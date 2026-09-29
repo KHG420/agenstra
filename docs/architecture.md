@@ -14,6 +14,8 @@ flowchart TB
     Provider --> Services[外部 REST / MCP / SDK]
     Host <--> Store[SQLiteStore]
     Pack[自有能力包] --> Provider
+    Registry[可选管理注册表\n不可变版本、启用、授权] --> Host
+    Registry --> Provider
     Pack --> Runtime
 ```
 
@@ -24,9 +26,12 @@ flowchart TB
 | `ToolBroker` | 执行前校验与 Fact 来源边界。 | 通常无需修改。 |
 | `CapabilityProvider` | 提供能力目录和技能，验证输入、调用外部服务、验证输出并返回结构化结果或安全错误码。 | REST、MCP 内置；特殊 SDK 实现同一协议。 |
 | 能力包 | 选取能力、固定契约、描述使用规则和执行性质。 | 由接入方维护并通过部署配置引用；本仓库不提供实际包。 |
+| 管理注册表（可选） | 校验并保存不可变包版本，原子切换新任务的启用版本，记录连接、授权和审计。 | CLI 与 Web 调用同一管理 API；静态配置部署仍可继续使用。 |
 | 外部系统 | 数据、计算、访问控制、幂等处理和正式产物。 | 保持现有服务，必要时暴露稳定的 API。 |
 
 `src/agenstra/providers.py` 定义 `CapabilityProvider`、`CapabilityDescription`、`CapabilityResult`、`InvocationContext` 和 `OperationBinding`。`src/agenstra/loader.py` 根据受信任的清单 schema 打开 REST/MCP/旧版 REST 包。用户的自然语言请求不允许携带新清单、端点、命令或凭据。
+
+启用管理注册表时，Host 在创建运行时保存当前发布版本的内容哈希，恢复运行时始终加载该版本；管理员启用新版只影响新任务。授权和连接身份仍在每次执行前重新检查，撤销权限会使已有任务暂停。注册表当前使用单节点 SQLite WAL 和受控的本地发布目录，必须一起备份。参见[能力管理指南](capability-management.md)。
 
 ## 2. ReAct 决策循环
 

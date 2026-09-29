@@ -1,6 +1,6 @@
 [project]
 name = "agenstra"
-version = "0.4.0"
+version = "0.5.0"
 description = "Agenstra: a domain-neutral ReAct runtime with independently imported capabilities."
 requires-python = ">=3.12"
 dependencies = [
@@ -17,6 +17,7 @@ server = ["fastapi>=0.116,<1", "uvicorn>=0.35,<1"]
 agenstra = "agenstra.cli:main"
 agenstra-serve = "agenstra.serve:main"
 agenstra-import-openapi = "agenstra.openapi:main"
+agenstra-manage = "agenstra.manage_cli:main"
 
 [dependency-groups]
 dev = [

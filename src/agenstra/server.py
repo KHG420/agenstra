@@ -15,6 +15,7 @@ from agenstra.deployment import DeploymentError
 from agenstra.storage import LeaseLost, RunNotFound, StoreConflict, StoredRun
 
 if TYPE_CHECKING:
+    from agenstra.deployment import Deployment
     from agenstra.host import AgentHost
 
 _LOG = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ def create_app(
     worker_interval_seconds: float = 1,
     worker_enabled: bool = True,
     on_shutdown: Callable[[], Awaitable[None]] | None = None,
+    deployment: "Deployment | None" = None,
 ) -> FastAPI:
     if worker_interval_seconds <= 0:
         raise ValueError("worker_interval_seconds must be positive")
@@ -81,6 +83,18 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         nonlocal ready, worker_task
+        if deployment is not None and deployment.registry is not None:
+            management = deployment.config.management
+            assert management is not None
+            admin_key = deployment.environment.get(management.admin_api_key_env, "")
+            if len(admin_key) < 24 or any(
+                admin_key == deployment.environment.get(user.api_key_env)
+                for user in deployment.config.users.values()
+            ):
+                raise RuntimeError(
+                    "management requires a distinct admin key of at least 24 characters"
+                )
+            await deployment.registry.initialize()
         await host.store.initialize()
         ready = True
         worker_task = asyncio.create_task(worker()) if worker_enabled else None
@@ -97,6 +111,10 @@ def create_app(
                 await on_shutdown()
 
     app = FastAPI(lifespan=lifespan)
+    if deployment is not None and deployment.registry is not None:
+        from agenstra.admin import create_admin_router
+
+        app.include_router(create_admin_router(deployment))
 
     async def owner_id(authorization: str | None = Header(default=None)) -> str:
         if authorization is None or not authorization.startswith("Bearer "):

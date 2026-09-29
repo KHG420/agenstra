@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ from agenstra.providers import (
     InvocationContext,
     Skill,
 )
+from agenstra.registry import CapabilityRegistry, RegistryError
 
 
 class DeploymentError(HostError):
@@ -107,17 +109,25 @@ class ConnectionConfig(_ConfigModel):
 
 class UserConfig(_ConfigModel):
     api_key_env: str
-    packs: dict[str, ConnectionConfig]
+    packs: dict[str, ConnectionConfig] = Field(default_factory=dict)
 
 
 class PackConfig(_ConfigModel):
     path: str
 
 
+class ManagementConfig(_ConfigModel):
+    database_path: str
+    package_dir: str
+    admin_api_key_env: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+    secret_dir: str | None = None
+
+
 class DeploymentConfig(_ConfigModel):
     database_path: str
-    packs: dict[str, PackConfig]
+    packs: dict[str, PackConfig] = Field(default_factory=dict)
     users: dict[str, UserConfig]
+    management: ManagementConfig | None = None
     settings: HostSettings = Field(default_factory=HostSettings)
 
 
@@ -134,6 +144,17 @@ class Deployment:
         self.base_dir = base_dir
         self.environment = environment if environment is not None else os.environ
         self.identity_client = identity_client
+        management = config.management
+        self.registry = (
+            CapabilityRegistry(
+                (base_dir / management.database_path).resolve(),
+                (base_dir / management.package_dir).resolve(),
+            )
+            if management is not None
+            else None
+        )
+        if self.registry is not None and self.registry.database_path == self.database_path:
+            raise ValueError("management database must differ from run database")
 
     @property
     def database_path(self) -> Path:
@@ -152,14 +173,46 @@ class Deployment:
             raise DeploymentError("unauthorized")
         return matched[0]
 
-    def _connection(self, owner_id: str, pack_id: str) -> ConnectionConfig:
+    async def _connection(self, owner_id: str, pack_id: str) -> ConnectionConfig:
         user = self.config.users.get(owner_id)
-        if user is None or pack_id not in self.config.packs or pack_id not in user.packs:
+        if user is None:
+            raise DeploymentError("access_denied")
+        if self.registry is not None:
+            try:
+                present, managed = await self.registry.binding(owner_id, pack_id)
+                if present:
+                    if managed is None:
+                        raise DeploymentError("access_denied")
+                    return ConnectionConfig.model_validate(managed)
+                if await self.registry.active_release(pack_id) is not None:
+                    raise DeploymentError("access_denied")
+            except RegistryError as error:
+                raise DeploymentError("access_denied") from error
+        if pack_id not in self.config.packs or pack_id not in user.packs:
             raise DeploymentError("access_denied")
         return user.packs[pack_id]
 
     def _secret(self, env_name: str) -> str:
-        value = self.environment.get(env_name)
+        value: str | None
+        if env_name.startswith("secret:"):
+            name = env_name.removeprefix("secret:")
+            management = self.config.management
+            if (
+                management is None
+                or management.secret_dir is None
+                or not re.fullmatch(r"[A-Z][A-Z0-9_]*", name)
+            ):
+                raise DeploymentError("connection_unavailable")
+            root = (self.base_dir / management.secret_dir).resolve()
+            path = root / name
+            if path.is_symlink() or not path.resolve().is_relative_to(root) or not path.is_file():
+                raise DeploymentError("connection_unavailable")
+            try:
+                value = path.read_text(encoding="utf-8").strip()
+            except (OSError, UnicodeError) as error:
+                raise DeploymentError("connection_unavailable") from error
+        else:
+            value = self.environment.get(env_name)
         if not value:
             raise DeploymentError("connection_unavailable")
         return value
@@ -207,7 +260,7 @@ class Deployment:
             raise DeploymentError("identity_unverified") from error
 
     async def policy_resolver(self, owner_id: str, pack_id: str) -> "ExecutionPolicy":
-        connection = self._connection(owner_id, pack_id)
+        connection = await self._connection(owner_id, pack_id)
         await self._validate_identity(owner_id, connection)
         return ExecutionPolicy(
             granted_capabilities=connection.granted_capabilities,
@@ -271,13 +324,43 @@ class Deployment:
     async def provider_factory(
         self, owner_id: str, pack_id: str
     ) -> AsyncIterator[CapabilityProvider]:
-        connection = self._connection(owner_id, pack_id)
+        release = await self.registry.active_release(pack_id) if self.registry is not None else None
+        async with self._open_provider(owner_id, pack_id, release) as provider:
+            yield provider
+
+    async def release_resolver(self, owner_id: str, pack_id: str) -> str | None:
+        if self.registry is None:
+            return None
+        return await self.registry.active_release(pack_id)
+
+    @asynccontextmanager
+    async def release_provider_factory(
+        self, owner_id: str, pack_id: str, release: str | None
+    ) -> AsyncIterator[CapabilityProvider]:
+        async with self._open_provider(owner_id, pack_id, release) as provider:
+            yield provider
+
+    @asynccontextmanager
+    async def _open_provider(
+        self, owner_id: str, pack_id: str, release: str | None
+    ) -> AsyncIterator[CapabilityProvider]:
+        connection = await self._connection(owner_id, pack_id)
         await self._validate_identity(owner_id, connection)
         environment = {
             target_env: self._secret(secret_env)
             for target_env, secret_env in connection.environment.items()
         }
-        path = (self.base_dir / self.config.packs[pack_id].path).resolve()
+        if release is None:
+            if pack_id not in self.config.packs:
+                raise DeploymentError("connection_unavailable")
+            path = (self.base_dir / self.config.packs[pack_id].path).resolve()
+        elif self.registry is not None:
+            try:
+                path = await self.registry.release_path(pack_id, release)
+            except RegistryError as error:
+                raise DeploymentError("connection_unavailable") from error
+        else:
+            raise DeploymentError("connection_unavailable")
         binding_id = self._binding_id(owner_id, pack_id, path, connection, environment)
         async with open_pack(path, environment=environment) as provider:
             yield _BoundProvider(provider=provider, binding_id=binding_id)

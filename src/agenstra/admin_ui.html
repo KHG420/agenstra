@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Agenstra · 能力管理</title>
+  <link rel="stylesheet" href="/admin/assets/admin_ui.css">
+  <script src="/admin/assets/admin_ui.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">A</span><span>Agenstra</span></div>
+    <div class="topbar-title">能力管理</div>
+    <span id="connection-state" class="connection-state">未连接</span>
+  </header>
+
+  <div class="shell">
+    <aside class="sidebar" aria-label="管理导航">
+      <p class="sidebar-label">工作区</p>
+      <a href="#releases">版本目录</a>
+      <a href="#publish">发布能力</a>
+      <a href="#bindings">连接与授权</a>
+      <a href="#audit">变更记录</a>
+      <div class="sidebar-note">发布版本后，新任务会读取当前启用版本。已有任务继续使用其固定版本。</div>
+    </aside>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <div>
+          <h1 id="page-title">让能力接入有迹可循</h1>
+          <p>校验契约，发布不可变版本，再决定谁可以调用。能力变更不需要停止正在运行的任务。</p>
+        </div>
+        <form id="connect-form" class="connect-form">
+          <label for="admin-key">管理员密钥</label>
+          <div class="connect-row">
+            <input id="admin-key" type="password" autocomplete="off" spellcheck="false" placeholder="输入管理 API 密钥" required>
+            <button type="submit" class="button primary">连接</button>
+          </div>
+          <small>密钥仅保存在当前页面内存中，刷新页面后需重新输入。</small>
+        </form>
+      </section>
+
+      <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
+
+      <section id="releases" class="section" aria-labelledby="releases-title">
+        <div class="section-heading">
+          <div><h2 id="releases-title">版本目录</h2><p>每次发布都有固定内容哈希；启用或回滚只改变新任务的默认版本。</p></div>
+          <button id="refresh" class="button secondary" type="button">刷新</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">能力包</th><th scope="col">版本</th><th scope="col">能力数</th><th scope="col">内容哈希</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+            <tbody id="release-rows"><tr><td colspan="6" class="empty">连接后查看已发布版本。</td></tr></tbody>
+          </table>
+        </div>
+        <p id="release-feedback" class="feedback inline-feedback" role="status" aria-live="polite"></p>
+      </section>
+
+      <section id="publish" class="section" aria-labelledby="publish-title">
+        <div class="section-heading"><div><h2 id="publish-title">发布能力</h2><p>上传经过选择与审查的能力包。发布不会自动授予用户权限，也不会立刻启用。</p></div></div>
+        <div class="two-column">
+          <form id="publish-form" class="form-panel">
+            <label for="manifest-file">能力包清单</label>
+            <input id="manifest-file" type="file" accept=".json,application/json">
+            <label for="manifest-editor">清单 JSON</label>
+            <textarea id="manifest-editor" rows="12" spellcheck="false" required placeholder="选择清单文件，或从右侧 OpenAPI 文档生成草稿。"></textarea>
+            <label for="skill-files">技能文件（可选）</label>
+            <input id="skill-files" type="file" multiple webkitdirectory directory>
+            <small>选择包含清单中技能路径的目录。文件内容和 SHA-256 必须与清单一致。</small>
+            <div class="form-grid">
+              <div><label for="pack-id">能力包 ID</label><input id="pack-id" type="text" required placeholder="records"></div>
+              <div><label for="pack-version">版本</label><input id="pack-version" type="text" required placeholder="1.0.0"></div>
+            </div>
+            <div class="actions"><button id="validate" class="button secondary" type="button">校验草稿</button><button class="button primary" type="submit">发布版本</button></div>
+            <p id="publish-feedback" class="feedback inline-feedback" role="status" aria-live="polite"></p>
+          </form>
+          <div class="guidance-panel">
+            <h3>发布前看什么</h3>
+            <ol>
+              <li>只选择任务确实需要的 REST 操作或 MCP 工具。</li>
+              <li>核对输入输出、读写影响、重试与审批规则。</li>
+              <li>把地址和凭据留在连接配置，清单只写环境变量名。</li>
+              <li>发布后检查能力列表，再明确启用版本。</li>
+            </ol>
+            <p>OpenAPI 可先用 <code>agenstra-import-openapi</code> 生成草稿；发布前仍要审查语义与执行保证。</p>
+            <details class="import-panel">
+              <summary>从 OpenAPI 生成草稿</summary>
+              <label for="openapi-file">OpenAPI 3.0/3.1 JSON</label>
+              <input id="openapi-file" type="file" accept=".json,application/json">
+              <label for="openapi-name">能力包 ID</label>
+              <input id="openapi-name" type="text" placeholder="records">
+              <div class="form-grid">
+                <div><label for="openapi-url-env">接口地址变量</label><input id="openapi-url-env" type="text" placeholder="RECORDS_API_URL"></div>
+                <div><label for="openapi-token-env">Token 变量（可选）</label><input id="openapi-token-env" type="text" placeholder="RECORDS_API_TOKEN"></div>
+              </div>
+              <div id="openapi-operations" class="operation-list"><p class="empty">选择文档后查看可导入的操作。</p></div>
+              <button id="generate-draft" class="button secondary" type="button">生成并编辑草稿</button>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section id="bindings" class="section" aria-labelledby="bindings-title">
+        <div class="section-heading"><div><h2 id="bindings-title">连接与授权</h2><p>配置环境变量引用和当前用户的能力范围。密钥值不会进入清单或管理记录。</p></div></div>
+        <div class="two-column">
+          <form id="binding-form" class="form-panel">
+            <div class="form-grid">
+              <div><label for="binding-owner">用户</label><select id="binding-owner" required><option value="">先连接管理服务</option></select></div>
+              <div><label for="binding-pack">能力包</label><select id="binding-pack" required><option value="">先发布并启用版本</option></select></div>
+            </div>
+            <label for="binding-environment">环境变量映射（JSON）</label>
+            <textarea id="binding-environment" rows="4" spellcheck="false" placeholder='{"RECORDS_API_URL":"RECORDS_API_URL"}' required>{}</textarea>
+            <div class="form-grid">
+              <div><label for="binding-grants">授权能力</label><input id="binding-grants" placeholder="records.get, records.update"><small>逗号分隔；读操作也可列出以便审计。</small></div>
+              <div><label for="binding-approvals">需审批能力</label><input id="binding-approvals" placeholder="records.update"><small>逗号分隔；调用仍需按参数逐次审批。</small></div>
+            </div>
+            <label class="checkbox"><input id="binding-model-data" type="checkbox">允许将该连接的数据发送给模型</label>
+            <details class="advanced">
+              <summary>高级连接选项</summary>
+              <label for="binding-identity-env">连接身份变量</label><input id="binding-identity-env" placeholder="TENANT_ID, ACCOUNT_ID"><small>这些非密钥变量的当前值会进入连接指纹。</small>
+              <label for="binding-identity">身份查询配置（JSON，可选）</label><textarea id="binding-identity" rows="5" spellcheck="false" placeholder='{"url_env":"IDENTITY_URL","token_env":"IDENTITY_TOKEN"}'></textarea>
+            </details>
+            <div class="actions"><button class="button primary" type="submit">保存连接</button><button id="check-binding" class="button secondary" type="button">检查连接</button><button id="disable-binding" class="button danger" type="button">停用连接</button></div>
+            <p id="binding-feedback" class="feedback inline-feedback" role="status" aria-live="polite"></p>
+          </form>
+          <div class="binding-list" id="binding-list"><p class="empty">连接后查看现有授权。</p></div>
+        </div>
+      </section>
+
+      <section id="audit" class="section" aria-labelledby="audit-title">
+        <div class="section-heading"><div><h2 id="audit-title">变更记录</h2><p>发布、启用、授权和停用的最近操作。</p></div></div>
+        <div id="audit-list" class="audit-list"><p class="empty">连接后查看变更记录。</p></div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

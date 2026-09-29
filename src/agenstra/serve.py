@@ -32,9 +32,13 @@ def main() -> None:
         provider_factory=deployment.provider_factory,
         model=model,
         policy_resolver=deployment.policy_resolver,
+        release_resolver=deployment.release_resolver if deployment.registry else None,
+        release_provider_factory=(
+            deployment.release_provider_factory if deployment.registry else None
+        ),
         settings=deployment.config.settings,
     )
-    app = create_app(host, deployment.authenticate, on_shutdown=model.aclose)
+    app = create_app(host, deployment.authenticate, on_shutdown=model.aclose, deployment=deployment)
     uvicorn.run(app, host=args.host, port=args.port)
 
 

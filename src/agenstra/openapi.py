@@ -119,6 +119,26 @@ def import_openapi(
 ) -> dict[str, Any]:
     """Generate an auditable draft; no URL, credential, or operation is inferred from input."""
     document = json.loads(Path(spec).read_text(encoding="utf-8"))
+    return import_openapi_document(
+        document,
+        name=name,
+        base_url_env=base_url_env,
+        operations=operations,
+        effects=effects,
+        token_env=token_env,
+    )
+
+
+def import_openapi_document(
+    document: dict[str, Any],
+    *,
+    name: str,
+    base_url_env: str,
+    operations: list[str],
+    effects: dict[str, str] | None = None,
+    token_env: str | None = None,
+) -> dict[str, Any]:
+    """Generate the same draft from an already parsed JSON document (for the web UI)."""
     if not isinstance(document, dict) or not str(document.get("openapi", "")).startswith(
         ("3.0.", "3.1.")
     ):
