@@ -1,0 +1,15 @@
+.git
+.venv
+.codegraph
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+dist
+var
+deploy/config
+deploy/capability-packs
+deploy/deployment.env
+local
+.env
+**/deployment.local.json

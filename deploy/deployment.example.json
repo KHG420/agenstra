@@ -1,0 +1,28 @@
+{
+  "database_path": "/data/agent.sqlite3",
+  "settings": {
+    "max_model_rounds": 30,
+    "max_tool_calls": 80,
+    "max_concurrent_runs": 4,
+    "max_run_seconds": 86400
+  },
+  "packs": {
+    "business": {"path": "/opt/packs/business/pack.json"}
+  },
+  "users": {
+    "operator": {
+      "api_key_env": "AGENT_OPERATOR_API_KEY",
+      "packs": {
+        "business": {
+          "environment": {
+            "BUSINESS_API_URL": "BUSINESS_API_URL",
+            "BUSINESS_API_TOKEN": "BUSINESS_API_TOKEN"
+          },
+          "granted_capabilities": ["records.get"],
+          "approval_capabilities": [],
+          "allow_model_data": true
+        }
+      }
+    }
+  }
+}

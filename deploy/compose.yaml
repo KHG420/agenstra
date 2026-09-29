@@ -1,0 +1,19 @@
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    env_file: ./deployment.env
+    environment:
+      AGENT_DEPLOYMENT_CONFIG: /etc/agent/deployment.json
+    volumes:
+      - ./config:/etc/agent:ro
+      - ./capability-packs:/opt/packs:ro
+      - agent_data:/data
+    ports:
+      - "127.0.0.1:8091:8091"
+    restart: unless-stopped
+    stop_grace_period: 40s
+
+volumes:
+  agent_data:
