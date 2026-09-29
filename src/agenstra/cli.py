@@ -6,9 +6,9 @@ import json
 import os
 from pathlib import Path
 
-from agent_capability.loader import open_pack
-from agent_capability.model import HttpJsonDecisionModel
-from agent_capability.runtime import AgentRuntime
+from agenstra.loader import open_pack
+from agenstra.model import HttpJsonDecisionModel
+from agenstra.runtime import AgentRuntime
 
 
 async def _run(

@@ -26,11 +26,11 @@ flowchart TB
 | 能力包 | 选取能力、固定契约、描述使用规则和执行性质。 | 由接入方维护并通过部署配置引用；本仓库不提供实际包。 |
 | 外部系统 | 数据、计算、访问控制、幂等处理和正式产物。 | 保持现有服务，必要时暴露稳定的 API。 |
 
-`src/agent_capability/providers.py` 定义 `CapabilityProvider`、`CapabilityDescription`、`CapabilityResult`、`InvocationContext` 和 `OperationBinding`。`src/agent_capability/loader.py` 根据受信任的清单 schema 打开 REST/MCP/旧版 REST 包。用户的自然语言请求不允许携带新清单、端点、命令或凭据。
+`src/agenstra/providers.py` 定义 `CapabilityProvider`、`CapabilityDescription`、`CapabilityResult`、`InvocationContext` 和 `OperationBinding`。`src/agenstra/loader.py` 根据受信任的清单 schema 打开 REST/MCP/旧版 REST 包。用户的自然语言请求不允许携带新清单、端点、命令或凭据。
 
 ## 2. ReAct 决策循环
 
-模型一次只能返回一种有类型的 `agent-capability.decision.v1` 决策：
+模型一次只能返回一种有类型的 `agenstra.decision.v1` 决策：
 
 | 决策 | 含义 |
 | --- | --- |

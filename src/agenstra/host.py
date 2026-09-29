@@ -12,18 +12,18 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from agent_capability.broker import CallOutcome, ToolBroker, bind_idempotency
-from agent_capability.contracts import DecisionModel, Fact, Observation, ToolCall
-from agent_capability.providers import CapabilityProvider, InvocationContext, OperationBinding
-from agent_capability.runtime import (
+from agenstra.broker import CallOutcome, ToolBroker, bind_idempotency
+from agenstra.contracts import DecisionModel, Fact, Observation, ToolCall
+from agenstra.providers import CapabilityProvider, InvocationContext, OperationBinding
+from agenstra.runtime import (
     AgentRuntime,
     FactReferenceError,
     arguments_digest,
     reference_available,
     resolve_argument,
 )
-from agent_capability.state import Invocation, OperationReceipt, RuntimeState
-from agent_capability.storage import LeaseLost, SQLiteStore, StoreConflict, StoredRun
+from agenstra.state import Invocation, OperationReceipt, RuntimeState
+from agenstra.storage import LeaseLost, SQLiteStore, StoreConflict, StoredRun
 
 
 class HostError(RuntimeError):

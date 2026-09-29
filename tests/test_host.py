@@ -13,16 +13,16 @@ from typing import ClassVar
 
 import pytest
 
-from agent_capability.contracts import (
+from agenstra.contracts import (
     FinalDecision,
     InspectFactDecision,
     RequestInputDecision,
     ToolBatchDecision,
     ToolCall,
 )
-from agent_capability.host import AgentHost, ExecutionPolicy, HostError, HostSettings
-from agent_capability.providers import CapabilityDescription, CapabilityResult, OperationBinding
-from agent_capability.storage import RunNotFound, SQLiteStore, StoreConflict
+from agenstra.host import AgentHost, ExecutionPolicy, HostError, HostSettings
+from agenstra.providers import CapabilityDescription, CapabilityResult, OperationBinding
+from agenstra.storage import RunNotFound, SQLiteStore, StoreConflict
 
 
 class Clock:

@@ -6,11 +6,11 @@ from pathlib import Path
 
 import uvicorn
 
-from agent_capability.deployment import load_deployment
-from agent_capability.host import AgentHost
-from agent_capability.model import HttpJsonDecisionModel
-from agent_capability.server import create_app
-from agent_capability.storage import SQLiteStore
+from agenstra.deployment import load_deployment
+from agenstra.host import AgentHost
+from agenstra.model import HttpJsonDecisionModel
+from agenstra.server import create_app
+from agenstra.storage import SQLiteStore
 
 
 def main() -> None:

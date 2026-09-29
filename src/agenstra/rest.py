@@ -14,18 +14,18 @@ from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from pydantic import Field, JsonValue, model_validator
 
-from agent_capability.contracts import StrictModel
-from agent_capability.providers import (
+from agenstra.contracts import StrictModel
+from agenstra.providers import (
     CapabilityDescription,
     CapabilityResult,
     OperationBinding,
     Skill,
     agent_prompt,
 )
-from agent_capability.skills import SkillFile, load_skill_files
+from agenstra.skills import SkillFile, load_skill_files
 
 if TYPE_CHECKING:
-    from agent_capability.providers import InvocationContext
+    from agenstra.providers import InvocationContext
 
 _ENV = r"^[A-Z][A-Z0-9_]*$"
 _NAME = r"^[A-Za-z][A-Za-z0-9_.-]{1,127}$"
@@ -94,7 +94,7 @@ class RestEndpoint(StrictModel):
 
 
 class RestManifest(StrictModel):
-    schema_: Literal["agent-capability.rest-pack.v2"] = Field(alias="schema")
+    schema_: Literal["agenstra.rest-pack.v2"] = Field(alias="schema")
     name: str = Field(min_length=1, max_length=80)
     version: str = Field(min_length=1, max_length=40)
     guidance: str = Field(min_length=1, max_length=8000)

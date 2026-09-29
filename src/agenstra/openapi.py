@@ -273,7 +273,7 @@ def import_openapi(
     if missing:
         raise ValueError(f"operationIds not found: {', '.join(missing)}")
     return {
-        "schema": "agent-capability.rest-pack.v2",
+        "schema": "agenstra.rest-pack.v2",
         "name": name,
         "version": "1.0.0",
         "guidance": f"Use the reviewed {name} REST capabilities for their declared purpose.",
@@ -315,7 +315,7 @@ def main() -> None:
             token_env=args.token_env,
         )
         # Validate the draft before writing it; credentials are bound only at load time.
-        from agent_capability.rest import RestManifest
+        from agenstra.rest import RestManifest
 
         RestManifest.model_validate(draft)
     except (ValueError, OSError, json.JSONDecodeError) as exc:

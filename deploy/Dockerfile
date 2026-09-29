@@ -19,4 +19,4 @@ VOLUME /data
 EXPOSE 8091
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/readyz', timeout=3)"
-CMD ["python", "-m", "agent_capability.serve", "--host", "0.0.0.0", "--port", "8091"]
+CMD ["python", "-m", "agenstra.serve", "--host", "0.0.0.0", "--port", "8091"]

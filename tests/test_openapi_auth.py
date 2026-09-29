@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from agent_capability.openapi import import_openapi
-from agent_capability.rest import RestManifest
+from agenstra.openapi import import_openapi
+from agenstra.rest import RestManifest
 
 
 def test_bearer_import_requires_explicit_environment_and_preserves_existing_name(tmp_path):

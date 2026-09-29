@@ -21,8 +21,8 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import McpError
 from pydantic import Field, JsonValue, model_validator
 
-from agent_capability.contracts import StrictModel
-from agent_capability.providers import (
+from agenstra.contracts import StrictModel
+from agenstra.providers import (
     CapabilityDescription,
     CapabilityResult,
     InvocationContext,
@@ -30,7 +30,7 @@ from agent_capability.providers import (
     Skill,
     agent_prompt,
 )
-from agent_capability.skills import SkillFile, load_skill_files
+from agenstra.skills import SkillFile, load_skill_files
 
 
 class McpSource(StrictModel):
@@ -69,7 +69,7 @@ class ToolExposure(StrictModel):
 
 
 class McpPackManifest(StrictModel):
-    schema_: Literal["agent-capability.mcp-pack.v1"] = Field(alias="schema")
+    schema_: Literal["agenstra.mcp-pack.v1"] = Field(alias="schema")
     name: str
     version: str
     guidance: str = Field(min_length=1, max_length=8_000)

@@ -13,17 +13,17 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
-from agent_capability.contracts import FinalDecision, ReadSkillDecision, ToolBatchDecision, ToolCall
-from agent_capability.host import AgentHost, ExecutionPolicy, HostSettings
-from agent_capability.openapi import import_openapi
-from agent_capability.rest import load_rest_pack
-from agent_capability.storage import SQLiteStore
+from agenstra.contracts import FinalDecision, ReadSkillDecision, ToolBatchDecision, ToolCall
+from agenstra.host import AgentHost, ExecutionPolicy, HostSettings
+from agenstra.openapi import import_openapi
+from agenstra.rest import load_rest_pack
+from agenstra.storage import SQLiteStore
 
 
 @pytest.fixture
 def manifest(tmp_path: Path) -> Path:
     document = {
-        "schema": "agent-capability.rest-pack.v2",
+        "schema": "agenstra.rest-pack.v2",
         "name": "record",
         "version": "1.0",
         "guidance": "Use reviewed records.",
@@ -342,7 +342,7 @@ def _job_pack(tmp_path: Path) -> Path:
         "additionalProperties": False,
     }
     document = {
-        "schema": "agent-capability.rest-pack.v2",
+        "schema": "agenstra.rest-pack.v2",
         "name": "jobs",
         "version": "1",
         "guidance": "Use the job API and verify its final status.",

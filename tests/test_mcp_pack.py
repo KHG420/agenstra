@@ -8,9 +8,9 @@ from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.shared.memory import create_connected_server_and_client_session
 
-from agent_capability.broker import ToolBroker
-from agent_capability.contracts import ToolCall
-from agent_capability.mcp import (
+from agenstra.broker import ToolBroker
+from agenstra.contracts import ToolCall
+from agenstra.mcp import (
     McpPack,
     McpPackManifest,
     bind_mcp_pack,
@@ -47,7 +47,7 @@ def catalog_tool():
 
 def manifest(tool):
     return {
-        "schema": "agent-capability.mcp-pack.v1",
+        "schema": "agenstra.mcp-pack.v1",
         "name": "metrics",
         "version": "1",
         "guidance": "Use actual resource capacity and retain the unit.",

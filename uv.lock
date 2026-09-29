@@ -10,8 +10,8 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "agent-capability-framework"
-version = "0.3.0"
+name = "agenstra"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

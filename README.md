@@ -1,6 +1,6 @@
-# Agent Capability Framework
+# Agenstra
 
-一个可独立部署的通用 Agent 框架。将已有的 REST API、OpenAPI 操作、MCP 工具或自定义 SDK 接入为**受审查的能力包**；框架负责 ReAct 决策、工具执行边界、用户授权、审批、结果证据，以及可恢复的长任务。具体计算和数据仍由所连接的服务负责。
+Agenstra 是一个可独立部署的通用 Agent 框架。将已有的 REST API、OpenAPI 操作、MCP 工具或自定义 SDK 接入为**受审查的能力包**；框架负责 ReAct 决策、工具执行边界、用户授权、审批、结果证据，以及可恢复的长任务。具体计算和数据仍由所连接的服务负责。
 
 它可以用于个人工具、团队应用或更大规模的系统。本仓库只发布框架、通用测试、部署模板和教程，**不内置场景能力包、技能文件、外部模型或凭据**。`deploy/deployment.example.json` 是接入模板；直接启动它不会得到一个具备实际能力的 Agent。
 
@@ -34,7 +34,7 @@ flowchart LR
 
 ## 五分钟了解接入流程
 
-1. 选择已有接口。REST 可以手写 `agent-capability.rest-pack.v2` 清单，或从 OpenAPI 3.0/3.1 JSON 中**只导入指定的 operationId**；MCP 可以固定选定工具的契约哈希。
+1. 选择已有接口。REST 可以手写 `agenstra.rest-pack.v2` 清单，或从 OpenAPI 3.0/3.1 JSON 中**只导入指定的 operationId**；MCP 可以固定选定工具的契约哈希。
 2. 审查每项能力的 `effect`（`read` / `compute` / `write` / `destructive`）、JSON Schema、凭据绑定、幂等机制、审批要求及长任务状态。导入器产生的是草稿，不会猜测访问权限。
 3. 为 Agent 增加可选的技能文件，说明单位、前提、异常和结果解释；清单记录文件 SHA-256。技能提供语义，不授予权限。
 4. 在部署配置中指定包路径、各用户的能力授权、API 凭据环境变量和是否允许把外部数据发送给模型。启动同一份框架代码即可。
@@ -47,15 +47,15 @@ flowchart LR
 需要 Python 3.12+ 和 [uv](https://docs.astral.sh/uv/)。在仓库根目录执行：
 
 ```sh
-git clone https://github.com/KHG420/agent-capability-framework.git
-cd agent-capability-framework
+git clone https://github.com/KHG420/agenstra.git
+cd agenstra
 uv sync --locked --extra server --extra mcp --group dev
 ```
 
-REST 包只需要 `server` extra；MCP 包另外需要 `mcp` extra。`agent-capability` 命令可先检查能力目录，不调用 LLM：
+REST 包只需要 `server` extra；MCP 包另外需要 `mcp` extra。`agenstra` 命令可先检查能力目录，不调用 LLM：
 
 ```sh
-uv run --locked --extra server agent-capability \
+uv run --locked --extra server agenstra \
   --pack local/packs/records/pack.json --inspect
 ```
 
@@ -69,7 +69,7 @@ uv run --locked --extra server agent-capability \
 默认模型适配器要求 `/chat/completions` 返回 JSON 字符串决策，使用 `response_format: {"type":"json_object"}`。模型必须实际支持这一协议；其他模型可实现 `DecisionModel` 接口接入。准备好自己的 `local/deployment.json` 后启动：
 
 ```sh
-uv run --locked --extra server agent-capability-serve \
+uv run --locked --extra server agenstra-serve \
   --config local/deployment.json
 ```
 
@@ -96,7 +96,7 @@ curl -sS http://127.0.0.1:8091/runs \
 OpenAPI 导入命令示意（把路径和 operationId 换成自己的）：
 
 ```sh
-uv run --locked agent-capability-import-openapi \
+uv run --locked agenstra-import-openapi \
   --spec local/openapi.json \
   --out local/packs/records/pack.json \
   --name records \

@@ -14,9 +14,9 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from agent_capability.host import ExecutionPolicy, HostError, HostSettings
-from agent_capability.loader import open_pack
-from agent_capability.providers import (
+from agenstra.host import ExecutionPolicy, HostError, HostSettings
+from agenstra.loader import open_pack
+from agenstra.providers import (
     CapabilityDescription,
     CapabilityProvider,
     CapabilityResult,
@@ -65,14 +65,14 @@ def _endpoint_value(value: str) -> str:
 
 def _endpoint_envs(manifest: dict[str, Any]) -> set[str]:
     schema = manifest.get("schema")
-    if schema == "agent-capability.rest-pack.v2":
+    if schema == "agenstra.rest-pack.v2":
         name = manifest.get("base_url_env")
         return {name} if isinstance(name, str) else set()
-    if schema == "agent-capability.mcp-pack.v1":
+    if schema == "agenstra.mcp-pack.v1":
         source = manifest.get("source")
         name = source.get("url_env") if isinstance(source, dict) else None
         return {name} if isinstance(name, str) else set()
-    if schema == "agent-capability.capability-pack.v1":
+    if schema == "agenstra.capability-pack.v1":
         capabilities = manifest.get("capabilities")
         if isinstance(capabilities, list):
             return {

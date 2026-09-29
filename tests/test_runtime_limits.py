@@ -5,20 +5,20 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from agent_capability.contracts import (
+from agenstra.contracts import (
     DECISION_ADAPTER,
     Fact,
     Observation,
     ToolBatchDecision,
     ToolCall,
 )
-from agent_capability.providers import (
+from agenstra.providers import (
     CapabilityDescription,
     CapabilityResult,
     Skill,
     SkillDescription,
 )
-from agent_capability.runtime import AgentRuntime, resolve_argument
+from agenstra.runtime import AgentRuntime, resolve_argument
 
 
 def test_context_bounds_previews_and_history_without_losing_full_facts():

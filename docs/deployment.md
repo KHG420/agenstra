@@ -22,7 +22,7 @@ deploy/capability-packs/           你自己的能力包与技能；Git 忽略
 
 ```sh
 uv sync --locked --extra server --extra mcp
-uv run --locked --extra server agent-capability-serve \
+uv run --locked --extra server agenstra-serve \
   --config local/deployment.json
 ```
 
@@ -118,6 +118,6 @@ curl -sS -X POST "http://127.0.0.1:8091/runs/$RUN_ID/approval" \
 
 ## 6. 从早期版本升级
 
-v0.3 更改了发行包、Python 导入路径、命令名和协议 schema 标识。早期能力包清单需要更新 schema 后重新审查；未完成运行没有自动迁移机制。升级前备份数据库，先完成或核对旧运行，再在隔离环境验证新版本，不要假定旧运行可以直接续接。
+v0.4 将发行包、Python 导入路径和命令统一改为 `agenstra`，并将能力包与模型决策的 schema 前缀改为 `agenstra.*`。v0.3 及更早版本的能力包清单需要更新 schema 后重新审查；未完成运行没有自动迁移机制。升级前备份数据库，先完成或核对旧运行，再在隔离环境验证新版本，不要假定旧运行可以直接续接。
 
 框架测试、格式与类型检查命令见[README](../README.md)。

@@ -7,23 +7,23 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
-from agent_capability.contracts import (
+from agenstra.contracts import (
     ContextPacket,
     FinalDecision,
     RequestInputDecision,
     ToolBatchDecision,
     ToolCall,
 )
-from agent_capability.deployment import Deployment, DeploymentConfig, DeploymentError
-from agent_capability.host import AgentHost, ExecutionPolicy
-from agent_capability.providers import (
+from agenstra.deployment import Deployment, DeploymentConfig, DeploymentError
+from agenstra.host import AgentHost, ExecutionPolicy
+from agenstra.providers import (
     CapabilityDescription,
     CapabilityResult,
     InvocationContext,
     Skill,
 )
-from agent_capability.server import create_app
-from agent_capability.storage import SQLiteStore
+from agenstra.server import create_app
+from agenstra.storage import SQLiteStore
 
 
 class ScriptedModel:
@@ -280,7 +280,7 @@ async def test_provider_binding_tracks_endpoint_and_identity_without_tokens(tmp_
     pack.write_text(
         json.dumps(
             {
-                "schema": "agent-capability.rest-pack.v2",
+                "schema": "agenstra.rest-pack.v2",
                 "name": "records",
                 "version": "1",
                 "guidance": "Read records.",
