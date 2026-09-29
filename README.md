@@ -1,55 +1,55 @@
 # Agenstra
 
-Agenstra 是一个可独立部署的通用 Agent 框架。将已有的 REST API、OpenAPI 操作、MCP 工具或自定义 SDK 接入为**受审查的能力包**；框架负责 ReAct 决策、工具执行边界、用户授权、审批、结果证据，以及可恢复的长任务。具体计算和数据仍由所连接的服务负责。
+Language / 语言: [简体中文](README.zh-CN.md) · **English**
 
-可选的管理入口让管理员通过 CLI 或 Web 页面校验、发布、启用和回滚能力包，并为用户设置连接与授权。发布版本不可变；新任务使用当前启用版本，已有任务保留创建时的版本。详见[能力管理指南](docs/capability-management.md)。
+Agenstra is a general-purpose agent framework that you can deploy independently. Bring existing REST APIs, selected OpenAPI operations, MCP tools, or custom SDK integrations into the agent as **reviewed capability packs**. The framework handles ReAct decisions, tool-call boundaries, per-user authorization, approvals, result provenance, and resumable long-running tasks. The connected services remain responsible for their own data and computations.
 
-它可以用于个人工具、团队应用或更大规模的系统。本仓库只发布框架、通用测试、部署模板和教程，**不内置场景能力包、技能文件、外部模型或凭据**。`deploy/deployment.example.json` 是接入模板；直接启动它不会得到一个具备实际能力的 Agent。
+An optional management interface lets administrators validate, publish, activate, and roll back capability packs through a CLI or web page, then configure user connections and grants. Managed releases are fixed by content hash: new runs use the active release, while existing managed runs keep the release they started with. Authorization and connection identity are still checked at execution time.
 
-## 适用场景与边界
+Agenstra can serve a personal tool, a team application, or a larger system. This repository contains the framework, generic tests, deployment templates, and guides. **It does not include a domain-specific capability pack, skill files, an external model, or credentials.** `deploy/deployment.example.json` is a template; starting it unchanged will not create an agent with working capabilities.
 
-例如一个应用已有搜索、数据转换和通知三个接口。把它们分别声明为能力后，Agent 可以先搜索，从返回的 Fact 读取真实字段，再调用转换接口，最后按任务需要发送通知。框架不硬编码这条路径；接入方决定能力粒度、使用规则和授权策略。
+## Scope and architecture
 
-当前持久宿主支持**单节点、持久本地磁盘和 SQLite WAL**。一个部署可以配置多个用户，每个用户有独立的能力授权和连接。分布式高可用、自动保留期清理、真实模型质量和外部计算正确性仍需另行设计或验收。
+Suppose an application already has search, data-transformation, and notification APIs. Once these are declared as capabilities, the agent can search, read actual fields from the returned Fact, call the transformation API, and send a notification if the task calls for one. Agenstra does not hard-code that workflow. The integrator chooses capability boundaries, usage guidance, and authorization policy.
+
+The current durable host targets **one node with persistent local storage and SQLite WAL**. A deployment can serve multiple users with separate connections and capability grants. Distributed high availability, automatic retention cleanup, model quality, and the correctness of external computations require separate design or validation.
 
 ```mermaid
 flowchart LR
-    U[用户或调用方应用] --> H[AgentHost\n认证、授权、审批、恢复]
-    H --> R[AgentRuntime\nReAct 决策循环]
-    R --> B[ToolBroker\n参数、引用、结果边界]
-    P[自有能力包\n契约、技能、执行声明] --> R
+    U[User or calling app] --> H[AgentHost\nAuthentication, authorization, approval, recovery]
+    H --> R[AgentRuntime\nReAct decision loop]
+    R --> B[ToolBroker\nArguments, references, result boundaries]
+    P[Your capability pack\nContracts, skills, execution properties] --> R
     P --> B
-    B --> C[CapabilityProvider\nREST / MCP / 自定义]
-    C --> E[已有服务和模型]
-    H <--> S[SQLiteStore\n状态、调用、Fact、事件]
+    B --> C[CapabilityProvider\nREST / MCP / custom]
+    C --> E[Existing services and models]
+    H <--> S[SQLiteStore\nRuns, invocations, Facts, events]
 ```
 
-| 组件 | 负责什么 |
+| Component | Responsibility |
 | --- | --- |
-| `AgentRuntime` | 看任务、能力目录、技能和真实观察；一次决定工具调用、读取技能、检查结果、追问或最终回答。没有固定场景 DAG 或预先计划模式。 |
-| `AgentHost` | 按用户保存运行、调用前记录、审批、租约、超时、后台作业轮询、断线恢复及取消。 |
-| `ToolBroker` | 校验调用和 Fact 引用，把已验证的工具结果保存为带来源的 Fact。 |
-| `CapabilityProvider` | 统一能力、技能、调用和结果接口；内置 REST 与 MCP 连接器，也可实现自定义 Provider。 |
-| 能力包 | 明确暴露哪些能力、输入输出契约、使用说明、执行性质、幂等策略和后台作业状态映射；由接入方审查和部署。 |
-| `CapabilityRegistry` | 保存经过校验的不可变版本、当前启用版本、用户连接与管理审计；可选启用。 |
+| `AgentRuntime` | Chooses one next action from the task, capability catalog, skills, and observed Facts: call tools, read a skill, inspect a result, ask for input, or answer. There is no fixed domain DAG or separate planning mode. |
+| `AgentHost` | Persists user-scoped runs and pre-call records; manages approvals, leases, timeouts, background-job polling, recovery, and cancellation. |
+| `ToolBroker` | Validates calls and Fact references, then stores verified tool results as Facts with provenance. |
+| `CapabilityProvider` | Presents one interface for capabilities, skills, invocation, and results. REST and MCP connectors are built in; applications can provide their own. |
+| Capability pack | Declares exposed capabilities, input/output contracts, guidance, effects, idempotency, and background-job mappings. The integrator reviews and deploys it. |
+| `CapabilityRegistry` | Optionally stores validated immutable releases, the active release, user connections, and a management audit trail. |
 
-更完整的执行与安全边界见[架构说明](docs/architecture.md)。
+See the [architecture guide (Chinese)](docs/architecture.md) for the execution and security boundaries.
 
-## 五分钟了解接入流程
+## Connect existing capabilities
 
-1. 选择已有接口。REST 可以手写 `agenstra.rest-pack.v2` 清单，或从 OpenAPI 3.0/3.1 JSON 中**只导入指定的 operationId**；MCP 可以固定选定工具的契约哈希。
-2. 审查每项能力的 `effect`（`read` / `compute` / `write` / `destructive`）、JSON Schema、凭据绑定、幂等机制、审批要求及长任务状态。导入器产生的是草稿，不会猜测访问权限。
-3. 为 Agent 增加可选的技能文件，说明单位、前提、异常和结果解释；清单记录文件 SHA-256。技能提供语义，不授予权限。
-4. 在部署配置中指定包路径、各用户的能力授权、API 凭据环境变量和是否允许把外部数据发送给模型。启动同一份框架代码即可。
-5. 用代表性任务验收真实模型选择、授权、错误路径、外部 API 契约和结果质量。
+1. Select the APIs you already operate. Write an `agenstra.rest-pack.v2` manifest for REST, import only named `operationId` values from an OpenAPI 3.0/3.1 JSON document, or pin reviewed MCP tool contracts by hash.
+2. Review each capability's `effect` (`read`, `compute`, `write`, or `destructive`), JSON Schema, credential binding, idempotency, approval requirement, and long-running operation states. Importers produce drafts; they do not infer access rights.
+3. Optionally add skill files explaining units, prerequisites, exceptional cases, and how to interpret results. The manifest records each file's SHA-256. A skill provides guidance, never permission.
+4. Configure pack paths, per-user capability grants, credential environment-variable references, and whether external data may be sent to the model. Run the same framework code with your configuration.
+5. Validate representative tasks against the real model and services, including authorization, error paths, API contracts, and answer quality.
 
-从零创建一个中性的 REST 能力包、添加技能和启动服务，按[完整接入教程](docs/tutorial.md)操作。生产配置、容器部署、状态接口与运维检查见[部署与运维](docs/deployment.md)。
+For a complete REST example, see the [integration tutorial (Chinese)](docs/tutorial.md). The [deployment guide (Chinese)](docs/deployment.md) covers production configuration, Docker Compose, HTTP status handling, and operations. To manage releases and grants without restarting the service, follow the [capability management guide (Chinese)](docs/capability-management.md).
 
-若要在服务运行时管理能力版本与授权，先按[能力管理指南](docs/capability-management.md)启用管理入口，再使用 `agenstra-manage` 或 `/admin`。管理密钥与普通用户 API key 分开配置。
+## Quick start
 
-## 安装与本地运行
-
-需要 Python 3.12+ 和 [uv](https://docs.astral.sh/uv/)。在仓库根目录执行：
+You need Python 3.12+ and [uv](https://docs.astral.sh/uv/). From the repository root:
 
 ```sh
 git clone https://github.com/KHG420/agenstra.git
@@ -57,48 +57,60 @@ cd agenstra
 uv sync --locked --extra server --extra mcp --group dev
 ```
 
-REST 包只需要 `server` extra；MCP 包另外需要 `mcp` extra。`agenstra` 命令可先检查能力目录，不调用 LLM：
+REST packs only need the `server` extra; MCP packs also need `mcp`. Create your own pack using the integration tutorial and provide the environment variables referenced by its manifest. You can then inspect its catalog without calling an LLM:
 
 ```sh
 uv run --locked --extra server agenstra \
   --pack local/packs/records/pack.json --inspect
 ```
 
-其中 `local/packs/records/pack.json` 由你按教程创建，不在仓库内。服务运行还需要：
+`local/packs/records/pack.json` is a path you create; it is not in this repository. Serving runs also requires:
 
-- `AGENT_MODEL`：模型名称。
-- `AGENT_MODEL_BASE_URL`：模型网关基地址，例如 `https://gateway.example/v1`；适配器请求其 `/chat/completions`。
-- `AGENT_MODEL_API_KEY`：模型网关密钥。
-- 部署配置中指定的每个用户 API key、外部接口地址与凭据环境变量。
+- `AGENT_MODEL`: the model name.
+- `AGENT_MODEL_BASE_URL`: the model gateway base URL, such as `https://gateway.example/v1`; the adapter calls its `/chat/completions` endpoint.
+- `AGENT_MODEL_API_KEY`: the model gateway credential.
+- The user API keys, external service addresses, and credentials referenced by your deployment configuration.
 
-默认模型适配器要求 `/chat/completions` 返回 JSON 字符串决策，使用 `response_format: {"type":"json_object"}`。模型必须实际支持这一协议；其他模型可实现 `DecisionModel` 接口接入。准备好自己的 `local/deployment.json` 后启动：
+The default model adapter asks `/chat/completions` for a JSON-object decision using `response_format: {"type":"json_object"}`. The model must actually support this protocol. To use another model interface, implement `DecisionModel`. Once you have created `local/deployment.json`, start the host:
 
 ```sh
 uv run --locked --extra server agenstra-serve \
   --config local/deployment.json
 ```
 
-默认监听 `127.0.0.1:8091`。`GET /readyz` 检查数据库和后台 worker 是否就绪。`POST /runs` 只创建任务；worker 自动执行并唤醒等待中的任务。
+The default listener is `127.0.0.1:8091`. `GET /readyz` checks database and worker readiness. `POST /runs` creates a run; the worker executes it and wakes runs that are waiting:
 
 ```sh
 curl -sS http://127.0.0.1:8091/runs \
   -H "Authorization: Bearer $AGENT_OPERATOR_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"pack_id":"records","instruction":"查询记录 R-1 并说明结果","request_id":"record-R-1-001"}'
+  -d '{"pack_id":"records","instruction":"Look up record R-1 and explain its status","request_id":"record-R-1-001"}'
 ```
 
-同一用户提交相同 `request_id` 和内容会得到同一个运行；相同 ID 配不同内容会冲突。响应含 `run_id`、`status`、`revision` 等状态信息。使用 `GET /runs/{run_id}` 跟踪；完整结果由 `GET /runs/{run_id}/artifacts/{fact_id}` 读取。HTTP 状态和审批示例见[部署与运维](docs/deployment.md)。
+For one user, the same `request_id` and request content return the same run; reusing the ID with different content conflicts. The response includes `run_id`, `status`, and `revision`. Follow progress with `GET /runs/{run_id}` and retrieve a complete result with `GET /runs/{run_id}/artifacts/{fact_id}`. See the [deployment guide (Chinese)](docs/deployment.md) for status and approval examples.
 
-## 能力包支持范围
+## Manage capabilities while running (optional)
 
-| 来源 | 已提供的接入方式 | 导入后仍需审查 |
+Enable `management` in the deployment configuration and set a separate `AGENSTRA_ADMIN_API_KEY` to use `/admin` or the CLI backed by the same management API. These commands require a running host and a capability manifest you created. The CLI defaults to `http://127.0.0.1:8091`:
+
+```sh
+uv run --locked --extra server agenstra-manage validate local/packs/records/pack.json
+uv run --locked --extra server agenstra-manage publish local/packs/records/pack.json
+uv run --locked --extra server agenstra-manage list
+```
+
+Publishing neither activates a release nor grants access. Read the full content digest and current revision from `list`, explicitly activate the release, then bind a user connection and capability grants. Activating an older release rolls back new runs; revoking a grant affects existing runs immediately. Connection records contain environment-variable or `secret:NAME` references, not plaintext secret values. Configuration, activation, rollback, connection checks, and backup requirements are documented in the [capability management guide (Chinese)](docs/capability-management.md).
+
+## Supported capability sources
+
+| Source | Built-in integration | Review still required |
 | --- | --- | --- |
-| REST JSON | GET/POST/PUT/PATCH/DELETE；路径、查询、请求头、请求体绑定；嵌套 JSON Schema、状态码和服务错误码。 | 端点、认证、`effect`、重试/幂等、结果含义。 |
-| OpenAPI 3.0/3.1 JSON | 选择 `operationId`，转成 REST v2 草稿；支持本地 schema 引用及显式 bearer 环境变量。 | 生成的契约、未支持的序列化/认证、技能、审批、后台作业映射。 |
-| MCP | stdio 与 streamable HTTP；分页发现、选定工具、输入输出校验、已审查契约哈希。 | 运行命令/端点、工具作用、引用有效期、幂等与授权。 |
-| 自定义 SDK | 实现 `CapabilityProvider` 协议，由应用提供用户级连接工厂。 | SDK 的身份隔离、输入输出验证和执行保证。 |
+| JSON REST API | GET/POST/PUT/PATCH/DELETE; path, query, header, and body bindings; nested JSON Schema, response-status contracts, and service error codes. | Endpoints, authentication, `effect`, retry/idempotency, and result meaning. |
+| OpenAPI 3.0/3.1 JSON | Selected `operationId` values become a REST v2 draft; local schema references and an explicit bearer-token environment variable are supported. | Generated contracts, unsupported serialization/authentication, skills, approvals, and background-job mappings. |
+| MCP | stdio and streamable HTTP; paginated discovery, selected tools, input/output validation, and reviewed contract hashes. | Commands/endpoints, tool effects, reference lifetimes, idempotency, and grants. |
+| Custom SDK | Implement `CapabilityProvider` and supply a user-scoped connection factory from your application. | Identity isolation, input/output validation, and execution guarantees. |
 
-OpenAPI 导入命令示意（把路径和 operationId 换成自己的）：
+Example OpenAPI import (replace paths and `operationId` with your own):
 
 ```sh
 uv run --locked agenstra-import-openapi \
@@ -110,19 +122,19 @@ uv run --locked agenstra-import-openapi \
   --operation records.get
 ```
 
-导入命令**不会**据接口名字推断审批、幂等性或后台任务。写操作和长期任务的声明请按[接入教程](docs/tutorial.md)补充和验证。
+The importer **does not** infer approvals, idempotency, or background-job completion from an operation name. Review and complete declarations for writes and long-running tasks using the [integration tutorial (Chinese)](docs/tutorial.md).
 
-## 运行与数据保证
+## Execution guarantees and limits
 
-- Host 在外部调用前保存调用 ID、确切参数和哈希。对于失败后结果不确定的调用，只有声明为安全或真正可幂等重放的能力才能按同一 ID 恢复；其他情况进入 `needs_reconciliation`，由接入方核对真实外部状态。
-- 被批准的是特定用户、特定调用和参数哈希；提交前会重新检查身份、权限及租约。技能文本不能跳过这些检查。
-- 完整工具结果作为 Fact 单独持久化，模型看到有界预览；模型可按路径检查完整结果。Fact ID 是框架本地证据 ID，不等于外部资源 ID。
-- 对声明了 `OperationBinding` 的后台作业，Host 保存外部作业回执并轮询状态接口；HTTP 请求成功或返回 `queued` 不代表任务完成。
-- 运行、事件、Fact 和续接接口按 `owner_id` 隔离；一个部署可配置多个用户及不同能力集合。
+- Before an external call, the host persists its invocation ID, exact arguments, and hash. After an uncertain outcome, it can replay only a capability declared safe or backed by real upstream idempotency. Other calls enter `needs_reconciliation` so the integrator can check the external system.
+- An approval applies to a specific user, invocation, and argument hash. Identity, grants, and leases are checked again before submission; skill text cannot bypass them.
+- Complete tool results are stored separately as Facts with provenance. The model sees a bounded preview and may inspect the full result by path. A Fact ID identifies local evidence, not an external resource.
+- For an `OperationBinding`, the host saves the external job receipt and polls the status capability. An HTTP success or `queued` response does not mean the job has finished.
+- Runs, events, Facts, and continuation APIs are scoped by `owner_id`. A deployment may configure multiple users with different capability sets.
 
-取消只停止本地编排，不承诺撤销已提交到外部系统的作业。SQLite WAL 适合当前单节点范围；请使用持久磁盘并制定备份与数据保留策略。
+Cancellation stops local orchestration; it does not promise to cancel a job already submitted upstream. SQLite WAL fits the current single-node scope. Use persistent storage and define backup and retention policies.
 
-## 开发验证
+## Development and validation
 
 ```sh
 uv run --locked --extra server --extra mcp pytest -q
@@ -132,4 +144,4 @@ uv run --locked --extra server --extra mcp mypy
 uv build --wheel --out-dir dist
 ```
 
-测试使用临时生成的 REST/MCP 契约、模型替身和 SQLite；不需要场景能力包或真实外部服务。发布前仍应在目标环境验收真实身份、模型决策、接口契约、长任务以及运维条件。当前实现的取舍和上线前检查见[架构说明](docs/architecture.md)与[部署与运维](docs/deployment.md)。
+The tests generate temporary REST/MCP contracts, model doubles, and SQLite databases. They need no domain pack or live external service. Before production use, validate real identities, model decisions, API contracts, long-running tasks, and operating conditions in the target environment. Current trade-offs and pre-launch checks are in the [architecture guide (Chinese)](docs/architecture.md) and [deployment guide (Chinese)](docs/deployment.md).
