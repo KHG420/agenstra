@@ -1,0 +1,411 @@
+(() => {
+  "use strict";
+
+  const state = { token: "", overview: null, openapiSpec: null };
+  const $ = (id) => document.getElementById(id);
+  const messages = {
+    admin_unauthorized: "管理员密钥无效。请检查密钥后重新连接。",
+    invalid_capability_pack: "能力包契约未通过校验，请检查清单和技能文件。",
+    skill_files_mismatch: "技能文件与清单列出的路径不一致。",
+    skill_digest_mismatch: "技能文件内容与清单中的 SHA-256 不一致。",
+    invalid_skill_path: "技能路径无效；请使用能力包内的相对路径。",
+    skill_path_conflict: "技能文件路径相互冲突；文件不能同时作为目录使用。",
+    version_already_published: "这个版本已发布过不同内容。请使用新版本号。",
+    release_path_conflict: "已发布版本目录存在冲突，请检查服务器上的发布文件。",
+    release_not_active: "请先启用一个版本，再配置用户连接。",
+    binding_capability_missing: "授权列表包含目标版本中不存在的能力。",
+    invalid_environment_ref: "环境变量映射只能引用大写变量名或已配置的 secret:NAME 文件。",
+    connection_unavailable: "连接引用的地址或密钥不可读取，请检查服务端配置。",
+    binding_contains_credentials: "连接指纹变量中包含凭据；请移除该变量。",
+    revision_conflict: "启用版本已被其他管理员修改。请刷新后重试。",
+    release_tampered: "已发布文件的内容发生变化，系统已拒绝使用。",
+    openapi_import_failed: "OpenAPI 草稿生成失败。请检查文档和所选操作。",
+  };
+
+  function feedback(message, kind = "info", location = "feedback") {
+    const target = $(location);
+    target.textContent = message;
+    target.dataset.kind = kind;
+  }
+
+  async function api(path, options = {}) {
+    const headers = { Authorization: `Bearer ${state.token}` };
+    if (options.body !== undefined) headers["Content-Type"] = "application/json";
+    const response = await fetch(path, {
+      method: options.method || "GET",
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      cache: "no-store",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (response.status === 401) {
+        state.token = "";
+        $("connection-state").textContent = "未连接";
+        $("connection-state").classList.remove("connected");
+      }
+      const code = data.detail?.code || data.code || `HTTP ${response.status}`;
+      throw new Error(messages[code] || `操作失败：${code}`);
+    }
+    return data;
+  }
+
+  function cell(text, className = "") {
+    const element = document.createElement("td");
+    element.textContent = String(text);
+    if (className) element.className = className;
+    return element;
+  }
+
+  function empty(container, text) {
+    const paragraph = document.createElement("p");
+    paragraph.className = "empty";
+    paragraph.textContent = text;
+    container.replaceChildren(paragraph);
+  }
+
+  function formatDate(seconds) {
+    return new Date(seconds * 1000).toLocaleString("zh-CN", { hour12: false });
+  }
+
+  function renderReleases() {
+    const rows = $("release-rows");
+    const releases = state.overview.releases;
+    rows.replaceChildren();
+    if (!releases.length) {
+      const row = document.createElement("tr");
+      const item = cell("尚无已发布版本。请从清单开始发布第一个能力包。", "empty");
+      item.colSpan = 6;
+      row.append(item);
+      rows.append(row);
+      return;
+    }
+    for (const release of releases) {
+      const row = document.createElement("tr");
+      row.append(cell(release.pack_id, "strong"));
+      row.append(cell(release.version));
+      row.append(cell(release.capabilities.length));
+      const hash = cell(release.digest.slice(0, 12), "hash");
+      hash.title = release.digest;
+      row.append(hash);
+      const status = cell(release.active ? "当前启用" : "已发布");
+      status.className = release.active ? "status active" : "status";
+      row.append(status);
+      const action = document.createElement("td");
+      if (release.active) {
+        action.textContent = "—";
+      } else {
+        const button = document.createElement("button");
+        button.className = "button small secondary";
+        button.type = "button";
+        button.textContent = "启用此版本";
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          feedback(`正在启用 ${release.pack_id} ${release.version}…`, "info", "release-feedback");
+          try {
+            await api(`/admin/api/packs/${encodeURIComponent(release.pack_id)}/activate`, {
+              method: "POST",
+              body: { digest: release.digest, expected_revision: release.revision },
+            });
+            await refresh();
+            feedback(`已启用 ${release.pack_id} ${release.version}，新任务将使用此版本。`, "success", "release-feedback");
+          } catch (error) {
+            feedback(error.message, "error", "release-feedback");
+          } finally {
+            button.disabled = false;
+          }
+        });
+        action.append(button);
+      }
+      row.append(action);
+      rows.append(row);
+    }
+  }
+
+  function option(value, label) {
+    const element = document.createElement("option");
+    element.value = value;
+    element.textContent = label;
+    return element;
+  }
+
+  function renderBindings() {
+    const owners = $("binding-owner");
+    const packs = $("binding-pack");
+    const previousOwner = owners.value;
+    const previousPack = packs.value;
+    owners.replaceChildren(option("", "选择用户"));
+    for (const owner of state.overview.users) owners.append(option(owner, owner));
+    packs.replaceChildren(option("", "选择已启用能力包"));
+    const active = state.overview.releases.filter((item) => item.active);
+    for (const release of active) packs.append(option(release.pack_id, release.pack_id));
+    owners.value = previousOwner;
+    packs.value = previousPack;
+
+    const list = $("binding-list");
+    list.replaceChildren();
+    const bindings = state.overview.bindings;
+    if (!bindings.length) {
+      empty(list, "尚无连接授权。启用版本后，为用户绑定能力和环境变量引用。");
+    } else {
+      for (const binding of bindings) {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "binding-item";
+        const title = document.createElement("strong");
+        title.textContent = `${binding.owner_id} · ${binding.pack_id}`;
+        const caption = document.createElement("span");
+        caption.textContent = binding.enabled
+          ? `${binding.config.granted_capabilities.length} 项授权能力 · 更新于 ${formatDate(binding.updated_at)}`
+          : "已停用";
+        item.append(title, caption);
+        item.addEventListener("click", () => {
+          owners.value = binding.owner_id;
+          packs.value = binding.pack_id;
+          fillBinding();
+          $("binding-form").scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+        list.append(item);
+      }
+    }
+    fillBinding();
+  }
+
+  function fillBinding() {
+    const matching = state.overview?.bindings.find(
+      (item) => item.owner_id === $("binding-owner").value && item.pack_id === $("binding-pack").value
+    );
+    const config = matching?.config;
+    $("binding-environment").value = JSON.stringify(config?.environment || {}, null, 2);
+    $("binding-grants").value = (config?.granted_capabilities || []).join(", ");
+    $("binding-approvals").value = (config?.approval_capabilities || []).join(", ");
+    $("binding-model-data").checked = Boolean(config?.allow_model_data);
+    $("binding-identity-env").value = (config?.binding_environment || []).join(", ");
+    $("binding-identity").value = config?.identity ? JSON.stringify(config.identity, null, 2) : "";
+    $("disable-binding").disabled = !matching?.enabled;
+    $("check-binding").disabled = !matching?.enabled;
+  }
+
+  function renderAudit() {
+    const list = $("audit-list");
+    list.replaceChildren();
+    if (!state.overview.audit.length) {
+      empty(list, "发布和授权操作会显示在这里。");
+      return;
+    }
+    const labels = { publish: "发布版本", activate: "启用版本", bind: "保存连接", disable_binding: "停用连接" };
+    for (const event of state.overview.audit) {
+      const row = document.createElement("div");
+      row.className = "audit-row";
+      const time = document.createElement("time");
+      time.textContent = formatDate(event.created_at);
+      const action = document.createElement("strong");
+      action.textContent = labels[event.action] || event.action;
+      const pack = document.createElement("span");
+      pack.textContent = event.pack_id;
+      row.append(time, action, pack);
+      list.append(row);
+    }
+  }
+
+  async function refresh() {
+    if (!state.token) {
+      feedback("请先输入管理员密钥。", "error");
+      return;
+    }
+    try {
+      state.overview = await api("/admin/api/overview");
+    } catch (error) {
+      $("connection-state").textContent = "未连接";
+      $("connection-state").classList.remove("connected");
+      throw error;
+    }
+    renderReleases();
+    renderBindings();
+    renderAudit();
+    $("connection-state").textContent = "已连接";
+    $("connection-state").classList.add("connected");
+  }
+
+  async function packageBody() {
+    let manifest;
+    try { manifest = JSON.parse($("manifest-editor").value); }
+    catch { throw new Error("能力包清单不是有效的 JSON。"); }
+    const skills = {};
+    for (const entry of manifest.skills || []) {
+      const matches = [...$("skill-files").files].filter((candidate) => {
+        const relative = candidate.webkitRelativePath || candidate.name;
+        return relative === entry.path || relative.endsWith(`/${entry.path}`);
+      });
+      if (matches.length !== 1) throw new Error(`请选择清单中对应的技能文件：${entry.path}`);
+      skills[entry.path] = await matches[0].text();
+    }
+    return {
+      pack_id: $("pack-id").value.trim(),
+      version: $("pack-version").value.trim(),
+      manifest,
+      skills,
+    };
+  }
+
+  function names(value) {
+    return [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))];
+  }
+
+  $("connect-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    state.token = $("admin-key").value;
+    try {
+      await refresh();
+      $("admin-key").value = "";
+      feedback("已连接管理服务。", "success");
+    } catch (error) {
+      state.token = "";
+      feedback(error.message, "error");
+    }
+  });
+
+  $("refresh").addEventListener("click", async () => {
+    try { await refresh(); feedback("目录已刷新。", "success"); }
+    catch (error) { feedback(error.message, "error"); }
+  });
+
+  $("manifest-file").addEventListener("change", async () => {
+    const file = $("manifest-file").files[0];
+    if (!file) return;
+    try {
+      const manifest = JSON.parse(await file.text());
+      $("manifest-editor").value = JSON.stringify(manifest, null, 2);
+      $("pack-id").value = manifest.name || "";
+      $("pack-version").value = manifest.version || "";
+      feedback("清单已读取。校验后再发布。", "info", "publish-feedback");
+    } catch { feedback("清单不是有效的 JSON。", "error", "publish-feedback"); }
+  });
+
+  $("openapi-file").addEventListener("change", async () => {
+    const file = $("openapi-file").files[0];
+    if (!file) return;
+    try {
+      state.openapiSpec = JSON.parse(await file.text());
+      const operations = $("openapi-operations");
+      operations.replaceChildren();
+      let count = 0;
+      for (const [path, methods] of Object.entries(state.openapiSpec.paths || {})) {
+        for (const [method, operation] of Object.entries(methods)) {
+          if (!operation?.operationId || !["get", "post", "put", "patch", "delete"].includes(method)) continue;
+          const label = document.createElement("label");
+          label.className = "operation-item";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.value = operation.operationId;
+          const name = document.createElement("span");
+          name.textContent = `${operation.operationId} · ${method.toUpperCase()} ${path}`;
+          label.append(checkbox, name);
+          operations.append(label);
+          count += 1;
+        }
+      }
+      if (!count) empty(operations, "文档中没有带 operationId 的受支持操作。");
+      feedback(`已发现 ${count} 个操作，请选择要暴露给 Agent 的能力。`, "info", "publish-feedback");
+    } catch {
+      state.openapiSpec = null;
+      feedback("OpenAPI 文档不是有效的 JSON。", "error", "publish-feedback");
+    }
+  });
+
+  $("generate-draft").addEventListener("click", async () => {
+    if (!state.openapiSpec) { feedback("请先选择 OpenAPI 文档。", "error", "publish-feedback"); return; }
+    const operations = [...$("openapi-operations").querySelectorAll("input:checked")].map((item) => item.value);
+    if (!operations.length) { feedback("请至少选择一个操作。", "error", "publish-feedback"); return; }
+    try {
+      const manifest = await api("/admin/api/openapi-draft", {
+        method: "POST",
+        body: {
+          spec: state.openapiSpec,
+          name: $("openapi-name").value.trim(),
+          base_url_env: $("openapi-url-env").value.trim(),
+          token_env: $("openapi-token-env").value.trim() || null,
+          operations,
+        },
+      });
+      $("manifest-editor").value = JSON.stringify(manifest, null, 2);
+      $("pack-id").value = manifest.name;
+      $("pack-version").value = manifest.version;
+      $("publish-form").scrollIntoView({ behavior: "smooth", block: "start" });
+      feedback(`已生成 ${operations.length} 项能力的草稿。请审查执行影响和契约，再校验发布。`, "success", "publish-feedback");
+    } catch (error) { feedback(error.message, "error", "publish-feedback"); }
+  });
+
+  $("validate").addEventListener("click", async () => {
+    $("validate").disabled = true;
+    feedback("正在校验草稿…", "info", "publish-feedback");
+    try {
+      const result = await api("/admin/api/validate", { method: "POST", body: await packageBody() });
+      feedback(`校验通过：${result.capabilities.map((item) => item.name).join("、")}。`, "success", "publish-feedback");
+    } catch (error) { feedback(error.message, "error", "publish-feedback"); }
+    finally { $("validate").disabled = false; }
+  });
+
+  $("publish-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = $("publish-form").querySelector('button[type="submit"]');
+    button.disabled = true;
+    feedback("正在发布版本…", "info", "publish-feedback");
+    try {
+      const result = await api("/admin/api/releases", { method: "POST", body: await packageBody() });
+      await refresh();
+      feedback(`已发布 ${result.pack_id} ${result.version}。请在版本目录中明确启用。`, "success", "publish-feedback");
+    } catch (error) { feedback(error.message, "error", "publish-feedback"); }
+    finally { button.disabled = false; }
+  });
+
+  $("binding-owner").addEventListener("change", fillBinding);
+  $("binding-pack").addEventListener("change", fillBinding);
+  $("binding-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      let environment;
+      try { environment = JSON.parse($("binding-environment").value); }
+      catch { throw new Error("环境变量映射不是有效的 JSON。"); }
+      if (!environment || Array.isArray(environment) || typeof environment !== "object") {
+        throw new Error("环境变量映射必须是 JSON 对象。");
+      }
+      const owner = $("binding-owner").value;
+      const pack = $("binding-pack").value;
+      await api(`/admin/api/bindings/${encodeURIComponent(owner)}/${encodeURIComponent(pack)}`, {
+        method: "PUT",
+        body: {
+          environment,
+          granted_capabilities: names($("binding-grants").value),
+          approval_capabilities: names($("binding-approvals").value),
+          allow_model_data: $("binding-model-data").checked,
+          binding_environment: names($("binding-identity-env").value),
+          identity: $("binding-identity").value.trim() ? JSON.parse($("binding-identity").value) : null,
+        },
+      });
+      await refresh();
+      feedback(`已保存 ${owner} 对 ${pack} 的连接与授权。`, "success", "binding-feedback");
+    } catch (error) { feedback(error.message, "error", "binding-feedback"); }
+  });
+
+  $("disable-binding").addEventListener("click", async () => {
+    const owner = $("binding-owner").value;
+    const pack = $("binding-pack").value;
+    if (!owner || !pack || !window.confirm(`停用 ${owner} 对 ${pack} 的连接？现有任务也将失去访问权限。`)) return;
+    try {
+      await api(`/admin/api/bindings/${encodeURIComponent(owner)}/${encodeURIComponent(pack)}`, { method: "DELETE" });
+      await refresh();
+      feedback(`已停用 ${owner} 对 ${pack} 的连接。`, "success", "binding-feedback");
+    } catch (error) { feedback(error.message, "error", "binding-feedback"); }
+  });
+
+  $("check-binding").addEventListener("click", async () => {
+    const owner = $("binding-owner").value;
+    const pack = $("binding-pack").value;
+    if (!owner || !pack) return;
+    try {
+      const result = await api(`/admin/api/bindings/${encodeURIComponent(owner)}/${encodeURIComponent(pack)}/check`, { method: "POST" });
+      feedback(`连接可用，发现 ${result.capabilities.length} 项能力和 ${result.skills.length} 份技能。`, "success", "binding-feedback");
+    } catch (error) { feedback(error.message, "error", "binding-feedback"); }
+  });
+})();

@@ -60,6 +60,10 @@ class HostSettings(BaseModel):
 
 ProviderFactory = Callable[[str, str], AbstractAsyncContextManager[CapabilityProvider]]
 PolicyResolver = Callable[[str, str], Awaitable[ExecutionPolicy]]
+ReleaseResolver = Callable[[str, str], Awaitable[str | None]]
+ReleaseProviderFactory = Callable[
+    [str, str, str | None], AbstractAsyncContextManager[CapabilityProvider]
+]
 _TERMINAL = {"completed", "failed", "cancelled"}
 _AUTH_CODES = {
     "product_api_unauthorized",
@@ -139,6 +143,8 @@ class AgentHost:
         provider_factory: ProviderFactory,
         model: DecisionModel,
         policy_resolver: PolicyResolver,
+        release_resolver: ReleaseResolver | None = None,
+        release_provider_factory: ReleaseProviderFactory | None = None,
         settings: HostSettings | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -146,6 +152,10 @@ class AgentHost:
         self.provider_factory = provider_factory
         self.model = model
         self.policy_resolver = policy_resolver
+        if (release_resolver is None) != (release_provider_factory is None):
+            raise ValueError("release resolver and provider factory must be configured together")
+        self.release_resolver = release_resolver
+        self.release_provider_factory = release_provider_factory
         self.settings = settings or HostSettings()
         self.clock = clock
         self._slots = asyncio.Semaphore(self.settings.max_concurrent_runs)
@@ -174,6 +184,11 @@ class AgentHost:
         if not instruction.strip() or len(instruction) > 30_000:
             raise HostError("instruction_invalid")
         await self._policy(owner_id, pack_id, model_data=True)
+        release = (
+            await self.release_resolver(owner_id, pack_id)
+            if self.release_resolver is not None
+            else None
+        )
         request_key = _canonical([owner_id, request_id]).decode()
         run_id = str(uuid5(NAMESPACE_URL, request_key)) if request_id else str(uuid4())
         state = AgentRuntime.new_state(instruction, run_id=run_id)
@@ -181,6 +196,7 @@ class AgentHost:
             "runtime": state.model_dump(mode="json", exclude={"facts"}),
             "artifact_ids": [],
             "pack_fingerprint": None,
+            "pack_release": release,
         }
         try:
             return await self.store.create_run(
@@ -229,6 +245,7 @@ class AgentHost:
             "runtime": state.model_dump(mode="json", exclude={"facts"}),
             "artifact_ids": [str(fact.fact_id) for fact in state.facts],
             "pack_fingerprint": fingerprint or run.state.get("pack_fingerprint"),
+            "pack_release": run.state.get("pack_release"),
         }
         if len(_canonical(envelope)) > self.settings.max_state_bytes:
             raise HostError("run_state_too_large")
@@ -668,7 +685,15 @@ class AgentHost:
             return run
         try:
             policy = await self._policy(run.owner_id, run.pack_id, model_data=True)
-            async with self.provider_factory(run.owner_id, run.pack_id) as provider:
+            release = run.state.get("pack_release")
+            if release is not None and not isinstance(release, str):
+                raise HostError("run_state_invalid")
+            factory = (
+                self.release_provider_factory(run.owner_id, run.pack_id, release)
+                if self.release_provider_factory is not None
+                else self.provider_factory(run.owner_id, run.pack_id)
+            )
+            async with factory as provider:
                 fingerprint = _fingerprint(provider)
                 previous = run.state.get("pack_fingerprint")
                 if previous is not None and fingerprint != previous:
