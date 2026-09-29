@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from enterprise_agent.contracts import Fact, ToolCall
-from enterprise_agent.providers import CapabilityDescription, CapabilityProvider, InvocationContext
+from agent_capability.contracts import Fact, ToolCall
+from agent_capability.providers import CapabilityDescription, CapabilityProvider, InvocationContext
 
 
 def bind_idempotency(

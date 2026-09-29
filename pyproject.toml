@@ -1,7 +1,7 @@
 [project]
-name = "enterprise-agent-framework"
-version = "0.2.0"
-description = "A domain-neutral ReAct runtime with independently imported enterprise capabilities."
+name = "agent-capability-framework"
+version = "0.3.0"
+description = "A domain-neutral ReAct runtime with independently imported capabilities."
 requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.28,<1",
@@ -14,9 +14,9 @@ mcp = ["mcp>=1.26,<2", "jsonschema>=4.23,<5"]
 server = ["fastapi>=0.116,<1", "uvicorn>=0.35,<1"]
 
 [project.scripts]
-enterprise-agent = "enterprise_agent.cli:main"
-enterprise-agent-serve = "enterprise_agent.serve:main"
-enterprise-agent-import-openapi = "enterprise_agent.openapi:main"
+agent-capability = "agent_capability.cli:main"
+agent-capability-serve = "agent_capability.serve:main"
+agent-capability-import-openapi = "agent_capability.openapi:main"
 
 [dependency-groups]
 dev = [
@@ -33,7 +33,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/enterprise_agent"]
+packages = ["src/agent_capability"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -52,4 +52,4 @@ ignore = ["RUF001"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-packages = ["enterprise_agent"]
+packages = ["agent_capability"]

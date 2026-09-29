@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from enterprise_agent.storage import LeaseLost, RunNotFound, SQLiteStore, StoreConflict
+from agent_capability.storage import LeaseLost, RunNotFound, SQLiteStore, StoreConflict
 
 
 @pytest.mark.asyncio

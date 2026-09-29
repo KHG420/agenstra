@@ -1,4 +1,4 @@
-"""Run the authenticated enterprise Agent HTTP host."""
+"""Run the authenticated Agent HTTP host."""
 
 import argparse
 import os
@@ -6,15 +6,15 @@ from pathlib import Path
 
 import uvicorn
 
-from enterprise_agent.deployment import load_deployment
-from enterprise_agent.host import AgentHost
-from enterprise_agent.model import HttpJsonDecisionModel
-from enterprise_agent.server import create_app
-from enterprise_agent.storage import SQLiteStore
+from agent_capability.deployment import load_deployment
+from agent_capability.host import AgentHost
+from agent_capability.model import HttpJsonDecisionModel
+from agent_capability.server import create_app
+from agent_capability.storage import SQLiteStore
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Serve enterprise Agent runs")
+    parser = argparse.ArgumentParser(description="Serve Agent runs")
     parser.add_argument("--config", type=Path, default=os.environ.get("AGENT_DEPLOYMENT_CONFIG"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8091)

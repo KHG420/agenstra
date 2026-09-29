@@ -1,4 +1,4 @@
-"""Durable single-enterprise host: scoped state, execution journal, approvals and job waiting."""
+"""Durable single-node host: scoped state, execution journal, approvals and job waiting."""
 
 import asyncio
 import hashlib
@@ -12,18 +12,18 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from enterprise_agent.broker import CallOutcome, ToolBroker, bind_idempotency
-from enterprise_agent.contracts import DecisionModel, Fact, Observation, ToolCall
-from enterprise_agent.providers import CapabilityProvider, InvocationContext, OperationBinding
-from enterprise_agent.runtime import (
+from agent_capability.broker import CallOutcome, ToolBroker, bind_idempotency
+from agent_capability.contracts import DecisionModel, Fact, Observation, ToolCall
+from agent_capability.providers import CapabilityProvider, InvocationContext, OperationBinding
+from agent_capability.runtime import (
     AgentRuntime,
     FactReferenceError,
     arguments_digest,
     reference_available,
     resolve_argument,
 )
-from enterprise_agent.state import Invocation, OperationReceipt, RuntimeState
-from enterprise_agent.storage import LeaseLost, SQLiteStore, StoreConflict, StoredRun
+from agent_capability.state import Invocation, OperationReceipt, RuntimeState
+from agent_capability.storage import LeaseLost, SQLiteStore, StoreConflict, StoredRun
 
 
 class HostError(RuntimeError):
@@ -66,8 +66,6 @@ _AUTH_CODES = {
     "product_api_forbidden",
     "upstream_http_401",
     "upstream_http_403",
-    "business_http_401",
-    "business_http_403",
     "unauthorized",
     "forbidden",
     "identity_unverified",

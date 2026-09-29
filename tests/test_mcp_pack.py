@@ -8,9 +8,9 @@ from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.shared.memory import create_connected_server_and_client_session
 
-from enterprise_agent.broker import ToolBroker
-from enterprise_agent.contracts import ToolCall
-from enterprise_agent.mcp import (
+from agent_capability.broker import ToolBroker
+from agent_capability.contracts import ToolCall
+from agent_capability.mcp import (
     McpPack,
     McpPackManifest,
     bind_mcp_pack,
@@ -20,15 +20,15 @@ from enterprise_agent.mcp import (
 
 def catalog_tool():
     return types.Tool(
-        name="Factory.Capacity/v2",
-        description="Read capacity for the requested production line.",
+        name="Metrics.Capacity/v2",
+        description="Read capacity for the requested resource.",
         inputSchema={
             "type": "object",
-            "required": ["line"],
+            "required": ["resource"],
             "additionalProperties": False,
-            "properties": {"line": {"$ref": "#/$defs/Line"}},
+            "properties": {"resource": {"$ref": "#/$defs/Resource"}},
             "$defs": {
-                "Line": {
+                "Resource": {
                     "type": "object",
                     "required": ["code"],
                     "additionalProperties": False,
@@ -47,19 +47,19 @@ def catalog_tool():
 
 def manifest(tool):
     return {
-        "schema": "enterprise.mcp-pack.v1",
-        "name": "factory",
+        "schema": "agent-capability.mcp-pack.v1",
+        "name": "metrics",
         "version": "1",
-        "guidance": "Use actual production capacity and retain the unit.",
+        "guidance": "Use actual resource capacity and retain the unit.",
         "source": {"transport": "stdio", "command": "unused"},
         "tools": [{"name": tool.name, "effect": "read", "contract_sha256": contract_digest(tool)}],
     }
 
 
-async def test_unrelated_enterprise_uses_same_adapter_and_retains_its_response_shape(tmp_path):
+async def test_generic_mcp_adapter_retains_response_shape(tmp_path):
     tool = catalog_tool()
     calls = []
-    server = Server("factory")
+    server = Server("metrics")
 
     @server.list_tools()
     async def list_tools():
@@ -84,15 +84,15 @@ async def test_unrelated_enterprise_uses_same_adapter_and_retains_its_response_s
         call = ToolCall(
             call_ref="capacity",
             capability=tool.name,
-            arguments={"line": {"code": 8}},
-            reason="Read current production capacity",
+            arguments={"resource": {"code": 8}},
+            reason="Read current resource capacity",
         )
-        invalid = call.model_copy(update={"arguments": {"line": {"code": "8"}}})
+        invalid = call.model_copy(update={"arguments": {"resource": {"code": "8"}}})
         assert (await broker.execute(invalid)).error_code == "capability_input_invalid"
         assert calls == []
         result = await broker.execute(call)
         assert result.fact.value == {"data": {"capacity": 2400, "unit": "units/day"}}
-        assert calls == [(tool.name, {"line": {"code": 8}})]
+        assert calls == [(tool.name, {"resource": {"code": 8}})]
         assert not pack.skills
 
 
@@ -116,6 +116,6 @@ async def test_timeout_is_an_unknown_outcome_and_never_automatically_resubmitted
     session = TimeoutSession()
     config = McpPackManifest.model_validate(manifest(tool))
     pack = McpPack(session, config, {tool.name: tool}, {})
-    result = await pack.invoke(tool.name, {"line": {"code": 8}})
+    result = await pack.invoke(tool.name, {"resource": {"code": 8}})
     assert result.error_code == "provider_outcome_unknown"
     assert session.count == 1

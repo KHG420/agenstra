@@ -7,16 +7,16 @@
     "max_run_seconds": 86400
   },
   "packs": {
-    "business": {"path": "/opt/packs/business/pack.json"}
+    "records": {"path": "/opt/packs/records/pack.json"}
   },
   "users": {
     "operator": {
       "api_key_env": "AGENT_OPERATOR_API_KEY",
       "packs": {
-        "business": {
+        "records": {
           "environment": {
-            "BUSINESS_API_URL": "BUSINESS_API_URL",
-            "BUSINESS_API_TOKEN": "BUSINESS_API_TOKEN"
+            "RECORDS_API_URL": "RECORDS_API_URL",
+            "RECORDS_API_TOKEN": "RECORDS_API_TOKEN"
           },
           "granted_capabilities": ["records.get"],
           "approval_capabilities": [],

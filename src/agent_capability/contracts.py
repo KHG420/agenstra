@@ -59,7 +59,7 @@ class RestCapability(StrictModel):
 
 
 class PackManifest(StrictModel):
-    schema_: Literal["enterprise.capability-pack.v1"] = Field(alias="schema")
+    schema_: Literal["agent-capability.capability-pack.v1"] = Field(alias="schema")
     name: str = Field(min_length=1, max_length=80)
     guidance: str = Field(min_length=1, max_length=8_000)
     capabilities: tuple[RestCapability, ...] = Field(min_length=1)
@@ -95,8 +95,8 @@ class Observation(StrictModel):
 
 
 class ContextPacket(StrictModel):
-    schema_: Literal["enterprise.context.v1"] = Field(
-        default="enterprise.context.v1", alias="schema"
+    schema_: Literal["agent-capability.context.v1"] = Field(
+        default="agent-capability.context.v1", alias="schema"
     )
     instruction: str
     capabilities: tuple[dict[str, JsonValue], ...]
@@ -115,8 +115,8 @@ class ContextPacket(StrictModel):
 
 
 class DecisionBase(StrictModel):
-    schema_: Literal["enterprise.decision.v1"] = Field(
-        default="enterprise.decision.v1", alias="schema"
+    schema_: Literal["agent-capability.decision.v1"] = Field(
+        default="agent-capability.decision.v1", alias="schema"
     )
 
 

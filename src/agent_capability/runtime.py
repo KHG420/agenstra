@@ -11,9 +11,9 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import JsonValue, ValidationError
 
-from enterprise_agent.broker import CallOutcome, ToolBroker
-from enterprise_agent.context import fact_view
-from enterprise_agent.contracts import (
+from agent_capability.broker import CallOutcome, ToolBroker
+from agent_capability.context import fact_view
+from agent_capability.contracts import (
     DECISION_ADAPTER,
     ContextPacket,
     DecisionModel,
@@ -28,9 +28,9 @@ from enterprise_agent.contracts import (
     ToolBatchDecision,
     ToolCall,
 )
-from enterprise_agent.model import ModelDecisionError
-from enterprise_agent.providers import CapabilityProvider, InvocationContext
-from enterprise_agent.state import Invocation, RuntimeState
+from agent_capability.model import ModelDecisionError
+from agent_capability.providers import CapabilityProvider, InvocationContext
+from agent_capability.state import Invocation, RuntimeState
 
 
 class FactReferenceError(ValueError):

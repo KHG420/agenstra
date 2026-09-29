@@ -13,17 +13,17 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
-from enterprise_agent.contracts import FinalDecision, ReadSkillDecision, ToolBatchDecision, ToolCall
-from enterprise_agent.host import AgentHost, ExecutionPolicy, HostSettings
-from enterprise_agent.openapi import import_openapi
-from enterprise_agent.rest import load_rest_pack
-from enterprise_agent.storage import SQLiteStore
+from agent_capability.contracts import FinalDecision, ReadSkillDecision, ToolBatchDecision, ToolCall
+from agent_capability.host import AgentHost, ExecutionPolicy, HostSettings
+from agent_capability.openapi import import_openapi
+from agent_capability.rest import load_rest_pack
+from agent_capability.storage import SQLiteStore
 
 
 @pytest.fixture
 def manifest(tmp_path: Path) -> Path:
     document = {
-        "schema": "enterprise.rest-pack.v2",
+        "schema": "agent-capability.rest-pack.v2",
         "name": "record",
         "version": "1.0",
         "guidance": "Use reviewed records.",
@@ -342,7 +342,7 @@ def _job_pack(tmp_path: Path) -> Path:
         "additionalProperties": False,
     }
     document = {
-        "schema": "enterprise.rest-pack.v2",
+        "schema": "agent-capability.rest-pack.v2",
         "name": "jobs",
         "version": "1",
         "guidance": "Use the job API and verify its final status.",

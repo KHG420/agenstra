@@ -1,4 +1,4 @@
-"""Run one enterprise task against a trusted pack and a JSON-capable model endpoint."""
+"""Run one task against a trusted pack and a JSON-capable model endpoint."""
 
 import argparse
 import asyncio
@@ -6,9 +6,9 @@ import json
 import os
 from pathlib import Path
 
-from enterprise_agent.loader import open_pack
-from enterprise_agent.model import HttpJsonDecisionModel
-from enterprise_agent.runtime import AgentRuntime
+from agent_capability.loader import open_pack
+from agent_capability.model import HttpJsonDecisionModel
+from agent_capability.runtime import AgentRuntime
 
 
 async def _run(
@@ -51,7 +51,7 @@ async def _run(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run one enterprise Agent task")
+    parser = argparse.ArgumentParser(description="Run one Agent task")
     parser.add_argument("--pack", type=Path, required=True)
     parser.add_argument("--instruction")
     parser.add_argument(

@@ -11,11 +11,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from enterprise_agent.deployment import DeploymentError
-from enterprise_agent.storage import LeaseLost, RunNotFound, StoreConflict, StoredRun
+from agent_capability.deployment import DeploymentError
+from agent_capability.storage import LeaseLost, RunNotFound, StoreConflict, StoredRun
 
 if TYPE_CHECKING:
-    from enterprise_agent.host import AgentHost
+    from agent_capability.host import AgentHost
 
 _LOG = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ def create_app(
         status = 403 if error.code in {"access_denied", "identity_unverified"} else 503
         return JSONResponse(status_code=status, content={"code": error.code})
 
-    from enterprise_agent.host import HostError
+    from agent_capability.host import HostError
 
     @app.exception_handler(HostError)
     async def host_error(_: Request, error: HostError) -> JSONResponse:

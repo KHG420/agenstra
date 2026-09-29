@@ -1,4 +1,4 @@
-"""Optional MCP connection adapter; no enterprise-specific imports or response rewrites."""
+"""Optional MCP connection adapter; no domain-specific imports or response rewrites."""
 
 import asyncio
 import hashlib
@@ -21,8 +21,8 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import McpError
 from pydantic import Field, JsonValue, model_validator
 
-from enterprise_agent.contracts import StrictModel
-from enterprise_agent.providers import (
+from agent_capability.contracts import StrictModel
+from agent_capability.providers import (
     CapabilityDescription,
     CapabilityResult,
     InvocationContext,
@@ -30,7 +30,7 @@ from enterprise_agent.providers import (
     Skill,
     agent_prompt,
 )
-from enterprise_agent.skills import SkillFile, load_skill_files
+from agent_capability.skills import SkillFile, load_skill_files
 
 
 class McpSource(StrictModel):
@@ -69,7 +69,7 @@ class ToolExposure(StrictModel):
 
 
 class McpPackManifest(StrictModel):
-    schema_: Literal["enterprise.mcp-pack.v1"] = Field(alias="schema")
+    schema_: Literal["agent-capability.mcp-pack.v1"] = Field(alias="schema")
     name: str
     version: str
     guidance: str = Field(min_length=1, max_length=8_000)

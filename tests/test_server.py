@@ -7,23 +7,23 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
-from enterprise_agent.contracts import (
+from agent_capability.contracts import (
     ContextPacket,
     FinalDecision,
     RequestInputDecision,
     ToolBatchDecision,
     ToolCall,
 )
-from enterprise_agent.deployment import Deployment, DeploymentConfig, DeploymentError
-from enterprise_agent.host import AgentHost, ExecutionPolicy
-from enterprise_agent.providers import (
+from agent_capability.deployment import Deployment, DeploymentConfig, DeploymentError
+from agent_capability.host import AgentHost, ExecutionPolicy
+from agent_capability.providers import (
     CapabilityDescription,
     CapabilityResult,
     InvocationContext,
     Skill,
 )
-from enterprise_agent.server import create_app
-from enterprise_agent.storage import SQLiteStore
+from agent_capability.server import create_app
+from agent_capability.storage import SQLiteStore
 
 
 class ScriptedModel:
@@ -280,7 +280,7 @@ async def test_provider_binding_tracks_endpoint_and_identity_without_tokens(tmp_
     pack.write_text(
         json.dumps(
             {
-                "schema": "enterprise.rest-pack.v2",
+                "schema": "agent-capability.rest-pack.v2",
                 "name": "records",
                 "version": "1",
                 "guidance": "Read records.",

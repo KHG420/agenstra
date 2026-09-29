@@ -1,6 +1,6 @@
 """Domain-neutral ReAct agent runtime and capability integration interfaces."""
 
-from enterprise_agent.contracts import (
+from agent_capability.contracts import (
     ContextPacket,
     DecisionModel,
     Fact,
@@ -9,12 +9,12 @@ from enterprise_agent.contracts import (
     ToolBatchDecision,
     ToolCall,
 )
-from enterprise_agent.host import AgentHost, ExecutionPolicy, HostSettings
-from enterprise_agent.loader import open_pack
-from enterprise_agent.packs import LoadedPack, load_pack
-from enterprise_agent.providers import CapabilityProvider, InvocationContext, OperationBinding
-from enterprise_agent.runtime import AgentRuntime
-from enterprise_agent.storage import SQLiteStore
+from agent_capability.host import AgentHost, ExecutionPolicy, HostSettings
+from agent_capability.loader import open_pack
+from agent_capability.packs import LoadedPack, load_pack
+from agent_capability.providers import CapabilityProvider, InvocationContext, OperationBinding
+from agent_capability.runtime import AgentRuntime
+from agent_capability.storage import SQLiteStore
 
 __all__ = [
     "AgentHost",

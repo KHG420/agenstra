@@ -3,7 +3,7 @@
 import httpx
 from pydantic import ValidationError
 
-from enterprise_agent.contracts import DECISION_ADAPTER, ContextPacket, Decision
+from agent_capability.contracts import DECISION_ADAPTER, ContextPacket, Decision
 
 
 class ModelDecisionError(RuntimeError):

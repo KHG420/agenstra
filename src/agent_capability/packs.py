@@ -10,8 +10,8 @@ from typing import Any, cast
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, create_model
 
-from enterprise_agent.contracts import PackManifest, RestCapability, RestField, StrictModel
-from enterprise_agent.providers import (
+from agent_capability.contracts import PackManifest, RestCapability, RestField, StrictModel
+from agent_capability.providers import (
     CapabilityDescription,
     CapabilityResult,
     InvocationContext,

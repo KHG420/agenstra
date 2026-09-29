@@ -5,8 +5,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from enterprise_agent.contracts import Fact, Observation, ToolCall
-from enterprise_agent.providers import OperationBinding
+from agent_capability.contracts import Fact, Observation, ToolCall
+from agent_capability.providers import OperationBinding
 
 RunStatus = Literal[
     "queued",

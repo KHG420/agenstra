@@ -1,44 +1,44 @@
-# Enterprise Agent Framework
+# Agent Capability Framework
 
-一个可独立部署的通用 Agent 框架。企业把已有的 REST API、OpenAPI 操作、MCP 工具或自定义 SDK 适配成**受审查的能力包**；框架负责 ReAct 决策、工具执行边界、用户授权、审批、结果证据，以及可恢复的长任务。业务计算仍由企业现有系统完成。
+一个可独立部署的通用 Agent 框架。将已有的 REST API、OpenAPI 操作、MCP 工具或自定义 SDK 接入为**受审查的能力包**；框架负责 ReAct 决策、工具执行边界、用户授权、审批、结果证据，以及可恢复的长任务。具体计算和数据仍由所连接的服务负责。
 
-本仓库只发布框架、通用测试、部署模板和教程，**不内置任何企业的能力包、技能文件、业务模型或凭据**。`deploy/deployment.example.json` 是需要填充自有能力包的模板；直接启动它不会得到一个可用的业务 Agent。
+它可以用于个人工具、团队应用或更大规模的系统。本仓库只发布框架、通用测试、部署模板和教程，**不内置场景能力包、技能文件、外部模型或凭据**。`deploy/deployment.example.json` 是接入模板；直接启动它不会得到一个具备实际能力的 Agent。
 
 ## 适用场景与边界
 
-例如企业已有三个 HTTP 接口：规划路径、读取沿途条件、按条件计算性能。把三个接口各自声明成能力后，Agent 可以在一次任务中选择先调用规划，再从返回的 Fact 取路径参数调用条件接口，最后把观察到的输入送给性能接口并形成有来源的回答。框架不会硬编码这三个步骤；每家企业决定自己的能力粒度、业务语义和授权策略。
+例如一个应用已有搜索、数据转换和通知三个接口。把它们分别声明为能力后，Agent 可以先搜索，从返回的 Fact 读取真实字段，再调用转换接口，最后按任务需要发送通知。框架不硬编码这条路径；接入方决定能力粒度、使用规则和授权策略。
 
-首版支持**一家企业独立部署、一个服务节点、持久本地磁盘和 SQLite WAL**。单个部署可以配置多个用户，每个用户有独立的能力授权和连接。分布式高可用、自动保留期清理、真实模型质量和企业业务算法正确性仍需部署方单独设计或验收。
+当前持久宿主支持**单节点、持久本地磁盘和 SQLite WAL**。一个部署可以配置多个用户，每个用户有独立的能力授权和连接。分布式高可用、自动保留期清理、真实模型质量和外部计算正确性仍需另行设计或验收。
 
 ```mermaid
 flowchart LR
-    U[用户或企业应用] --> H[AgentHost\n认证、授权、审批、恢复]
+    U[用户或调用方应用] --> H[AgentHost\n认证、授权、审批、恢复]
     H --> R[AgentRuntime\nReAct 决策循环]
     R --> B[ToolBroker\n参数、引用、结果边界]
-    P[企业自有能力包\n契约、技能、执行声明] --> R
+    P[自有能力包\n契约、技能、执行声明] --> R
     P --> B
     B --> C[CapabilityProvider\nREST / MCP / 自定义]
-    C --> E[企业已有服务和模型]
+    C --> E[已有服务和模型]
     H <--> S[SQLiteStore\n状态、调用、Fact、事件]
 ```
 
 | 组件 | 负责什么 |
 | --- | --- |
-| `AgentRuntime` | 看任务、能力目录、技能和真实观察；一次决定工具调用、读取技能、检查结果、追问或最终回答。没有固定业务 DAG 或预先计划模式。 |
+| `AgentRuntime` | 看任务、能力目录、技能和真实观察；一次决定工具调用、读取技能、检查结果、追问或最终回答。没有固定场景 DAG 或预先计划模式。 |
 | `AgentHost` | 按用户保存运行、调用前记录、审批、租约、超时、后台作业轮询、断线恢复及取消。 |
 | `ToolBroker` | 校验调用和 Fact 引用，把已验证的工具结果保存为带来源的 Fact。 |
-| `CapabilityProvider` | 统一能力、技能、调用和结果接口；内置 REST 与 MCP 连接器，也可由企业实现自定义 Provider。 |
-| 企业能力包 | 明确暴露哪些能力、输入输出契约、业务技能、执行性质、幂等策略、后台作业状态映射；由企业自己审查和部署。 |
+| `CapabilityProvider` | 统一能力、技能、调用和结果接口；内置 REST 与 MCP 连接器，也可实现自定义 Provider。 |
+| 能力包 | 明确暴露哪些能力、输入输出契约、使用说明、执行性质、幂等策略和后台作业状态映射；由接入方审查和部署。 |
 
 更完整的执行与安全边界见[架构说明](docs/architecture.md)。
 
 ## 五分钟了解接入流程
 
-1. 选择企业已有接口。REST 可以手写 `enterprise.rest-pack.v2` 清单，或从 OpenAPI 3.0/3.1 JSON 中**只导入指定的 operationId**；MCP 可以固定选定工具的契约哈希。
-2. 审查每项能力的 `effect`（`read` / `compute` / `write` / `destructive`）、JSON Schema、凭据绑定、幂等机制、审批要求及长任务状态。导入器产生的是草稿，不会猜测业务权限。
+1. 选择已有接口。REST 可以手写 `agent-capability.rest-pack.v2` 清单，或从 OpenAPI 3.0/3.1 JSON 中**只导入指定的 operationId**；MCP 可以固定选定工具的契约哈希。
+2. 审查每项能力的 `effect`（`read` / `compute` / `write` / `destructive`）、JSON Schema、凭据绑定、幂等机制、审批要求及长任务状态。导入器产生的是草稿，不会猜测访问权限。
 3. 为 Agent 增加可选的技能文件，说明单位、前提、异常和结果解释；清单记录文件 SHA-256。技能提供语义，不授予权限。
-4. 在部署配置中指定包路径、各用户的能力授权、API 凭据环境变量和是否允许把业务数据发送给模型。启动同一份框架代码即可。
-5. 用代表性任务验收真实模型选择、授权、错误路径、企业 API 契约和结果质量。
+4. 在部署配置中指定包路径、各用户的能力授权、API 凭据环境变量和是否允许把外部数据发送给模型。启动同一份框架代码即可。
+5. 用代表性任务验收真实模型选择、授权、错误路径、外部 API 契约和结果质量。
 
 从零创建一个中性的 REST 能力包、添加技能和启动服务，按[完整接入教程](docs/tutorial.md)操作。生产配置、容器部署、状态接口与运维检查见[部署与运维](docs/deployment.md)。
 
@@ -47,29 +47,29 @@ flowchart LR
 需要 Python 3.12+ 和 [uv](https://docs.astral.sh/uv/)。在仓库根目录执行：
 
 ```sh
-git clone https://github.com/KHG420/enterprise-agent-framework.git
-cd enterprise-agent-framework
+git clone https://github.com/KHG420/agent-capability-framework.git
+cd agent-capability-framework
 uv sync --locked --extra server --extra mcp --group dev
 ```
 
-REST 包只需要 `server` extra；MCP 包另外需要 `mcp` extra。`enterprise-agent` 命令可先检查能力目录，不调用 LLM：
+REST 包只需要 `server` extra；MCP 包另外需要 `mcp` extra。`agent-capability` 命令可先检查能力目录，不调用 LLM：
 
 ```sh
-uv run --locked --extra server enterprise-agent \
-  --pack local/packs/business/pack.json --inspect
+uv run --locked --extra server agent-capability \
+  --pack local/packs/records/pack.json --inspect
 ```
 
-其中 `local/packs/business/pack.json` 由你按教程创建，不在仓库内。服务运行还需要：
+其中 `local/packs/records/pack.json` 由你按教程创建，不在仓库内。服务运行还需要：
 
 - `AGENT_MODEL`：模型名称。
 - `AGENT_MODEL_BASE_URL`：模型网关基地址，例如 `https://gateway.example/v1`；适配器请求其 `/chat/completions`。
 - `AGENT_MODEL_API_KEY`：模型网关密钥。
-- 部署配置中指定的每个用户 API key、企业接口地址与凭据环境变量。
+- 部署配置中指定的每个用户 API key、外部接口地址与凭据环境变量。
 
 默认模型适配器要求 `/chat/completions` 返回 JSON 字符串决策，使用 `response_format: {"type":"json_object"}`。模型必须实际支持这一协议；其他模型可实现 `DecisionModel` 接口接入。准备好自己的 `local/deployment.json` 后启动：
 
 ```sh
-uv run --locked --extra server enterprise-agent-serve \
+uv run --locked --extra server agent-capability-serve \
   --config local/deployment.json
 ```
 
@@ -79,29 +79,29 @@ uv run --locked --extra server enterprise-agent-serve \
 curl -sS http://127.0.0.1:8091/runs \
   -H "Authorization: Bearer $AGENT_OPERATOR_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"pack_id":"business","instruction":"查询记录 R-1 并说明结果","request_id":"record-R-1-001"}'
+  -d '{"pack_id":"records","instruction":"查询记录 R-1 并说明结果","request_id":"record-R-1-001"}'
 ```
 
 同一用户提交相同 `request_id` 和内容会得到同一个运行；相同 ID 配不同内容会冲突。响应含 `run_id`、`status`、`revision` 等状态信息。使用 `GET /runs/{run_id}` 跟踪；完整结果由 `GET /runs/{run_id}/artifacts/{fact_id}` 读取。HTTP 状态和审批示例见[部署与运维](docs/deployment.md)。
 
 ## 能力包支持范围
 
-| 来源 | 已提供的接入方式 | 导入后仍需企业审查 |
+| 来源 | 已提供的接入方式 | 导入后仍需审查 |
 | --- | --- | --- |
-| REST JSON | GET/POST/PUT/PATCH/DELETE；路径、查询、请求头、请求体绑定；嵌套 JSON Schema、状态码和业务错误码。 | 端点、认证、`effect`、重试/幂等、结果含义。 |
+| REST JSON | GET/POST/PUT/PATCH/DELETE；路径、查询、请求头、请求体绑定；嵌套 JSON Schema、状态码和服务错误码。 | 端点、认证、`effect`、重试/幂等、结果含义。 |
 | OpenAPI 3.0/3.1 JSON | 选择 `operationId`，转成 REST v2 草稿；支持本地 schema 引用及显式 bearer 环境变量。 | 生成的契约、未支持的序列化/认证、技能、审批、后台作业映射。 |
 | MCP | stdio 与 streamable HTTP；分页发现、选定工具、输入输出校验、已审查契约哈希。 | 运行命令/端点、工具作用、引用有效期、幂等与授权。 |
-| 企业 SDK | 实现 `CapabilityProvider` 协议，由应用提供用户级连接工厂。 | SDK 的身份隔离、输入输出验证和执行保证。 |
+| 自定义 SDK | 实现 `CapabilityProvider` 协议，由应用提供用户级连接工厂。 | SDK 的身份隔离、输入输出验证和执行保证。 |
 
 OpenAPI 导入命令示意（把路径和 operationId 换成自己的）：
 
 ```sh
-uv run --locked enterprise-agent-import-openapi \
+uv run --locked agent-capability-import-openapi \
   --spec local/openapi.json \
-  --out local/packs/business/pack.json \
-  --name business \
-  --base-url-env BUSINESS_API_URL \
-  --token-env BUSINESS_API_TOKEN \
+  --out local/packs/records/pack.json \
+  --name records \
+  --base-url-env RECORDS_API_URL \
+  --token-env RECORDS_API_TOKEN \
   --operation records.get
 ```
 
@@ -109,13 +109,13 @@ uv run --locked enterprise-agent-import-openapi \
 
 ## 运行与数据保证
 
-- Host 在外部调用前保存调用 ID、确切参数和哈希。对于失败后结果不确定的调用，只有声明为安全或真正可幂等重放的能力才能按同一 ID 恢复；其他情况进入 `needs_reconciliation`，由企业核对真实外部状态。
+- Host 在外部调用前保存调用 ID、确切参数和哈希。对于失败后结果不确定的调用，只有声明为安全或真正可幂等重放的能力才能按同一 ID 恢复；其他情况进入 `needs_reconciliation`，由接入方核对真实外部状态。
 - 被批准的是特定用户、特定调用和参数哈希；提交前会重新检查身份、权限及租约。技能文本不能跳过这些检查。
-- 完整工具结果作为 Fact 单独持久化，模型看到有界预览；模型可按路径检查完整结果。Fact ID 是框架本地证据 ID，不等于企业业务 ID。
-- 对声明了 `OperationBinding` 的后台作业，Host 保存企业作业回执并轮询既有状态接口；HTTP 请求成功或返回 `queued` 不代表业务任务完成。
-- 运行、事件、Fact 和续接接口按 `owner_id` 隔离；可对同一企业配置多个用户及不同能力集合。
+- 完整工具结果作为 Fact 单独持久化，模型看到有界预览；模型可按路径检查完整结果。Fact ID 是框架本地证据 ID，不等于外部资源 ID。
+- 对声明了 `OperationBinding` 的后台作业，Host 保存外部作业回执并轮询状态接口；HTTP 请求成功或返回 `queued` 不代表任务完成。
+- 运行、事件、Fact 和续接接口按 `owner_id` 隔离；一个部署可配置多个用户及不同能力集合。
 
-取消只停止本地编排，不承诺撤销已提交到企业系统的作业。SQLite WAL 适合当前单节点范围；请使用持久磁盘并制定备份与数据保留策略。
+取消只停止本地编排，不承诺撤销已提交到外部系统的作业。SQLite WAL 适合当前单节点范围；请使用持久磁盘并制定备份与数据保留策略。
 
 ## 开发验证
 
@@ -127,4 +127,4 @@ uv run --locked --extra server --extra mcp mypy
 uv build --wheel --out-dir dist
 ```
 
-测试使用临时生成的 REST/MCP 契约、模型替身和 SQLite；不需要企业能力包或真实业务服务。发布前仍应在目标企业环境验收真实身份、模型决策、接口契约、长任务以及运维条件。当前实现的取舍和上线前检查见[架构说明](docs/architecture.md)与[部署与运维](docs/deployment.md)。
+测试使用临时生成的 REST/MCP 契约、模型替身和 SQLite；不需要场景能力包或真实外部服务。发布前仍应在目标环境验收真实身份、模型决策、接口契约、长任务以及运维条件。当前实现的取舍和上线前检查见[架构说明](docs/architecture.md)与[部署与运维](docs/deployment.md)。

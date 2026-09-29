@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import Field
 
-from enterprise_agent.providers import Skill, SkillDescription
+from agent_capability.providers import Skill, SkillDescription
 
 
 class SkillFile(SkillDescription):

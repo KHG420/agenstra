@@ -5,7 +5,7 @@ from typing import cast
 
 from pydantic import JsonValue
 
-from enterprise_agent.contracts import Fact, FactView
+from agent_capability.contracts import Fact, FactView
 
 
 def fact_view(fact: Fact, *, max_characters: int = 6_000) -> FactView:
