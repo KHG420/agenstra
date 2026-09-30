@@ -91,6 +91,47 @@ func TestCoreFactReferenceExpiryAndPath(t *testing.T) {
 	}
 }
 
+func TestCoreFactPreviewDoesNotInventNullOrEmptyValues(t *testing.T) {
+	full := JSON{
+		"actual_null":  nil,
+		"empty_array":  []any{},
+		"empty_object": JSON{},
+		"timestamp":    strings.Repeat("2026-08-26T06:00:00Z", 100),
+		"weather":      JSON{"source_utc": strings.Repeat("2026-08-26T06:00:00Z", 100)},
+	}
+	fact := Fact{FactID: NewID(), Value: full}
+	view := factView(fact, 160)
+	if value, exists := view.Value["actual_null"]; !exists || value != nil {
+		t.Fatal("an actual provider null must remain visible")
+	}
+	for _, key := range []string{"empty_array", "empty_object"} {
+		if _, exists := view.Value[key]; !exists {
+			t.Fatalf("actual empty value %q was omitted", key)
+		}
+	}
+	for _, key := range []string{"timestamp", "weather"} {
+		if value, exists := view.Value[key]; exists {
+			t.Fatalf("omitted %q appears as provider data: %#v", key, value)
+		}
+	}
+	if len(view.OmittedPaths) == 0 {
+		t.Fatal("missing omission metadata")
+	}
+	value, err := ResolveArgument(JSON{"$fact_value": JSON{"fact_id": fact.FactID, "path": []any{"weather", "source_utc"}}}, map[string]Fact{fact.FactID: fact}, "", false)
+	if err != nil || value != full["weather"].(map[string]any)["source_utc"] {
+		t.Fatalf("full stored value was changed: %v %v", value, err)
+	}
+	array := factView(Fact{Value: JSON{"notes": []any{strings.Repeat("HY model note", 100), nil, JSON{}}}}, 80)
+	items := array.Value["notes"].([]any)
+	if len(items) != 3 || items[0] != nil || items[1] != nil || len(items[2].(map[string]any)) != 0 {
+		t.Fatalf("array indices or actual null/empty values changed: %v", items)
+	}
+	omitted, _ := CanonicalJSON(array.OmittedPaths)
+	if !strings.Contains(string(omitted), `["notes",0]`) {
+		t.Fatalf("array placeholder lost its omission path: %s", omitted)
+	}
+}
+
 func TestCoreFactPreviewArrayLengthAndInspectPrompt(t *testing.T) {
 	provider := &coreTestProvider{caps: map[string]CapabilityDescription{}}
 	results := []any{}
@@ -117,6 +158,9 @@ func TestCoreFactPreviewArrayLengthAndInspectPrompt(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("missing full length note: %v", packet.ContextOmissions)
+	}
+	if !strings.Contains(strings.Join(packet.ContextOmissions, " "), "null placeholders") {
+		t.Fatalf("omitted array values need an explicit unknown-value reminder: %v", packet.ContextOmissions)
 	}
 	for i := 0; i < 3; i++ {
 		if err := runtime.Step(context.Background(), state, nil); err != nil {
