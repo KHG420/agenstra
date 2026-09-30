@@ -113,6 +113,8 @@ go run ./cmd/agenstra-manage list
 
 Publishing neither activates a release nor grants access. Read the full content digest and current revision from `list`, explicitly activate the release, then bind a user connection and capability grants. Activating an older release rolls back new runs; revoking a grant affects existing runs immediately. Connection records contain environment-variable or `secret:NAME` references, not plaintext secret values. Configuration, activation, rollback, connection checks, and backup requirements are documented in the [capability management guide (Chinese)](docs/capability-management.md).
 
+Web and CLI also share saved REST/MCP drafts: configure one section at a time, append selected OpenAPI operations or package capabilities with explicit conflict handling, and publish after validation. Use `agenstra-manage draft` for the command list; the [draft workflow and examples (Chinese)](docs/capability-management.md#6-分步编辑共享草稿) cover save/resume, export, and revision conflicts.
+
 ## Supported capability sources
 
 | Source | Built-in integration | Review still required |

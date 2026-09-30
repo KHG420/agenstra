@@ -21,7 +21,7 @@ func main() {
 	flag.Parse()
 	args := flag.Args()
 	if len(args) == 0 {
-		fail(errors.New("command required: list, validate, publish, activate, bind, disable, check, audit"))
+		fail(errors.New("command required: draft, list, validate, publish, activate, bind, disable, check, audit"))
 	}
 	base, e := validateServer(*server)
 	if e != nil {
@@ -30,6 +30,16 @@ func main() {
 	key := os.Getenv(*keyEnv)
 	if key == "" {
 		fail(fmt.Errorf("missing administrator key in %s", *keyEnv))
+	}
+	if args[0] == "draft" {
+		out, err := draftCommand(args[1:], func(method, path string, body any) (any, error) {
+			return managementRequest(base, key, method, path, body)
+		})
+		if err != nil {
+			fail(err)
+		}
+		printResult(out)
+		return
 	}
 	method, path := "GET", "/admin/api/overview"
 	var body any
@@ -101,17 +111,24 @@ func main() {
 	default:
 		fail(fmt.Errorf("unknown command: %s", args[0]))
 	}
+	out, e := managementRequest(base, key, method, path, body)
+	if e != nil {
+		fail(e)
+	}
+	printResult(out)
+}
+func managementRequest(base, key, method, path string, body any) (any, error) {
 	var payload io.Reader
 	if body != nil {
 		b, e := json.Marshal(body)
 		if e != nil {
-			fail(e)
+			return nil, e
 		}
 		payload = bytes.NewReader(b)
 	}
 	req, e := http.NewRequest(method, base+path, payload)
 	if e != nil {
-		fail(e)
+		return nil, e
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
 	if body != nil {
@@ -120,20 +137,23 @@ func main() {
 	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, e := client.Do(req)
 	if e != nil {
-		fail(e)
+		return nil, e
 	}
 	defer resp.Body.Close()
 	data, e := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if e != nil {
-		fail(e)
+		return nil, e
 	}
 	if resp.StatusCode >= 400 {
-		fail(fmt.Errorf("management API returned %d: %s", resp.StatusCode, string(data)))
+		return nil, fmt.Errorf("management API returned %d: %s", resp.StatusCode, string(data))
 	}
 	var out any
 	if e = json.Unmarshal(data, &out); e != nil {
-		fail(e)
+		return nil, e
 	}
+	return out, nil
+}
+func printResult(out any) {
 	pretty, e := json.MarshalIndent(out, "", "  ")
 	if e != nil {
 		fail(e)

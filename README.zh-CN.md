@@ -47,7 +47,7 @@ flowchart LR
 
 从零创建一个中性的 REST 能力包、添加技能和启动服务，按[完整接入教程](docs/tutorial.md)操作。生产配置、容器部署、状态接口与运维检查见[部署与运维](docs/deployment.md)。
 
-若要在服务运行时管理能力版本与授权，先按[能力管理指南](docs/capability-management.md)启用管理入口，再使用 `agenstra-manage` 或 `/admin`。管理密钥与普通用户 API key 分开配置。
+若要在服务运行时管理能力版本与授权，先按[能力管理指南](docs/capability-management.md)启用管理入口，再使用 `agenstra-manage` 或 `/admin`。管理密钥与普通用户 API key 分开配置。Web 和 CLI 还支持共享草稿：分步骤填写、分批导入、保存进度，再校验发布。示例见能力管理指南的“分步编辑共享草稿”。
 
 ## 安装与本地运行
 
