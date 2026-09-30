@@ -59,7 +59,7 @@ class HttpJsonDecisionModel:
             content = envelope["choices"][0]["message"]["content"]
             if not isinstance(content, str):
                 raise ValueError("model content must be a JSON string")
-            # Do not repair malformed decisions: the model must cross this typed boundary.
+            # Keep this typed boundary; the runtime may request a fresh decision on failure.
             return DECISION_ADAPTER.validate_json(content)
         except (KeyError, IndexError, TypeError, ValueError, ValidationError) as exc:
             raise ModelDecisionError("model_decision_invalid") from exc

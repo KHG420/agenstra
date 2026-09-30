@@ -10,34 +10,46 @@ from agenstra.contracts import Fact, FactView
 
 def fact_view(fact: Fact, *, max_characters: int = 6_000) -> FactView:
     omitted: list[tuple[str | int, ...]] = []
-    remaining = max_characters
 
-    def visit(value: JsonValue, path: tuple[str | int, ...]) -> JsonValue:
-        nonlocal remaining
-        if remaining <= 0:
+    def encoded_length(value: JsonValue) -> int:
+        return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+
+    def visit(value: JsonValue, path: tuple[str | int, ...], budget: int) -> JsonValue:
+        if budget < 4:
             omitted.append(path)
             return {} if isinstance(value, dict) else [] if isinstance(value, list) else None
-        serialized = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-        if len(serialized) <= remaining:
-            remaining -= len(serialized)
+        if encoded_length(value) <= budget:
             return value
         if isinstance(value, dict):
             result: dict[str, JsonValue] = {}
-            for key, item in value.items():
-                remaining -= len(json.dumps(key, ensure_ascii=False)) + 3
-                if remaining <= 0:
-                    omitted.append(path)
+            remaining = budget - 2
+            for index, (key, item) in enumerate(value.items()):
+                overhead = len(json.dumps(key, ensure_ascii=False)) + 2
+                slots = len(value) - index
+                if remaining < overhead + 4:
                     break
-                result[key] = visit(item, (*path, key))
+                preview = visit(item, (*path, key), max(4, (remaining - overhead) // slots))
+                cost = overhead + encoded_length(preview)
+                if cost > remaining:
+                    break
+                result[key] = preview
+                remaining -= cost
+            if len(result) != len(value):
+                omitted.append(path)
             return result
         if isinstance(value, list):
-            remaining -= 2
-            sample = []
-            for index, item in enumerate(value[:3]):
-                if remaining <= 0:
+            remaining = budget - 2
+            sample: list[JsonValue] = []
+            for index, item in enumerate(value[:32]):
+                slots = min(len(value), 32) - index
+                if remaining < 5:
                     break
-                remaining -= 1
-                sample.append(visit(item, (*path, index)))
+                preview = visit(item, (*path, index), max(4, (remaining - 1) // slots))
+                cost = 1 + encoded_length(preview)
+                if cost > remaining:
+                    break
+                sample.append(preview)
+                remaining -= cost
             if len(sample) != len(value):
                 omitted.append(path)
             return sample
@@ -45,5 +57,5 @@ def fact_view(fact: Fact, *, max_characters: int = 6_000) -> FactView:
         # Do not replace a partial string with an apparently complete quotation.
         return None
 
-    value = cast(dict[str, JsonValue], visit(fact.value, ()))
+    value = cast(dict[str, JsonValue], visit(fact.value, (), max_characters))
     return FactView(**(fact.model_dump() | {"value": value, "omitted_paths": tuple(omitted)}))

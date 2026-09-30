@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -18,6 +19,7 @@ from agenstra.contracts import (
     ContextPacket,
     DecisionModel,
     Fact,
+    FactView,
     FinalDecision,
     InspectCapabilityDecision,
     InspectFactDecision,
@@ -116,6 +118,58 @@ def arguments_digest(call: ToolCall) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def _decision_feedback(error: ValidationError | None) -> str:
+    if error is not None and any(
+        item["type"] == "too_long" and item["loc"] == ("tool_batch", "calls")
+        for item in error.errors(include_input=False)
+    ):
+        return (
+            "Your previous decision was invalid: tool_batch.calls has at most 4 items. "
+            "Return one valid agenstra.decision.v1 JSON decision with no more than 4 calls."
+        )
+    return (
+        "Your previous response was not a valid agenstra.decision.v1 JSON decision. "
+        "Return exactly one valid decision object. Do not put read_skill, "
+        "inspect_capability, or inspect_fact inside tool_batch.calls."
+    )
+
+
+def _stored_value_at(value: JsonValue, path: tuple[str | int, ...]) -> JsonValue | None:
+    for step in path:
+        if isinstance(value, dict) and isinstance(step, str):
+            value = value[step]
+            continue
+        if isinstance(value, list) and type(step) is int:
+            value = value[step]
+            continue
+        return None
+    return value
+
+
+def _array_omission_notes(facts: list[Fact], views: tuple[FactView, ...]) -> list[str]:
+    notes: list[str] = []
+    seen: set[tuple[UUID, tuple[str | int, ...]]] = set()
+    for fact, view in reversed(tuple(zip(facts, views, strict=True))):
+        for omitted_path in view.omitted_paths:
+            selected = _stored_value_at(fact.value, omitted_path)
+            queue = deque([(selected, omitted_path)])
+            while queue:
+                value, path = queue.popleft()
+                if isinstance(value, list) and (fact.fact_id, path) not in seen:
+                    seen.add((fact.fact_id, path))
+                    notes.append(
+                        f"fact {fact.fact_id}: array at {json.dumps(path)} has {len(value)} "
+                        "items; preview incomplete; inspect omitted indices with inspect_fact"
+                    )
+                    if len(notes) >= 12:
+                        return notes
+                if isinstance(value, dict):
+                    queue.extend((item, (*path, key)) for key, item in value.items())
+                elif isinstance(value, list):
+                    queue.extend((item, (*path, index)) for index, item in enumerate(value[:3]))
+    return notes
+
+
 class AgentRuntime:
     def __init__(
         self,
@@ -161,6 +215,14 @@ class AgentRuntime:
             observations.append(item)
         if len(state.model_observations) > 12:
             omissions.append(f"observations: {len(state.model_observations) - 12} older entries")
+        fact_views = tuple(
+            fact_view(fact, max_characters=fact_budget).model_copy(
+                update={"reference_available": reference_available(fact, self.connection_id)}
+            )
+            for fact in state.facts
+        )
+        array_notes = _array_omission_notes(state.facts, fact_views)
+        omissions.extend(array_notes)
         packet = ContextPacket(
             instruction=state.instruction,
             capabilities=tuple(
@@ -170,14 +232,7 @@ class AgentRuntime:
                 }
                 for item in self.pack.capabilities.values()
             ),
-            facts=tuple(
-                fact_view(fact, max_characters=fact_budget).model_copy(
-                    update={
-                        "reference_available": reference_available(fact, self.connection_id),
-                    }
-                )
-                for fact in state.facts
-            ),
+            facts=fact_views,
             observations=tuple(observations),
             round_index=state.rounds_used,
             rounds_remaining=self.max_model_rounds - state.rounds_used,
@@ -200,18 +255,19 @@ class AgentRuntime:
         # Complete results and observations stay in the durable state and artifact store.
         available = self.max_context_characters - len(self.pack.system_prompt())
         if len(packet.model_dump_json()) > available:
+            fallback_views = tuple(
+                fact_view(fact, max_characters=0).model_copy(
+                    update={"reference_available": reference_available(fact, self.connection_id)}
+                )
+                for fact in state.facts
+            )
+            omissions = omissions[: len(omissions) - len(array_notes)]
+            array_notes = _array_omission_notes(state.facts, fallback_views)
+            omissions.extend(array_notes)
             packet = packet.model_copy(
                 update={
-                    "facts": tuple(
-                        fact_view(fact, max_characters=0).model_copy(
-                            update={
-                                "reference_available": reference_available(
-                                    fact, self.connection_id
-                                ),
-                            }
-                        )
-                        for fact in state.facts
-                    )
+                    "facts": fallback_views,
+                    "context_omissions": tuple(omissions),
                 }
             )
         loaded = dict(packet.loaded_skills)
@@ -222,6 +278,9 @@ class AgentRuntime:
             packet = packet.model_copy(
                 update={"loaded_skills": dict(loaded), "context_omissions": tuple(omissions)}
             )
+        while array_notes and len(packet.model_dump_json()) > available:
+            omissions.remove(array_notes.pop())
+            packet = packet.model_copy(update={"context_omissions": tuple(omissions)})
         return packet
 
     @staticmethod
@@ -231,11 +290,13 @@ class AgentRuntime:
         capability: str,
         code: str,
         arguments: dict[str, JsonValue] | None = None,
+        fact_id: UUID | None = None,
     ) -> None:
         observation = Observation(
             call_ref=call_ref,
             capability=capability,
             status="rejected",
+            fact_id=fact_id,
             error_code=code,
             arguments=arguments or {},
         )
@@ -252,25 +313,81 @@ class AgentRuntime:
         if state.rounds_used >= self.max_model_rounds:
             state.status, state.error_code = "failed", "model_round_budget_exhausted"
             return
-        packet = self.context(state)
-        prompt = self.pack.system_prompt()
-        if len(prompt) + len(packet.model_dump_json()) > self.max_context_characters:
-            state.status, state.error_code = "failed", "context_too_large"
-            return
-        # Charge before invoking the model; durable caller saves the resulting state or a failure.
-        state.rounds_used += 1
-        if before_model is not None:
-            await before_model()
-        try:
-            decision = DECISION_ADAPTER.validate_python(
-                await self.model.decide(context=packet, system_prompt=prompt)
-            )
-        except ModelDecisionError as exc:
-            state.status, state.error_code = "failed", exc.code
-            return
-        except ValidationError:
-            state.status, state.error_code = "failed", "model_decision_invalid"
-            return
+        feedback = ""
+        for attempt in range(2):
+            packet = self.context(state)
+            prompt = self.pack.system_prompt() + feedback
+            array_lengths = [
+                item
+                for item in packet.context_omissions
+                if item.startswith("fact ") and "array at" in item
+            ]
+            if array_lengths:
+                length_note = (
+                    "\nAuthoritative full array lengths from stored Facts follow. "
+                    "A preview may show fewer items; inspect omitted indices before claiming "
+                    "coverage:\n" + "\n".join(array_lengths[:4])
+                )
+                if (
+                    len(prompt) + len(packet.model_dump_json()) + len(length_note)
+                    <= self.max_context_characters
+                ):
+                    prompt += length_note
+            if state.model_observations:
+                latest = state.model_observations[-1]
+                if latest.error_code == "repeated_equivalent_call" and latest.fact_id is not None:
+                    prompt += (
+                        "\nYour previous call repeated a completed calculation. "
+                        f"Use existing Fact {latest.fact_id} to answer or inspect its needed path. "
+                        "Do not issue another equivalent tool call."
+                    )
+            if state.inspected_fact is not None:
+                array_length = state.inspected_fact.get("array_length")
+                inspected_preview = state.inspected_fact.get("preview")
+                shown = (
+                    inspected_preview.get("value") if isinstance(inspected_preview, dict) else None
+                )
+                if (
+                    type(array_length) is int
+                    and isinstance(shown, list)
+                    and len(shown) < array_length
+                ):
+                    prompt += (
+                        f"\nThe inspected array has {array_length} items, but its preview shows "
+                        f"only {len(shown)}. Inspect missing indices before reporting "
+                        "full coverage."
+                    )
+                parent_length = state.inspected_fact.get("parent_array_length")
+                inspected_index = state.inspected_fact.get("inspected_index")
+                if type(parent_length) is int and type(inspected_index) is int:
+                    prompt += (
+                        f"\nThe item you inspected at index {inspected_index} belongs to an array "
+                        f"with {parent_length} items. Report the total as {parent_length}; "
+                        "do not use the preview length as the total."
+                    )
+            if len(prompt) + len(packet.model_dump_json()) > self.max_context_characters:
+                state.status, state.error_code = "failed", "context_too_large"
+                return
+            # Charge and checkpoint before every model request, including a repair attempt.
+            state.rounds_used += 1
+            if before_model is not None:
+                await before_model()
+            try:
+                decision = DECISION_ADAPTER.validate_python(
+                    await self.model.decide(context=packet, system_prompt=prompt)
+                )
+                break
+            except ModelDecisionError as exc:
+                if exc.code != "model_decision_invalid":
+                    state.status, state.error_code = "failed", exc.code
+                    return
+                validation = exc.__cause__ if isinstance(exc.__cause__, ValidationError) else None
+            except ValidationError as exc:
+                validation = exc
+            if attempt or state.rounds_used >= self.max_model_rounds:
+                state.status, state.error_code = "failed", "model_decision_invalid"
+                return
+            feedback = "\n" + _decision_feedback(validation)
         state.decisions.append(
             cast(dict[str, JsonValue], decision.model_dump(mode="json", by_alias=True))
         )
@@ -297,6 +414,17 @@ class AgentRuntime:
                     "preview": preview.value,
                     "omitted_paths": [list(path) for path in preview.omitted_paths],
                 }
+                if isinstance(selected, list):
+                    state.inspected_fact["array_length"] = len(selected)
+                for index in range(len(decision.path) - 1, -1, -1):
+                    if type(decision.path[index]) is int:
+                        parent = _stored_value_at(
+                            facts[decision.fact_id].value, decision.path[:index]
+                        )
+                        if isinstance(parent, list):
+                            state.inspected_fact["parent_array_length"] = len(parent)
+                            state.inspected_fact["inspected_index"] = decision.path[index]
+                        break
             except FactReferenceError as exc:
                 state.inspected_fact = {"error_code": str(exc)}
         elif isinstance(decision, InspectCapabilityDecision):
@@ -321,6 +449,16 @@ class AgentRuntime:
             state.input_field, state.input_prompt = decision.field, decision.prompt
         elif isinstance(decision, ToolBatchDecision):
             for call in decision.calls:
+                decision_kind = call.capability.removeprefix("agent.")
+                if decision_kind in {"read_skill", "inspect_capability", "inspect_fact"}:
+                    self.reject(
+                        state,
+                        call.call_ref,
+                        call.capability,
+                        f"use_{decision_kind}_decision",
+                        call.arguments,
+                    )
+                    continue
                 if call.call_ref in state.used_refs:
                     self.reject(
                         state,
@@ -341,6 +479,48 @@ class AgentRuntime:
                     continue
                 resolved = call.model_copy(update={"arguments": arguments})
                 key = arguments_digest(resolved)
+                capability = self.pack.capabilities.get(call.capability)
+                if capability is not None and capability.effect == "compute":
+                    if any(arguments_digest(item.call) == key for item in state.pending):
+                        self.reject(
+                            state,
+                            call.call_ref,
+                            call.capability,
+                            "repeated_equivalent_call",
+                            call.arguments,
+                        )
+                        continue
+                    failed_operations = {
+                        item.call_ref
+                        for item in state.observations
+                        if item.error_code == "operation_failed"
+                    }
+                    prior_fact = next(
+                        (
+                            facts[item.fact_id]
+                            for item in reversed(state.observations)
+                            if item.status == "succeeded"
+                            and item.capability == call.capability
+                            and item.call_ref not in failed_operations
+                            and item.fact_id in facts
+                            and arguments_digest(
+                                resolved.model_copy(update={"arguments": item.arguments})
+                            )
+                            == key
+                            and reference_available(facts[item.fact_id], self.connection_id)
+                        ),
+                        None,
+                    )
+                    if prior_fact is not None:
+                        self.reject(
+                            state,
+                            call.call_ref,
+                            call.capability,
+                            "repeated_equivalent_call",
+                            call.arguments,
+                            prior_fact.fact_id,
+                        )
+                        continue
                 if state.repeated.get(key, 0) >= self.max_repeated_call:
                     self.reject(
                         state,

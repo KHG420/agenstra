@@ -137,6 +137,30 @@ def runtime(run):
 
 
 @pytest.mark.asyncio
+async def test_invalid_model_decision_repair_is_checkpointed_before_each_request(tmp_path):
+    class RepairModel:
+        def __init__(self):
+            self.prompts = []
+
+        async def decide(self, *, context, system_prompt):
+            self.prompts.append(system_prompt)
+            return "invalid" if len(self.prompts) == 1 else FinalDecision(answer_markdown="Done")
+
+    model = RepairModel()
+    host = await make_host(tmp_path, StubProvider(), model)
+    created = await host.create("alice", "sample", "Answer")
+    completed = await host.drive(created.run_id, owner_id="alice")
+    assert completed.status == "completed"
+    assert runtime(completed)["rounds_used"] == 2
+    assert len(runtime(completed)["decisions"]) == 1
+    assert "Return exactly one valid decision object" in model.prompts[1]
+    events = await host.store.list_events(created.run_id, owner_id="alice")
+    assert [
+        item["event"]["round"] for item in events if item["event"]["kind"] == "model_requested"
+    ] == [1, 2]
+
+
+@pytest.mark.asyncio
 async def test_question_survives_restart_and_keeps_facts_and_owner(tmp_path):
     provider = StubProvider()
     model = SequenceModel(call(), RequestInputDecision(field="region", prompt="Which region?"))
@@ -266,6 +290,40 @@ async def test_job_waiting_survives_restart_without_llm_polling(tmp_path):
     assert model.contexts[-1].observations[-1].status == "succeeded"
     assert len(finished.state["artifact_ids"]) == 1
     assert len(await restarted.store.list_events(created.run_id, owner_id="alice")) > 3
+
+
+@pytest.mark.asyncio
+async def test_failed_compute_operation_can_be_submitted_again(tmp_path):
+    binding = OperationBinding(
+        id_path=("job_id",),
+        status_path=("status",),
+        poll_capability="jobs.status",
+        poll_argument=("job_id",),
+    )
+    provider = StubProvider(
+        capabilities={
+            "jobs.create": capability("jobs.create", effect="compute", operation=binding),
+            "jobs.status": capability("jobs.status"),
+        }
+    )
+
+    async def jobs(name, arguments, context):
+        attempt = len(provider.calls)
+        return CapabilityResult(
+            data={"job_id": f"job-{attempt}", "status": "failed" if attempt == 1 else "succeeded"}
+        )
+
+    provider.handler = jobs
+    model = SequenceModel(call("jobs.create", ref="first"), call("jobs.create", ref="retry"), final)
+    host = await make_host(tmp_path, provider, model, policies=Policies("jobs.create"))
+    created = await host.create("alice", "sample", "Retry a definitively failed calculation")
+    completed = await host.drive(created.run_id, owner_id="alice")
+    assert completed.status == "completed"
+    assert [name for name, _, _ in provider.calls] == ["jobs.create", "jobs.create"]
+    assert runtime(completed)["tool_calls_used"] == 2
+    assert any(
+        item["error_code"] == "operation_failed" for item in runtime(completed)["observations"]
+    )
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,7 @@ def main() -> None:
         model=os.environ["AGENT_MODEL"],
         base_url=os.environ["AGENT_MODEL_BASE_URL"],
         api_key=os.environ["AGENT_MODEL_API_KEY"],
+        timeout_seconds=deployment.config.settings.model_timeout_seconds,
     )
     host = AgentHost(
         store=SQLiteStore(deployment.database_path),
