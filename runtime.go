@@ -216,6 +216,20 @@ func factView(f Fact, budget int) FactView {
 				}
 				p := append(append([]any{}, path...), k)
 				preview := visit(t[k], p, max(4, (remaining-overhead)/slots))
+				// Omitted object fields must not look like provider-reported nulls
+				// or empty containers. Keep real null/empty values and array indices.
+				omittedValue := preview == nil && t[k] != nil
+				switch v := preview.(type) {
+				case map[string]any:
+					original, ok := t[k].(map[string]any)
+					omittedValue = ok && len(v) == 0 && len(original) > 0
+				case []any:
+					original, ok := t[k].([]any)
+					omittedValue = ok && len(v) == 0 && len(original) > 0
+				}
+				if omittedValue {
+					continue
+				}
 				enc, _ := CanonicalJSON(preview)
 				cost := overhead + utf8.RuneCount(enc)
 				if cost > remaining {
@@ -265,7 +279,9 @@ func factView(f Fact, budget int) FactView {
 func arrayOmissions(facts []Fact, views []FactView) []string {
 	notes := []string{}
 	seen := map[string]bool{}
+	hasOmissions := false
 	for i := len(facts) - 1; i >= 0; i-- {
+		hasOmissions = hasOmissions || len(views[i].OmittedPaths) > 0
 		for _, path := range views[i].OmittedPaths {
 			selected, err := valueAt(facts[i].Value, path)
 			if err != nil {
@@ -282,7 +298,7 @@ func arrayOmissions(facts []Fact, views []FactView) []string {
 					if !seen[key] {
 						seen[key] = true
 						raw, _ := CanonicalJSON(p)
-						notes = append(notes, fmt.Sprintf("fact %s: array at %s has %d items; preview incomplete; inspect omitted indices with inspect_fact", facts[i].FactID, raw, len(t)))
+						notes = append(notes, fmt.Sprintf("fact %s: array at %s has %d items; omitted null placeholders/empty previews unknown; inspect_fact", facts[i].FactID, raw, len(t)))
 					}
 					for j := 0; j < min(3, len(t)); j++ {
 						walk(t[j], append(append([]any{}, p...), j))
@@ -295,6 +311,9 @@ func arrayOmissions(facts []Fact, views []FactView) []string {
 			}
 			walk(selected, path)
 		}
+	}
+	if hasOmissions && len(notes) == 0 {
+		notes = append(notes, "fact omitted_paths are unknown/incomplete; inspect_fact before asserting null/empty values")
 	}
 	return notes
 }
