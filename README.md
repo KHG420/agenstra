@@ -2,7 +2,7 @@
 
 Language / 语言: [简体中文](README.zh-CN.md) · **English**
 
-Agenstra is a general-purpose agent framework that you can deploy independently. Bring existing REST APIs, selected OpenAPI operations, MCP tools, or custom SDK integrations into the agent as **reviewed capability packs**. The framework handles ReAct decisions, tool-call boundaries, per-user authorization, approvals, result provenance, and resumable long-running tasks. The connected services remain responsible for their own data and computations.
+Agenstra is a general-purpose agent framework written in Go that you can deploy independently. Bring existing REST APIs, selected OpenAPI operations, MCP tools, or custom SDK integrations into the agent as **reviewed capability packs**. The framework handles ReAct decisions, tool-call boundaries, per-user authorization, approvals, result provenance, and resumable long-running tasks. The connected services remain responsible for their own data and computations.
 
 An optional management interface lets administrators validate, publish, activate, and roll back capability packs through a CLI or web page, then configure user connections and grants. Managed releases are fixed by content hash: new runs use the active release, while existing managed runs keep the release they started with. Authorization and connection identity are still checked at execution time.
 
@@ -18,7 +18,7 @@ The current durable host targets **one node with persistent local storage and SQ
 flowchart LR
     U[User or calling app] --> H[AgentHost\nAuthentication, authorization, approval, recovery]
     H --> R[AgentRuntime\nReAct decision loop]
-    R --> B[ToolBroker\nArguments, references, result boundaries]
+    R --> B[ExecuteCall\nArguments, references, result boundaries]
     P[Your capability pack\nContracts, skills, execution properties] --> R
     P --> B
     B --> C[CapabilityProvider\nREST / MCP / custom]
@@ -30,7 +30,7 @@ flowchart LR
 | --- | --- |
 | `AgentRuntime` | Chooses one next action from the task, capability catalog, skills, and observed Facts: call tools, read a skill, inspect a result, ask for input, or answer. There is no fixed domain DAG or separate planning mode. |
 | `AgentHost` | Persists user-scoped runs and pre-call records; manages approvals, leases, timeouts, background-job polling, recovery, and cancellation. |
-| `ToolBroker` | Validates calls and Fact references, then stores verified tool results as Facts with provenance. |
+| `ExecuteCall` | Validates capability calls and grants; the runtime records verified results as Facts with provenance. |
 | `CapabilityProvider` | Presents one interface for capabilities, skills, invocation, and results. REST and MCP connectors are built in; applications can provide their own. |
 | Capability pack | Declares exposed capabilities, input/output contracts, guidance, effects, idempotency, and background-job mappings. The integrator reviews and deploys it. |
 | `CapabilityRegistry` | Optionally stores validated immutable releases, the active release, user connections, and a management audit trail. |
@@ -49,18 +49,28 @@ For a complete REST example, see the [integration tutorial (Chinese)](docs/tutor
 
 ## Quick start
 
-You need Python 3.12+ and [uv](https://docs.astral.sh/uv/). From the repository root:
+You need Go 1.26+. From the repository root:
 
 ```sh
 git clone https://github.com/KHG420/agenstra.git
 cd agenstra
-uv sync --locked --extra server --extra mcp --group dev
+go mod download
+CGO_ENABLED=0 go build -trimpath -o dist/ ./cmd/...
 ```
 
-REST packs only need the `server` extra; MCP packs also need `mcp`. Create your own pack using the integration tutorial and provide the environment variables referenced by its manifest. You can then inspect its catalog without calling an LLM:
+The build produces four standalone commands in `dist/`. SQLite storage and JSON Schema validation use pure Go libraries; the server embeds the management page and its static assets.
+
+| Command | Purpose |
+| --- | --- |
+| `agenstra` | Inspect a capability catalog or execute a local task. |
+| `agenstra-serve` | Serve the HTTP API, durable worker, and optional management interface. |
+| `agenstra-manage` | Validate, publish, and manage capability releases and grants through the management API. |
+| `agenstra-import-openapi` | Create a REST pack draft from selected OpenAPI operations. |
+
+REST and MCP support are included in the Go binaries. Create your own pack using the integration tutorial and provide the environment variables referenced by its manifest. You can then inspect its catalog without calling an LLM:
 
 ```sh
-uv run --locked --extra server agenstra \
+go run ./cmd/agenstra \
   --pack local/packs/records/pack.json --inspect
 ```
 
@@ -74,9 +84,11 @@ uv run --locked --extra server agenstra \
 The default model adapter asks `/chat/completions` for a JSON-object decision using `response_format: {"type":"json_object"}`. The model must actually support this protocol. To use another model interface, implement `DecisionModel`. Once you have created `local/deployment.json`, start the host:
 
 ```sh
-uv run --locked --extra server agenstra-serve \
+go run ./cmd/agenstra-serve \
   --config local/deployment.json
 ```
+
+To use the compiled server, run `./dist/agenstra-serve --config local/deployment.json`. Container build and persistent-storage configuration are covered in the [deployment guide (Chinese)](docs/deployment.md).
 
 The default listener is `127.0.0.1:8091`. `GET /readyz` checks database and worker readiness. `POST /runs` creates a run; the worker executes it and wakes runs that are waiting:
 
@@ -94,9 +106,9 @@ For one user, the same `request_id` and request content return the same run; reu
 Enable `management` in the deployment configuration and set a separate `AGENSTRA_ADMIN_API_KEY` to use `/admin` or the CLI backed by the same management API. These commands require a running host and a capability manifest you created. The CLI defaults to `http://127.0.0.1:8091`:
 
 ```sh
-uv run --locked --extra server agenstra-manage validate local/packs/records/pack.json
-uv run --locked --extra server agenstra-manage publish local/packs/records/pack.json
-uv run --locked --extra server agenstra-manage list
+go run ./cmd/agenstra-manage validate local/packs/records/pack.json
+go run ./cmd/agenstra-manage publish local/packs/records/pack.json
+go run ./cmd/agenstra-manage list
 ```
 
 Publishing neither activates a release nor grants access. Read the full content digest and current revision from `list`, explicitly activate the release, then bind a user connection and capability grants. Activating an older release rolls back new runs; revoking a grant affects existing runs immediately. Connection records contain environment-variable or `secret:NAME` references, not plaintext secret values. Configuration, activation, rollback, connection checks, and backup requirements are documented in the [capability management guide (Chinese)](docs/capability-management.md).
@@ -113,7 +125,7 @@ Publishing neither activates a release nor grants access. Read the full content 
 Example OpenAPI import (replace paths and `operationId` with your own):
 
 ```sh
-uv run --locked agenstra-import-openapi \
+go run ./cmd/agenstra-import-openapi \
   --spec local/openapi.json \
   --out local/packs/records/pack.json \
   --name records \
@@ -134,14 +146,18 @@ The importer **does not** infer approvals, idempotency, or background-job comple
 
 Cancellation stops local orchestration; it does not promise to cancel a job already submitted upstream. SQLite WAL fits the current single-node scope. Use persistent storage and define backup and retention policies.
 
+## Migrating from the Python version
+
+The Go version retains the deployment JSON format, capability manifests, HTTP routes and response formats, and SQLite v1 run schema. Compatibility tests cover reading and continuing runs created by the Python version, including stored Facts, request IDs, and REST contract fingerprints.
+
+Back up the database, stop the Python worker, and start the Go server using the same deployment configuration and persistent database paths. Update launch commands to the Go commands above. Custom Python `CapabilityProvider` and `DecisionModel` implementations need to be ported to the corresponding Go interfaces.
+
 ## Development and validation
 
 ```sh
-uv run --locked --extra server --extra mcp pytest -q
-uv run --locked --extra server --extra mcp ruff check src tests
-uv run --locked --extra server --extra mcp ruff format --check src tests
-uv run --locked --extra server --extra mcp mypy
-uv build --wheel --out-dir dist
+go test -race ./...
+go vet ./...
+go build ./cmd/...
 ```
 
 The tests generate temporary REST/MCP contracts, model doubles, and SQLite databases. They need no domain pack or live external service. Before production use, validate real identities, model decisions, API contracts, long-running tasks, and operating conditions in the target environment. Current trade-offs and pre-launch checks are in the [architecture guide (Chinese)](docs/architecture.md) and [deployment guide (Chinese)](docs/deployment.md).

@@ -6,6 +6,7 @@ __pycache__
 .mypy_cache
 .ruff_cache
 dist
+coverage.out
 var
 deploy/config
 deploy/capability-packs

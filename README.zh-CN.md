@@ -2,7 +2,7 @@
 
 语言 / Language：**简体中文** · [English](README.md)
 
-Agenstra 是一个可独立部署的通用 Agent 框架。将已有的 REST API、OpenAPI 操作、MCP 工具或自定义 SDK 接入为**受审查的能力包**；框架负责 ReAct 决策、工具执行边界、用户授权、审批、结果证据，以及可恢复的长任务。具体计算和数据仍由所连接的服务负责。
+Agenstra 是一个用 Go 实现、可独立部署的通用 Agent 框架。将已有的 REST API、OpenAPI 操作、MCP 工具或自定义 SDK 接入为**受审查的能力包**；框架负责 ReAct 决策、工具执行边界、用户授权、审批、结果证据，以及可恢复的长任务。具体计算和数据仍由所连接的服务负责。
 
 可选的管理入口让管理员通过 CLI 或 Web 页面校验、发布、启用和回滚能力包，并为用户设置连接与授权。托管发布版本按内容哈希固定；新任务使用当前启用版本，已有托管任务继续使用创建时的版本。授权和连接身份仍会实时检查。详见[能力管理指南](docs/capability-management.md)。
 
@@ -18,7 +18,7 @@ Agenstra 是一个可独立部署的通用 Agent 框架。将已有的 REST API�
 flowchart LR
     U[用户或调用方应用] --> H[AgentHost\n认证、授权、审批、恢复]
     H --> R[AgentRuntime\nReAct 决策循环]
-    R --> B[ToolBroker\n参数、引用、结果边界]
+    R --> B[ExecuteCall\n参数、引用、结果边界]
     P[自有能力包\n契约、技能、执行声明] --> R
     P --> B
     B --> C[CapabilityProvider\nREST / MCP / 自定义]
@@ -30,7 +30,7 @@ flowchart LR
 | --- | --- |
 | `AgentRuntime` | 看任务、能力目录、技能和真实观察；一次决定工具调用、读取技能、检查结果、追问或最终回答。没有固定场景 DAG 或预先计划模式。 |
 | `AgentHost` | 按用户保存运行、调用前记录、审批、租约、超时、后台作业轮询、断线恢复及取消。 |
-| `ToolBroker` | 校验调用和 Fact 引用，把已验证的工具结果保存为带来源的 Fact。 |
+| `ExecuteCall` | 校验能力调用与授权；运行内核将已验证的结果保存为带来源的 Fact。 |
 | `CapabilityProvider` | 统一能力、技能、调用和结果接口；内置 REST 与 MCP 连接器，也可实现自定义 Provider。 |
 | 能力包 | 明确暴露哪些能力、输入输出契约、使用说明、执行性质、幂等策略和后台作业状态映射；由接入方审查和部署。 |
 | `CapabilityRegistry` | 保存经过校验的不可变版本、当前启用版本、用户连接与管理审计；可选启用。 |
@@ -51,18 +51,28 @@ flowchart LR
 
 ## 安装与本地运行
 
-需要 Python 3.12+ 和 [uv](https://docs.astral.sh/uv/)。在仓库根目录执行：
+需要 Go 1.26+。在仓库根目录执行：
 
 ```sh
 git clone https://github.com/KHG420/agenstra.git
 cd agenstra
-uv sync --locked --extra server --extra mcp --group dev
+go mod download
+CGO_ENABLED=0 go build -trimpath -o dist/ ./cmd/...
 ```
 
-REST 包只需要 `server` extra；MCP 包另外需要 `mcp` extra。按[接入教程](docs/tutorial.md)创建自己的包，并设置清单引用的环境变量后，`agenstra` 命令可先检查能力目录，不调用 LLM：
+构建后，`dist/` 中包含四个独立命令。SQLite 存储与 JSON Schema 校验使用纯 Go 库；管理页面及其静态资源嵌入服务端二进制。
+
+| 命令 | 用途 |
+| --- | --- |
+| `agenstra` | 检查能力目录或执行本地任务。 |
+| `agenstra-serve` | 提供 HTTP API、持久化 worker 和可选管理入口。 |
+| `agenstra-manage` | 通过管理 API 校验、发布和管理能力版本与授权。 |
+| `agenstra-import-openapi` | 将指定 OpenAPI 操作导入为 REST 能力包草稿。 |
+
+REST 与 MCP 支持均包含在 Go 二进制中。按[接入教程](docs/tutorial.md)创建自己的包，并设置清单引用的环境变量后，`agenstra` 命令可先检查能力目录，不调用 LLM：
 
 ```sh
-uv run --locked --extra server agenstra \
+go run ./cmd/agenstra \
   --pack local/packs/records/pack.json --inspect
 ```
 
@@ -76,9 +86,11 @@ uv run --locked --extra server agenstra \
 默认模型适配器要求 `/chat/completions` 返回 JSON 字符串决策，使用 `response_format: {"type":"json_object"}`。模型必须实际支持这一协议；其他模型可实现 `DecisionModel` 接口接入。准备好自己的 `local/deployment.json` 后启动：
 
 ```sh
-uv run --locked --extra server agenstra-serve \
+go run ./cmd/agenstra-serve \
   --config local/deployment.json
 ```
+
+使用已编译服务时，执行 `./dist/agenstra-serve --config local/deployment.json`。容器构建与持久存储配置见[部署与运维](docs/deployment.md)。
 
 默认监听 `127.0.0.1:8091`。`GET /readyz` 检查数据库和后台 worker 是否就绪。`POST /runs` 只创建任务；worker 自动执行并唤醒等待中的任务。
 
@@ -96,9 +108,9 @@ curl -sS http://127.0.0.1:8091/runs \
 在部署配置中启用 `management` 并设置独立的 `AGENSTRA_ADMIN_API_KEY` 后，可访问 `/admin`，或使用同一管理 API 的 CLI。以下命令要求服务已启动，能力包清单已创建；CLI 默认连接 `http://127.0.0.1:8091`：
 
 ```sh
-uv run --locked --extra server agenstra-manage validate local/packs/records/pack.json
-uv run --locked --extra server agenstra-manage publish local/packs/records/pack.json
-uv run --locked --extra server agenstra-manage list
+go run ./cmd/agenstra-manage validate local/packs/records/pack.json
+go run ./cmd/agenstra-manage publish local/packs/records/pack.json
+go run ./cmd/agenstra-manage list
 ```
 
 发布不会自动启用或授权。从 `list` 结果读取完整内容哈希和当前修订版本，明确启用后，再为用户绑定连接与能力授权；启用旧版本即回滚。新版本只影响新任务，撤销授权则会立即影响已有任务。连接记录保存环境变量或 `secret:NAME` 引用，不保存明文密钥。配置示例、启用与回滚命令、连接检查及备份要求见[能力管理指南](docs/capability-management.md)。
@@ -115,7 +127,7 @@ uv run --locked --extra server agenstra-manage list
 OpenAPI 导入命令示意（把路径和 operationId 换成自己的）：
 
 ```sh
-uv run --locked agenstra-import-openapi \
+go run ./cmd/agenstra-import-openapi \
   --spec local/openapi.json \
   --out local/packs/records/pack.json \
   --name records \
@@ -136,14 +148,18 @@ uv run --locked agenstra-import-openapi \
 
 取消只停止本地编排，不承诺撤销已提交到外部系统的作业。SQLite WAL 适合当前单节点范围；请使用持久磁盘并制定备份与数据保留策略。
 
+## 从 Python 版本切换
+
+Go 版本保留部署 JSON 格式、能力包清单、HTTP 路由与响应格式，以及 SQLite v1 运行数据库结构。兼容性测试覆盖读取并继续执行 Python 版本创建的运行，包括已保存的 Fact、请求 ID 和 REST 契约指纹。
+
+先备份数据库并停止 Python worker，再使用相同部署配置与持久数据库路径启动 Go 服务；启动命令改为上面的 Go 命令。自定义 Python `CapabilityProvider` 和 `DecisionModel` 实现需要移植到对应的 Go 接口。
+
 ## 开发验证
 
 ```sh
-uv run --locked --extra server --extra mcp pytest -q
-uv run --locked --extra server --extra mcp ruff check src tests
-uv run --locked --extra server --extra mcp ruff format --check src tests
-uv run --locked --extra server --extra mcp mypy
-uv build --wheel --out-dir dist
+go test -race ./...
+go vet ./...
+go build ./cmd/...
 ```
 
 测试使用临时生成的 REST/MCP 契约、模型替身和 SQLite；不需要场景能力包或真实外部服务。发布前仍应在目标环境验收真实身份、模型决策、接口契约、长任务以及运维条件。当前实现的取舍和上线前检查见[架构说明](docs/architecture.md)与[部署与运维](docs/deployment.md)。

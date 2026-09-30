@@ -1,0 +1,62 @@
+{
+  "schema": "agenstra.rest-pack.v2",
+  "name": "records",
+  "version": "1.0.0",
+  "guidance": "Use reviewed record data.",
+  "base_url_env": "RECORDS_URL",
+  "capabilities": [
+    {
+      "name": "records.get",
+      "description": "Read a record",
+      "method": "GET",
+      "path": "/records/{record_id}",
+      "effect": "read",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "object",
+            "properties": {
+              "record_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "record_id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "operation": {
+        "id_path": [
+          "id"
+        ],
+        "status_path": [
+          "status"
+        ],
+        "poll_capability": "records.get",
+        "poll_argument": [
+          "path",
+          "record_id"
+        ]
+      }
+    }
+  ]
+}

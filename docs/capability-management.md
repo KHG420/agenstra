@@ -27,7 +27,7 @@ Agenstra 的管理入口用于把已有 REST、OpenAPI、MCP 或 SDK 能力接�
 
 ```sh
 export AGENSTRA_ADMIN_API_KEY='通过密钥管理器注入的独立随机密钥'
-uv run --locked --extra server --extra mcp agenstra-serve --config local/deployment.json
+go run ./cmd/agenstra-serve --config local/deployment.json
 ```
 
 容器部署时，把管理数据库和 `package_dir` 放在 `/data` 持久卷中。若使用 `secret_dir`，由部署方将专用目录以只读方式挂载到容器；不要把真实密钥文件提交进仓库或能力包。目录内每个文件以大写变量名命名，例如 `RECORDS_API_TOKEN`。连接可以引用 `secret:RECORDS_API_TOKEN`；Agenstra 在每次建立连接时读取当前文件内容，因此预先配置好目录后，增添密钥文件无需重启服务。修改该文件的端点值可能改变连接指纹，已有任务会要求核对；轮换同一端点的 token 值不会写入指纹。
@@ -37,7 +37,7 @@ uv run --locked --extra server --extra mcp agenstra-serve --config local/deploym
 已有 OpenAPI 3.0/3.1 JSON 时，只选取需要的操作：
 
 ```sh
-uv run --locked agenstra-import-openapi \
+go run ./cmd/agenstra-import-openapi \
   --spec local/openapi.json \
   --out local/packs/records/pack.json \
   --name records \
@@ -55,9 +55,9 @@ Web 页面的“从 OpenAPI 生成草稿”也提供选取操作的界面；生�
 `agenstra-manage` 和 Web 页面使用同一管理 API。CLI 从 `AGENSTRA_ADMIN_API_KEY` 读取密钥；也可用 `--admin-key-env` 指定另一个环境变量名。
 
 ```sh
-uv run --locked --extra server agenstra-manage validate local/packs/records/pack.json
-uv run --locked --extra server agenstra-manage publish local/packs/records/pack.json
-uv run --locked --extra server agenstra-manage list
+go run ./cmd/agenstra-manage validate local/packs/records/pack.json
+go run ./cmd/agenstra-manage publish local/packs/records/pack.json
+go run ./cmd/agenstra-manage list
 ```
 
 `validate` 会检查清单、JSON Schema、技能哈希等，但不调用外部业务操作。发布按清单和技能内容生成 SHA-256 版本 ID。同一 `pack_id` 与版本号只能对应一份内容；重复发布相同内容是幂等操作。发布后**不会自动启用，也不会自动授权**。
@@ -65,7 +65,7 @@ uv run --locked --extra server agenstra-manage list
 从 `list` 输出读取完整 `digest` 和当前 `revision`，再启用：
 
 ```sh
-uv run --locked --extra server agenstra-manage activate records <digest> --revision 0
+go run ./cmd/agenstra-manage activate records <digest> --revision 0
 ```
 
 `--revision` 防止两位管理员相互覆盖；首次启用为 `0`，每次切换递增。启用旧版本就是回滚。启用只改变**新任务**所用版本，已经创建的任务继续使用自己保存的版本。已发布版本不会由管理 API 删除，以保证旧任务可以恢复。
@@ -89,15 +89,15 @@ uv run --locked --extra server agenstra-manage activate records <digest> --revis
 左边是清单所需的变量名，右边是部署进程已有的环境变量名或专用密钥目录中的 `secret:NAME`。管理 API 会检查引用当前可读取，且授权能力存在于启用版本中。能力本身声明 `approval_required` 时，即使这里未列出，也仍需逐次审批。
 
 ```sh
-uv run --locked --extra server agenstra-manage bind operator records local/records-connection.json
-uv run --locked --extra server agenstra-manage check operator records
-uv run --locked --extra server agenstra-manage audit
+go run ./cmd/agenstra-manage bind operator records local/records-connection.json
+go run ./cmd/agenstra-manage check operator records
+go run ./cmd/agenstra-manage audit
 ```
 
 `check` 建立连接并读取实际能力目录，不发起业务工具调用；对 MCP 会进行握手和契约哈希校验。停用连接会立即撤销运行访问，包括已有任务：
 
 ```sh
-uv run --locked --extra server agenstra-manage disable operator records
+go run ./cmd/agenstra-manage disable operator records
 ```
 
 Web 页面可完成相同流程：发布版本、启用或回滚、选择用户、填写变量映射与授权、检查连接、查看最近变更。页面中的管理员密钥只放在当前标签页的内存里，刷新后需重新输入；请勿在没有 HTTPS 的远程地址打开管理页面。

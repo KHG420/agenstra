@@ -23,8 +23,8 @@ deploy/capability-packs/           你自己的能力包与技能；Git 忽略
 按[教程](tutorial.md)创建忽略提交的 `local/packs/records/pack.json` 与 `local/deployment.json`，在环境中提供模型变量、用户 API key 和外部 API 凭据，然后：
 
 ```sh
-uv sync --locked --extra server --extra mcp
-uv run --locked --extra server agenstra-serve \
+go mod download
+go run ./cmd/agenstra-serve \
   --config local/deployment.json
 ```
 
@@ -51,7 +51,9 @@ docker compose -f deploy/compose.yaml ps
 curl -sS http://127.0.0.1:8091/readyz
 ```
 
-Compose 默认把服务只映射到宿主机 `127.0.0.1:8091`，使用 `agent_data` 持久卷保存 `/data/agent.sqlite3`，并运行一个 Agent 服务实例。`deploy/Dockerfile` 安装锁定依赖，默认以非 root 用户运行。生产环境可改用受控的持久卷、密钥注入和入口网关，但保持单节点 SQLite 拓扑；不要仅通过增加 Compose 副本数来宣称高可用。
+如果构建环境无法稳定访问默认的 Go 模块代理，可先运行 `docker compose -f deploy/compose.yaml build --build-arg GOPROXY=https://goproxy.cn`，再用 `docker compose -f deploy/compose.yaml up -d --no-build` 启动。模块版本仍由 `go.mod` 和 `go.sum` 固定。
+
+Compose 默认把服务只映射到宿主机 `127.0.0.1:8091`，使用 `agent_data` 持久卷保存 `/data/agent.sqlite3`，并运行一个 Agent 服务实例。`deploy/Dockerfile` 构建静态 Go 服务，默认以非 root 用户运行。生产环境可改用受控的持久卷、密钥注入和入口网关，但保持单节点 SQLite 拓扑；不要仅通过增加 Compose 副本数来宣称高可用。
 
 ## 4. HTTP 运行接口
 
@@ -120,6 +122,6 @@ curl -sS -X POST "http://127.0.0.1:8091/runs/$RUN_ID/approval" \
 
 ## 6. 从早期版本升级
 
-v0.5 增加可选的能力管理注册表、CLI 和 Web 页面。现有静态能力包配置保持可用；启用注册表后，新任务固定启用版本，管理 API 不提供删除发布版本的操作。v0.4 曾将发行包、Python 导入路径、命令和 schema 前缀统一改为 `agenstra`；v0.3 及更早版本清单仍需更新后重新审查。未完成运行没有自动跨版本迁移机制，升级前请备份并核对旧运行。
+Go 版本继续使用 v1 SQLite 表结构、现有部署 JSON 和静态能力包配置；仓库测试包含从旧数据库恢复运行的样例。升级前备份运行数据库以及管理注册表和发布目录，并在目标环境验证未完成运行。启用管理注册表后，新任务固定启用版本；管理 API 不提供删除发布版本的操作。v0.3 及更早版本清单仍需更新后重新审查，未完成运行没有自动跨版本迁移机制。
 
 框架测试、格式与类型检查命令见[中文版 README](../README.zh-CN.md)。

@@ -6,6 +6,7 @@
 __pycache__/
 *.pyc
 dist/
+coverage.out
 var/
 *.sqlite3*
 *.db

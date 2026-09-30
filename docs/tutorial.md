@@ -6,10 +6,10 @@
 
 ## 1. 安装框架并确认接口契约
 
-需要 Python 3.12+、uv，以及一个能返回 JSON 决策的模型网关：
+需要 Go 1.26+，以及一个能返回 JSON 决策的模型网关：
 
 ```sh
-uv sync --locked --extra server --extra mcp --group dev
+go mod download
 ```
 
 先写下真实 API 的最小契约。例如：
@@ -93,23 +93,13 @@ MD
 清单要固定该文件的 SHA-256。下面的命令把技能声明写入刚创建的本地包：
 
 ```sh
-uv run --locked python - <<'PY'
-import hashlib
-import json
-from pathlib import Path
+shasum -a 256 local/packs/records/skills/record-rules/SKILL.md
+```
 
-pack_path = Path("local/packs/records/pack.json")
-skill_path = Path("local/packs/records/skills/record-rules/SKILL.md")
-document = json.loads(pack_path.read_text(encoding="utf-8"))
-document["skills"] = [{
-    "name": "record-rules",
-    "description": "How to interpret the record status",
-    "path": "skills/record-rules/SKILL.md",
-    "sha256": hashlib.sha256(skill_path.read_bytes()).hexdigest(),
-}]
-document["capabilities"][0]["skills"] = ["record-rules"]
-pack_path.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-PY
+将输出的 64 位哈希填入 `local/packs/records/pack.json` 的 `skills` 条目，并在相应能力的 `skills` 数组中填入 `record-rules`：
+
+```json
+"skills": [{"name": "record-rules", "description": "How to interpret the record status", "path": "skills/record-rules/SKILL.md", "sha256": "<上一步的哈希>"}]
 ```
 
 改变技能内容后要重新审查并更新哈希。已有运行保存了包指纹；不要在运行恢复的中途替换包内容或连接端点。
@@ -159,14 +149,14 @@ export AGENT_MODEL_API_KEY='replace-with-real-model-key'
 模型适配器向 `${AGENT_MODEL_BASE_URL}/chat/completions` 发请求，并要求模型返回 `agenstra.decision.v1` 的 JSON 对象。启动前先检查包能被加载，且目录只暴露选定的能力：
 
 ```sh
-uv run --locked --extra server agenstra \
+go run ./cmd/agenstra \
   --pack local/packs/records/pack.json --inspect
 ```
 
 随后启动服务：
 
 ```sh
-uv run --locked --extra server agenstra-serve \
+go run ./cmd/agenstra-serve \
   --config local/deployment.json
 ```
 
@@ -187,7 +177,7 @@ curl -sS http://127.0.0.1:8091/runs \
 已有 OpenAPI 3.0/3.1 **JSON** 文档时，可以省掉大量手写 schema 工作。把文档留在 `local/`，只选实际要开放的 operationId：
 
 ```sh
-uv run --locked agenstra-import-openapi \
+go run ./cmd/agenstra-import-openapi \
   --spec local/openapi.json \
   --out local/packs/records/pack.json \
   --name records \
@@ -255,8 +245,8 @@ uv run --locked agenstra-import-openapi \
 
 ## 7. MCP 或自定义 SDK
 
-已有 MCP 服务时，用 `agenstra.mcp-pack.v1` 清单声明 stdio 或 streamable HTTP 连接，只暴露审查过的工具。对每个工具保存 `contract_sha256`；它覆盖完整工具契约，而不是只覆盖工具名。`src/agenstra/mcp.py` 的 `contract_digest` 可对 MCP SDK 的 `types.Tool` 计算值，`tests/test_mcp_pack.py` 展示了一个完全临时的工具目录和契约漂移检查。MCP 连接所需 URL、token 或 stdio 环境变量仍由部署配置绑定，不能写明文到包中。
+已有 MCP 服务时，用 `agenstra.mcp-pack.v1` 清单声明 stdio 或 streamable HTTP 连接，只暴露审查过的工具。对每个工具保存 `contract_sha256`；它覆盖完整工具契约，而不是只覆盖工具名。`mcp.go` 的 `MCPContractDigest` 接受工具契约的 JSON 映射并计算哈希。MCP 连接所需 URL、token 或 stdio 环境变量仍由部署配置绑定，不能写明文到包中。
 
-特殊 SDK 可实现 `CapabilityProvider`：提供 `capabilities`、`skills`、`system_prompt()`、`invoke(name, arguments, context=...)`，由调用方应用构造按用户隔离的 `provider_factory` 传给 `AgentHost`。Provider 负责对输入和返回做验证，返回结构化 `CapabilityResult` 或安全错误码；不要让原始异常、密钥或不可信响应正文进入模型或审计文本。具体协议类型见 [`providers.py`](../src/agenstra/providers.py)，持久 Host 接入见 [`host.py`](../src/agenstra/host.py)。
+特殊 SDK 可实现 `CapabilityProvider`：提供 `Capabilities()`、`Skills()`、`SystemPrompt()`、`Invoke(ctx, name, arguments, invocationContext)` 和 `Close()`，由调用方应用构造按用户隔离的 `ProviderFactory` 传给 `AgentHost`。Provider 负责对输入和返回做验证，返回结构化 `CapabilityResult` 或安全错误码；不要让原始异常、密钥或不可信响应正文进入模型或审计文本。具体协议类型见 [`providers.go`](../providers.go)，持久 Host 接入见 [`host.go`](../host.go)。
 
 完成接入后，用真实 API 和模型验证授权、结果字段、错误情况、数据是否允许送模型、提交幂等、等待恢复与最终回答；自动化测试只能证明框架边界，不能代替具体场景验收。
