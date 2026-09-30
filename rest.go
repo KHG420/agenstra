@@ -81,8 +81,21 @@ func validateLocalSchema(schema JSON, strictREST bool) (*jsonschema.Schema, erro
 						return fmt.Errorf("REST schemas do not support %s", k)
 					}
 				}
-				if err := walk(y); err != nil {
-					return err
+				// Inspect schema positions, preserving ordinary property names and
+				// literal JSON in enum/default/examples as provider data.
+				switch k {
+				case "properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies":
+					if schemas, ok := y.(map[string]any); ok {
+						for _, schema := range schemas {
+							if err := walk(schema); err != nil {
+								return err
+							}
+						}
+					}
+				case "allOf", "anyOf", "oneOf", "prefixItems", "items", "additionalItems", "additionalProperties", "unevaluatedProperties", "unevaluatedItems", "propertyNames", "contains", "not", "if", "then", "else", "contentSchema":
+					if err := walk(y); err != nil {
+						return err
+					}
 				}
 			}
 		case []any:

@@ -142,14 +142,51 @@ func convertOpenAPISchema(doc JSON, source JSON) (JSON, error) {
 			}
 			result := JSON{}
 			for k, y := range x {
-				if k == "nullable" {
+				if k == "nullable" && strings.HasPrefix(version, "3.0.") {
 					continue
 				}
-				c, e := convert(y)
-				if e != nil {
-					return nil, e
+				// Property names and literal enum/default/example data are not schemas.
+				switch k {
+				case "properties", "patternProperties", "$defs", "dependentSchemas":
+					if schemas, ok := y.(map[string]any); ok {
+						converted := JSON{}
+						for name, schema := range schemas {
+							c, e := convert(schema)
+							if e != nil {
+								return nil, e
+							}
+							converted[name] = c
+						}
+						result[k] = converted
+						continue
+					}
+				case "allOf", "anyOf", "oneOf", "prefixItems", "items", "additionalProperties", "unevaluatedProperties", "unevaluatedItems", "propertyNames", "contains", "not", "if", "then", "else", "contentSchema":
+					c, e := convert(y)
+					if e != nil {
+						return nil, e
+					}
+					result[k] = c
+					continue
 				}
-				result[k] = c
+				result[k] = y
+			}
+			if strings.HasPrefix(version, "3.0.") {
+				for _, bound := range []struct{ exclusive, inclusive string }{
+					{"exclusiveMinimum", "minimum"}, {"exclusiveMaximum", "maximum"},
+				} {
+					if enabled, ok := result[bound.exclusive].(bool); ok {
+						delete(result, bound.exclusive)
+						if enabled {
+							switch result[bound.inclusive].(type) {
+							case json.Number, float32, float64, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+								result[bound.exclusive] = result[bound.inclusive]
+								delete(result, bound.inclusive)
+							default:
+								return nil, fmt.Errorf("%s=true requires numeric %s", bound.exclusive, bound.inclusive)
+							}
+						}
+					}
+				}
 			}
 			if strings.HasPrefix(version, "3.0.") && x["nullable"] == true {
 				return JSON{"anyOf": []any{result, JSON{"type": "null"}}}, nil
