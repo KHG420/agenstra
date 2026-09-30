@@ -110,3 +110,67 @@ Web 页面可完成相同流程：发布版本、启用或回滚、选择用户�
 - REST 能力在发布时做离线契约校验。MCP 包发布时校验清单与技能，`check` 或实际连接时验证远端工具契约；自定义 SDK 的部署和升级由调用方应用负责。
 - 注册表使用单节点 SQLite WAL。备份和恢复应同时覆盖运行数据库、管理数据库和完整 `package_dir`，并保存外部密钥管理器的配置。不要只备份其中一个文件。
 - 管理页面不提供模型质量、外部计算正确性或写操作幂等性的保证。发布前用目标服务测试代表性任务、审批拒绝和异常恢复。
+
+## 6. 分步编辑共享草稿
+
+管理入口现在支持可保存的 REST v2 / MCP v1 草稿。草稿存放在管理数据库的 `drafts` 表中，Web 和 CLI 读取同一份内容；草稿可以不完整，保存不需要连接外部服务或模型。正式版本仍经过现有完整校验并按内容哈希固定，编辑草稿不会影响已发布版本或已有运行。
+
+Web 的“草稿编辑”按六步组织：基本信息、服务连接、能力与契约、执行规则、使用说明、检查与发布。可随时保存，重新连接管理服务后从列表继续。每项能力单独编辑，技能正文保存时计算 SHA-256。输入输出 Schema、响应映射和长任务 `operation` 等复杂规则保留 JSON 编辑入口。完整清单也可以在最后一步查看或编辑。
+
+分批导入只合并能力和技能，保留草稿的名称、版本、总体原则和连接配置。OpenAPI 导入使用草稿已有的 REST 连接声明，只追加所选 operationId。导入默认 `error`：任一同名项冲突时整批不保存；`keep` 保留已有同名项并追加新项；`replace` 替换同名项并保留其他项。替换会使用导入项的整份契约，请先审查导入预览。Web 导入前会先保存当前表单，导入失败也不会丢掉这些修改。
+
+CLI 示例（服务和管理密钥配置同前文）：
+
+```sh
+# 创建草稿；不要求一次填完。MCP 可加 --type mcp。
+go run ./cmd/agenstra-manage draft create records-work --name records --version 1.0.0
+
+# 只改一个配置部分；JSON 文件可只包含该部分的待更新字段。
+go run ./cmd/agenstra-manage draft set records-work basic local/basic.json
+go run ./cmd/agenstra-manage draft set records-work connection local/connection.json
+
+# 添加单项能力或一批能力：文件内容是一个能力对象或对象数组。
+go run ./cmd/agenstra-manage draft add records-work local/read-capability.json
+
+# 增量修改一项已有能力：只提供要修改的字段，其余字段保留。
+go run ./cmd/agenstra-manage draft update records-work records.get local/execution-rules.json
+
+# 分批导入完整包中的能力/技能，或选中的 OpenAPI 操作。
+go run ./cmd/agenstra-manage draft import records-work local/packs/records/pack.json --conflict keep
+go run ./cmd/agenstra-manage draft openapi records-work local/openapi.json --operation records.get --operation records.list --conflict error
+
+# 添加技能，自动计算哈希；需要在能力的 skills 数组中关联名称。
+go run ./cmd/agenstra-manage draft skill records-work record-rules local/SKILL.md --description '记录状态解释'
+
+# 查看、校验、移除以及直接通过 EDITOR 编辑完整清单。
+go run ./cmd/agenstra-manage draft list
+go run ./cmd/agenstra-manage draft show records-work
+go run ./cmd/agenstra-manage draft validate records-work
+go run ./cmd/agenstra-manage draft remove records-work capability records.list
+EDITOR=vi go run ./cmd/agenstra-manage draft edit records-work
+
+# 导出为一个新目录，包含 pack.json 和技能文件；拒绝覆盖已有目录。
+go run ./cmd/agenstra-manage draft export records-work local/records-export
+
+# 完整校验通过后发布；仍需另外 activate 和 bind。
+go run ./cmd/agenstra-manage draft publish records-work
+```
+
+其中 `basic.json` 可为 `{"guidance":"仅使用真实记录数据，不推测缺失字段。"}`；REST 的 `connection.json` 可为 `{"base_url_env":"RECORDS_API_URL","token_env":"RECORDS_API_TOKEN"}`；`execution-rules.json` 可为 `{"approval_required":true}`。`set` / `update` 中的 `null` 删除相应可选字段。MCP 的连接片段使用 `source` 对象，例如 `{"source":{"transport":"streamable_http","url_env":"MCP_URL"}}`。MCP 工具清单固定远端契约哈希，连接时仍要求输入输出 Schema 和契约匹配。
+
+Web 导出的是包含 `manifest` 与 `skills` 正文的 JSON 文件，可从 Web 的清单合并入口导回；CLI 导出的是标准文件目录，可直接用于文件式部署和原有发布命令。
+
+草稿的每次保存都会增加 `revision`。Web 保存和 CLI 的读取后更新都提交读取时的修订号；若另一处先保存，返回 HTTP 409，不覆盖其修改。CLI `edit` 也使用打开编辑器前的修订号；解析或保存失败时保留编辑后的临时文件并输出路径，便于核对和恢复。Web 会保留发生冲突时的本地编辑，可先导出，再重新读取并合并。CLI 片段文件保留在本地，重新查看后可重试；不要未经核对覆盖其他管理员的内容。
+
+草稿 API（均要求管理员密钥）：
+
+| 请求 | 行为 |
+| --- | --- |
+| `GET /admin/api/drafts` | 列出草稿摘要。 |
+| `GET /admin/api/drafts/{id}` | 读取清单、技能正文、修订号和待完成问题。 |
+| `PUT /admin/api/drafts/{id}` | 创建或保存完整草稿；请求包含 `expected_revision`、`manifest`、`skills`。创建用修订号 `0`。 |
+| `PATCH /admin/api/drafts/{id}` | 修改一个部分或导入一批内容；必须提供 `expected_revision`。 |
+| `POST /admin/api/drafts/{id}/validate` | 校验指定修订的草稿，返回按步骤定位的 `issues`；有问题仍允许保存。 |
+| `POST /admin/api/drafts/{id}/publish` | 发布指定修订，完整校验失败返回 422 与 `issues`；发布成功不启用、不授权。 |
+
+`PATCH` 的 `section` 支持 `basic`、`connection`（通过 `value` 对象更新字段），`capabilities`、`skills`（通过 `items` 数组和 `conflict` 合并，技能正文放在 `skills` 对象中），`import`（`value` 为同类型清单），`openapi`（`value` 含 `spec`、`operations` 和可选 `effects`），以及 `remove_capability` / `remove_skill`（通过 `name` 指定）。导入和合并在一次修订更新中完成。备份管理数据库时也会备份草稿；仍需同时备份运行数据库、发布目录和密钥管理配置。

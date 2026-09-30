@@ -4,6 +4,12 @@
   const state = { token: "", overview: null, openapiSpec: null };
   const $ = (id) => document.getElementById(id);
   const messages = {
+    draft_not_found: "草稿不存在，请刷新草稿列表。",
+    draft_revision_conflict: "草稿已在其他页面或 CLI 更新。当前修改仍在页面中；请导出后重新读取并合并。",
+    draft_item_conflict: "存在同名能力或技能。请检查导入预览，并明确选择保留或替换。",
+    draft_incomplete: "草稿尚未完整，请根据检查结果补齐后发布。",
+    invalid_draft_field: "这个字段不属于所选配置步骤。",
+    unsupported_pack_schema: "请选择与草稿类型一致的 REST v2 或 MCP v1 清单。",
     admin_unauthorized: "管理员密钥无效。请检查密钥后重新连接。",
     invalid_capability_pack: "能力包契约未通过校验，请检查清单和技能文件。",
     skill_files_mismatch: "技能文件与清单列出的路径不一致。",
@@ -45,7 +51,7 @@
         $("connection-state").classList.remove("connected");
       }
       const code = data.detail?.code || data.code || `HTTP ${response.status}`;
-      throw new Error(messages[code] || `操作失败：${code}`);
+      throw new Error(messages[code] || data.detail?.message || `操作失败：${code}`);
     }
     return data;
   }
@@ -193,7 +199,7 @@
       empty(list, "发布和授权操作会显示在这里。");
       return;
     }
-    const labels = { publish: "发布版本", activate: "启用版本", bind: "保存连接", disable_binding: "停用连接" };
+    const labels = { publish: "发布版本", activate: "启用版本", bind: "保存连接", disable_binding: "停用连接", save_draft: "保存草稿" };
     for (const event of state.overview.audit) {
       const row = document.createElement("div");
       row.className = "audit-row";
@@ -223,29 +229,9 @@
     renderReleases();
     renderBindings();
     renderAudit();
+    await drafts.refreshList();
     $("connection-state").textContent = "已连接";
     $("connection-state").classList.add("connected");
-  }
-
-  async function packageBody() {
-    let manifest;
-    try { manifest = JSON.parse($("manifest-editor").value); }
-    catch { throw new Error("能力包清单不是有效的 JSON。"); }
-    const skills = {};
-    for (const entry of manifest.skills || []) {
-      const matches = [...$("skill-files").files].filter((candidate) => {
-        const relative = candidate.webkitRelativePath || candidate.name;
-        return relative === entry.path || relative.endsWith(`/${entry.path}`);
-      });
-      if (matches.length !== 1) throw new Error(`请选择清单中对应的技能文件：${entry.path}`);
-      skills[entry.path] = await matches[0].text();
-    }
-    return {
-      pack_id: $("pack-id").value.trim(),
-      version: $("pack-version").value.trim(),
-      manifest,
-      skills,
-    };
   }
 
   function names(value) {
@@ -268,95 +254,6 @@
   $("refresh").addEventListener("click", async () => {
     try { await refresh(); feedback("目录已刷新。", "success"); }
     catch (error) { feedback(error.message, "error"); }
-  });
-
-  $("manifest-file").addEventListener("change", async () => {
-    const file = $("manifest-file").files[0];
-    if (!file) return;
-    try {
-      const manifest = JSON.parse(await file.text());
-      $("manifest-editor").value = JSON.stringify(manifest, null, 2);
-      $("pack-id").value = manifest.name || "";
-      $("pack-version").value = manifest.version || "";
-      feedback("清单已读取。校验后再发布。", "info", "publish-feedback");
-    } catch { feedback("清单不是有效的 JSON。", "error", "publish-feedback"); }
-  });
-
-  $("openapi-file").addEventListener("change", async () => {
-    const file = $("openapi-file").files[0];
-    if (!file) return;
-    try {
-      state.openapiSpec = JSON.parse(await file.text());
-      const operations = $("openapi-operations");
-      operations.replaceChildren();
-      let count = 0;
-      for (const [path, methods] of Object.entries(state.openapiSpec.paths || {})) {
-        for (const [method, operation] of Object.entries(methods)) {
-          if (!operation?.operationId || !["get", "post", "put", "patch", "delete"].includes(method)) continue;
-          const label = document.createElement("label");
-          label.className = "operation-item";
-          const checkbox = document.createElement("input");
-          checkbox.type = "checkbox";
-          checkbox.value = operation.operationId;
-          const name = document.createElement("span");
-          name.textContent = `${operation.operationId} · ${method.toUpperCase()} ${path}`;
-          label.append(checkbox, name);
-          operations.append(label);
-          count += 1;
-        }
-      }
-      if (!count) empty(operations, "文档中没有带 operationId 的受支持操作。");
-      feedback(`已发现 ${count} 个操作，请选择要暴露给 Agent 的能力。`, "info", "publish-feedback");
-    } catch {
-      state.openapiSpec = null;
-      feedback("OpenAPI 文档不是有效的 JSON。", "error", "publish-feedback");
-    }
-  });
-
-  $("generate-draft").addEventListener("click", async () => {
-    if (!state.openapiSpec) { feedback("请先选择 OpenAPI 文档。", "error", "publish-feedback"); return; }
-    const operations = [...$("openapi-operations").querySelectorAll("input:checked")].map((item) => item.value);
-    if (!operations.length) { feedback("请至少选择一个操作。", "error", "publish-feedback"); return; }
-    try {
-      const manifest = await api("/admin/api/openapi-draft", {
-        method: "POST",
-        body: {
-          spec: state.openapiSpec,
-          name: $("openapi-name").value.trim(),
-          base_url_env: $("openapi-url-env").value.trim(),
-          token_env: $("openapi-token-env").value.trim() || null,
-          operations,
-        },
-      });
-      $("manifest-editor").value = JSON.stringify(manifest, null, 2);
-      $("pack-id").value = manifest.name;
-      $("pack-version").value = manifest.version;
-      $("publish-form").scrollIntoView({ behavior: "smooth", block: "start" });
-      feedback(`已生成 ${operations.length} 项能力的草稿。请审查执行影响和契约，再校验发布。`, "success", "publish-feedback");
-    } catch (error) { feedback(error.message, "error", "publish-feedback"); }
-  });
-
-  $("validate").addEventListener("click", async () => {
-    $("validate").disabled = true;
-    feedback("正在校验草稿…", "info", "publish-feedback");
-    try {
-      const result = await api("/admin/api/validate", { method: "POST", body: await packageBody() });
-      feedback(`校验通过：${result.capabilities.map((item) => item.name).join("、")}。`, "success", "publish-feedback");
-    } catch (error) { feedback(error.message, "error", "publish-feedback"); }
-    finally { $("validate").disabled = false; }
-  });
-
-  $("publish-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const button = $("publish-form").querySelector('button[type="submit"]');
-    button.disabled = true;
-    feedback("正在发布版本…", "info", "publish-feedback");
-    try {
-      const result = await api("/admin/api/releases", { method: "POST", body: await packageBody() });
-      await refresh();
-      feedback(`已发布 ${result.pack_id} ${result.version}。请在版本目录中明确启用。`, "success", "publish-feedback");
-    } catch (error) { feedback(error.message, "error", "publish-feedback"); }
-    finally { button.disabled = false; }
   });
 
   $("binding-owner").addEventListener("change", fillBinding);
@@ -408,4 +305,5 @@
       feedback(`连接可用，发现 ${result.capabilities.length} 项能力和 ${result.skills.length} 份技能。`, "success", "binding-feedback");
     } catch (error) { feedback(error.message, "error", "binding-feedback"); }
   });
+  const drafts = window.installDraftEditor({ api, feedback, names, formatDate, onPublish: refresh });
 })();

@@ -148,3 +148,30 @@ textarea { resize: vertical; min-height: 95px; }
   .form-grid { grid-template-columns: 1fr; }
   .audit-row { grid-template-columns: 130px 90px 1fr; gap: 8px; }
 }
+
+[hidden] { display: none !important; }
+input[type="number"] { width: 100%; min-height: 39px; padding: 9px 11px; border: 1px solid #bdcdc9; border-radius: 7px; color: var(--ink); }
+.draft-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.draft-toolbar > div:first-child { flex: 1; min-width: 250px; }
+.draft-toolbar label { display: block; margin-bottom: 6px; font-size: .82rem; font-weight: 700; }
+.draft-status { margin: 14px 0 20px; font-size: .85rem; overflow-wrap: anywhere; }
+.draft-steps { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+.draft-steps button { padding: 12px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-weight: 650; }
+.draft-steps button:hover { background: #e8f2ed; }
+.draft-steps button[aria-current="step"] { border-bottom-color: var(--accent); color: var(--accent-dark); }
+#draft-editor { max-width: 100%; }
+#draft-editor section > label, #draft-editor section > div > label, #capability-fields > label { display: block; margin: 16px 0 7px; }
+#draft-editor .form-grid { margin: 16px 0; }
+#draft-editor .actions { margin: 16px 0; align-items: center; }
+#draft-editor .actions select { width: auto; max-width: 100%; flex: 1; }
+#draft-editor small { margin: 5px 0 14px; }
+#draft-editor .checkbox { margin-top: 20px; }
+.draft-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; border-top: 1px solid var(--line); margin-top: 28px; padding-top: 20px; }
+#draft-progress { margin-left: auto; font-size: .85rem; color: var(--muted); }
+.draft-issues { padding-left: 22px; overflow-wrap: anywhere; }
+.draft-issues li { margin: 9px 0; }
+.draft-issues button { border: 0; background: transparent; color: var(--accent-dark); text-decoration: underline; text-underline-offset: 3px; padding: 2px; text-align: left; }
+textarea, input { caret-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .button { transition: none; } }
+#publish input:not([type]) { width: 100%; min-height: 39px; padding: 9px 11px; border: 1px solid #bdcdc9; border-radius: 7px; background: #fff; color: var(--ink); }
+#publish textarea[spellcheck="false"] { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .85rem; }

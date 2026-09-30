@@ -64,6 +64,10 @@ func (r *CapabilityRegistry) Initialize() error {
 			return err
 		}
 	}
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS drafts (draft_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, manifest_json TEXT NOT NULL, skills_json TEXT NOT NULL, updated_at REAL NOT NULL)`); err != nil {
+		db.Close()
+		return err
+	}
 	r.db = db
 	return nil
 }
