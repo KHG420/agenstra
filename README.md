@@ -148,7 +148,7 @@ The importer **does not** infer approvals, idempotency, or background-job comple
 
 - Before an external call, the host persists its invocation ID, exact arguments, and hash. After an uncertain outcome, it can replay only a capability declared safe or backed by real upstream idempotency. Other calls enter `needs_reconciliation` so the integrator can check the external system.
 - An approval applies to a specific user, invocation, and argument hash. Identity, grants, and leases are checked again before submission; skill text cannot bypass them.
-- Complete tool results are stored separately as Facts with provenance. The model sees a bounded preview and may inspect the full result by path. A Fact ID identifies local evidence, not an external resource.
+- Complete tool results are stored separately as Facts with provenance. Context budgeting preserves task constraints and Fact identities, prioritizes recent evidence, and explicitly marks omitted details for inspection. Full values remain available for tool arguments through Fact references. See the [context management design (Chinese)](docs/context-management.md). A Fact ID identifies local evidence, not an external resource.
 - For an `OperationBinding`, the host saves the external job receipt and polls the status capability. An HTTP success or `queued` response does not mean the job has finished.
 - Runs, events, Facts, and continuation APIs are scoped by `owner_id`. A deployment may configure multiple users with different capability sets.
 
