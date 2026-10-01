@@ -52,7 +52,7 @@ func newWebFixture(t *testing.T, model *hostModel, approval bool) *webFixture {
 	if e != nil {
 		t.Fatal(e)
 	}
-	f.session, e = w.SetBrowserContext("alice", f.session.ID, f.key, 1, 0, JSON{"page": "home"})
+	f.session, e = w.UpdatePageObservation("alice", f.session.ID, f.key, 1, 0, JSON{"page": "home"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -181,7 +181,7 @@ func TestBrowserTimeoutAndContextChanges(t *testing.T) {
 		f := newWebFixture(t, &hostModel{decisions: browserDecisions()}, false)
 		f.run(t)
 		c := f.dispatch(t)
-		if _, e := f.w.SetBrowserContext("alice", f.session.ID, f.key, 1, f.session.ContextRevision, JSON{"page": "changed"}); e != nil {
+		if _, e := f.w.UpdatePageObservation("alice", f.session.ID, f.key, 1, f.session.ContextRevision, JSON{"page": "changed"}); e != nil {
 			t.Fatal(e)
 		}
 		ok, c, e := f.w.BeginBrowserCommand(t.Context(), "alice", c.ID, f.key, 1)

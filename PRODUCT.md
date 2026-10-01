@@ -12,7 +12,7 @@ Developers embed Agenstra in existing systems; their signed-in users ask the age
 
 ## Product Purpose
 
-Agenstra is a Go capability-using agent framework. Optional web integration supplies reusable chat, conversation handling and browser command delivery. The host application maps its own business APIs and UI handlers.
+Agenstra is a Go capability-using agent framework. Optional web integration supplies headless chat and conversation APIs, framework-owned context restoration and browser command delivery. The host application selects conversations by ID and implements its own chat UI, business APIs and UI handlers.
 
 ## Operating Context
 
@@ -20,14 +20,15 @@ The existing headless runtime, API contracts, v1 run database, authorization and
 
 ## Capabilities and Constraints
 
-The browser SDK and Web Component use native JavaScript without React/Vue runtime dependencies. Browser results are client-reported evidence. Unknown action outcomes require reconciliation. Runtime and extension data are separate SQLite databases on a single node.
+The browser SDK uses native JavaScript without DOM rendering, CSS or React/Vue runtime dependencies. Agent context and run checkpoints remain on the server; browser storage contains only the selected conversation ID, tab binding and action receipts. Browser results are client-reported evidence. Unknown action outcomes require reconciliation. Runtime and extension data are separate SQLite databases on a single node.
 
 ## Brand Commitments
 
-Retain the incumbent admin interface's quiet teal, ink, warm white surfaces, system typography and explicit keyboard focus. Embedded components allow host CSS-variable overrides.
+The integration imposes no visual design. Hosts own their interface and accessibility. The local demo owns its illustrative chat renderer and styles independently of core assets and package exports.
 
 ## Product Principles
 
+- Keep context assembly and restoration in the framework; hosts choose conversation IDs.
 - Reuse task execution and approvals rather than create a second execution engine.
 - Bind commands to an authenticated user, run and specific browser session.
 - Publish stable action contracts; browser handlers do not grant permissions.

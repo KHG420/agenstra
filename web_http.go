@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-//go:embed web/agenstra-client.js web/agenstra-chat.js
+//go:embed web/agenstra-client.js
 var webAssets embed.FS
 
 func webError(w http.ResponseWriter, e error) {
@@ -72,7 +72,7 @@ func (s *HTTPServer) webHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	if strings.HasPrefix(p, "/web/assets/") && r.Method == "GET" {
 		name := strings.TrimPrefix(p, "/web/assets/")
-		if name != "agenstra-client.js" && name != "agenstra-chat.js" {
+		if name != "agenstra-client.js" {
 			http.NotFound(w, r)
 			return
 		}
@@ -162,29 +162,9 @@ func (s *HTTPServer) chatHTTP(w http.ResponseWriter, r *http.Request, owner stri
 	p := strings.TrimPrefix(r.URL.Path, "/chat/v1/")
 	if p == "conversations" {
 		if r.Method == "GET" {
-			rows, e := s.Web.Store.store.DB.Query("SELECT payload FROM web_conversations WHERE owner=? ORDER BY rowid DESC LIMIT 100", owner)
+			items, e := s.Web.ListConversations(r.Context(), owner, r.URL.Query().Get("integration_id"))
 			if e != nil {
-				serverError(w, e)
-				return
-			}
-			items := []ChatConversation{}
-			for rows.Next() {
-				var raw string
-				var c ChatConversation
-				if e = rows.Scan(&raw); e != nil {
-					break
-				}
-				if e = webDecode(raw, &c); e != nil {
-					break
-				}
-				items = append(items, c)
-			}
-			if e == nil {
-				e = rows.Err()
-			}
-			rows.Close()
-			if e != nil {
-				serverError(w, e)
+				webError(w, e)
 				return
 			}
 			writeJSON(w, 200, items)
@@ -238,6 +218,7 @@ func (s *HTTPServer) chatHTTP(w http.ResponseWriter, r *http.Request, owner stri
 			webError(w, e)
 			return
 		}
+		m.Instruction = ""
 		writeJSON(w, 200, m)
 		return
 	}
@@ -247,6 +228,7 @@ func (s *HTTPServer) chatHTTP(w http.ResponseWriter, r *http.Request, owner stri
 			webError(w, e)
 			return
 		}
+		m.Instruction = ""
 		writeJSON(w, 200, m)
 		return
 	}
@@ -341,17 +323,17 @@ func (s *HTTPServer) browserHTTP(w http.ResponseWriter, r *http.Request, owner s
 			}
 			writeJSON(w, 200, JSON{"session": session})
 			return
-		case "context":
+		case "observation":
 			var b struct {
-				Generation int  `json:"generation"`
-				Revision   int  `json:"revision"`
-				Context    JSON `json:"context"`
+				Generation  int  `json:"generation"`
+				Revision    int  `json:"revision"`
+				Observation JSON `json:"observation"`
 			}
 			if decodeBody(r, &b) != nil {
 				apiError(w, 422, "invalid_request", false)
 				return
 			}
-			session, e := s.Web.SetBrowserContext(owner, parts[1], key, b.Generation, b.Revision, b.Context)
+			session, e := s.Web.UpdatePageObservation(owner, parts[1], key, b.Generation, b.Revision, b.Observation)
 			if e != nil {
 				webError(w, e)
 				return

@@ -23,7 +23,7 @@ import (
 	agenstra "github.com/KHG420/agenstra"
 )
 
-//go:embed index.html host.js frontend.json pack.json deployment.json
+//go:embed index.html host.js demo-chat.js frontend.json pack.json deployment.json
 var assets embed.FS
 
 type demoModel struct{}
@@ -148,7 +148,7 @@ func run() error {
 		if name == "" {
 			name = "index.html"
 		}
-		if name != "index.html" && name != "host.js" {
+		if name != "index.html" && name != "host.js" && name != "demo-chat.js" {
 			http.NotFound(w, r)
 			return
 		}
@@ -157,7 +157,7 @@ func run() error {
 			http.NotFound(w, r)
 			return
 		}
-		if name == "host.js" {
+		if strings.HasSuffix(name, ".js") {
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		} else {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

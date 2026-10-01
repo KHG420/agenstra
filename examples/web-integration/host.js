@@ -1,5 +1,5 @@
 import { createAgenstraClient } from "/web/assets/agenstra-client.js";
-import { mountAgenstraChat } from "/web/assets/agenstra-chat.js";
+import { mountDemoChat } from "./demo-chat.js";
 
 const state = { page: "orders", status: "all", selected_order: "" };
 const rows = await fetch("/demo/orders").then(response => response.json()).then(data => data.orders);
@@ -33,7 +33,7 @@ const client = createAgenstraClient({
     if (!response.ok) throw new Error("Session unavailable");
     return response.json();
   },
-  getContext: () => ({ ...state })
+  getPageObservation: () => ({ ...state })
 });
 client.registerActions({
   "ui.show_orders": async ({ status }) => {
@@ -50,13 +50,38 @@ client.on("action", ({ command, status }) => {
   evidence.textContent = "前端动作：" + command.action + (status === "succeeded" ? " · 页面已更新，回执已提交" : status === "unknown" ? " · 结果待确认" : " · 正在执行");
 });
 client.on("error", error => { if (error.name !== "AbortError") document.querySelector("#host-error").textContent = "操作未完成：" + (error.code || error.message); });
-mountAgenstraChat(document.querySelector("#chat"), { client, title: "订单助手" });
+mountDemoChat(document.querySelector("#chat"), { client, title: "订单助手" });
+const conversationList = document.querySelector("#conversation-list");
+async function refreshConversations() {
+  const selected = await client.getConversation();
+  const items = await client.listConversations();
+  conversationList.replaceChildren();
+  for (const item of items) {
+    const option = document.createElement("option");
+    option.value = item.id;option.textContent = "会话 " + item.id.slice(0, 8);
+    option.selected = item.id === selected.id;conversationList.append(option);
+  }
+  conversationList.disabled = false;
+}
+conversationList.addEventListener("change", async () => {
+  conversationList.disabled = true;
+  try { await client.selectConversation(conversationList.value); }
+  catch (error) { document.querySelector("#host-error").textContent = error.message; }
+  finally { await refreshConversations(); }
+});
+document.querySelector("#new-conversation").addEventListener("click", async event => {
+  const button = event.currentTarget;button.disabled = true;
+  try { await client.createConversation();await refreshConversations(); }
+  catch (error) { document.querySelector("#host-error").textContent = error.message; }
+  finally { button.disabled = false; }
+});
+refreshConversations().catch(error => { document.querySelector("#host-error").textContent = error.message; });
 document.querySelector("#filter").addEventListener("change", async event => {
   state.page = "orders";state.selected_order = "";state.status = event.target.value;render();
-  try { await client.setContext(state); } catch (error) { document.querySelector("#host-error").textContent = error.message; }
+  try { await client.updatePageObservation(state); } catch (error) { document.querySelector("#host-error").textContent = error.message; }
 });
 for (const button of document.querySelectorAll("[data-prompt]")) button.addEventListener("click", () => {
-  const input = document.querySelector("agenstra-chat").shadowRoot.querySelector("textarea");
+  const input = document.querySelector("demo-chat").shadowRoot.querySelector("textarea");
   input.value = button.dataset.prompt;input.focus();
 });
 render();

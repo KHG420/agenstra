@@ -15,8 +15,10 @@ export class AgenstraClient {
     this.prefix = "agenstra:v1:" + this.endpoint + ":" + options.integration;
     this.token = null;
     this.closed = false;
-    this.context = {};
-    this.contextChain = Promise.resolve();
+    this.pageObservation = {};
+    this.observationChain = Promise.resolve();
+    this.selectionChain = Promise.resolve();
+    this.selectionRevision = 0;
     this.receipts = this.load("receipts") || {};
     this.chatWatchers = 0;
     this.aborters = new Set();
@@ -82,24 +84,25 @@ export class AgenstraClient {
     }
     this.save("browser", this.browser);
     await this.flushReceipts();
-    await this.publishContext();
+    await this.publishPageObservation();
     if (!this.closed) this.browserTimer = setTimeout(() => this.pollBrowser(), 0);
     this.emit("connection", { status: "connected" });
     return this.browser;
   }
-  setContext(context) {
-    // Serialize context updates so revisions cannot race in one tab.
-    this.context = structuredClone(context);
+  updatePageObservation(observation) {
+    // Page observations are tool data, never the conversation's agent context.
+    // Serialize updates so page revisions cannot race in one tab.
+    this.pageObservation = structuredClone(observation);
     if (!this.browser) return Promise.resolve();
-    this.contextChain = this.contextChain.catch(() => {}).then(() => this.publishContext());
-    return this.contextChain;
+    this.observationChain = this.observationChain.catch(() => {}).then(() => this.publishPageObservation());
+    return this.observationChain;
   }
-  async publishContext() {
+  async publishPageObservation() {
     if (!this.browser) return;
-    const context = this.options.getContext ? await this.options.getContext() : this.context;
-    const data = await this.request("/browser/v1/sessions/" + this.browser.id + "/context", { method: "POST", browserKey: this.browser.key, body: { generation: this.browser.generation, revision: this.browser.context_revision, context } });
+    const observation = this.options.getPageObservation ? await this.options.getPageObservation() : this.pageObservation;
+    const data = await this.request("/browser/v1/sessions/" + this.browser.id + "/observation", { method: "POST", browserKey: this.browser.key, body: { generation: this.browser.generation, revision: this.browser.context_revision, observation } });
     this.browser = { ...data.session, key: this.browser.key };
-    this.context = structuredClone(context);
+    this.pageObservation = structuredClone(observation);
     this.save("browser", this.browser);
   }
   async pollBrowser() {
@@ -126,11 +129,11 @@ export class AgenstraClient {
       // Persist before claiming. A crash cannot cause the handler to be rerun.
       const receipt = { command, status: "starting" };
       this.receipts[command.id] = receipt; this.save("receipts", this.receipts);
-      await this.contextChain;
-      // getContext observes host state that may have changed without a callback.
-      if (this.options.getContext) {
-        const latest = await this.options.getContext();
-        if (JSON.stringify(latest) !== JSON.stringify(this.context)) await this.setContext(latest);
+      await this.observationChain;
+      // Observe page changes before claiming an action against a page revision.
+      if (this.options.getPageObservation) {
+        const latest = await this.options.getPageObservation();
+        if (JSON.stringify(latest) !== JSON.stringify(this.pageObservation)) await this.updatePageObservation(latest);
       }
       const begun = await this.request("/browser/v1/commands/" + command.id + "/begin", { method: "POST", browserKey: this.browser.key, body: { generation: command.generation } });
       if (!begun.accepted) {
@@ -143,7 +146,7 @@ export class AgenstraClient {
       const result = await handler(structuredClone(command.arguments), { commandId: command.id, runId: command.run_id });
       receipt.status = "succeeded"; receipt.result = result ?? {};
       this.save("receipts", this.receipts);
-      try { await this.setContext(this.options.getContext ? await this.options.getContext() : this.context); } catch (error) { this.emit("error", error); }
+      try { await this.updatePageObservation(this.options.getPageObservation ? await this.options.getPageObservation() : this.pageObservation); } catch (error) { this.emit("error", error); }
       await this.flushReceipts();
       this.emit("action", { command, status: ["confirmed", "acked"].includes(receipt.status) ? "succeeded" : "unknown" });
     } catch (error) {
@@ -196,20 +199,56 @@ export class AgenstraClient {
       receipt.status = "acked"; this.save("receipts", this.receipts);
     }
   }
-  async getConversation() {
-    if (this.conversationPromise) return this.conversationPromise;
-    this.conversationPromise = this.ensureConversation().catch(error => { this.conversationPromise = null; throw error; });
-    return this.conversationPromise;
+  changeConversation(operation) {
+    // Selection, restoration and creation share a queue. A late response cannot
+    // overwrite a newer selection or create an extra default conversation.
+    const pending = this.selectionChain.then(() => {
+      if (this.closed) throw new AgenstraError("client_closed");
+      return operation();
+    });
+    this.selectionChain = pending.catch(() => {});
+    return pending;
+  }
+  rememberConversation(conversation) {
+    if (this.closed) throw new AgenstraError("client_closed");
+    if (conversation.integration_id !== this.options.integration) throw new AgenstraError("conversation_integration_mismatch");
+    this.conversation = conversation;
+    this.selectionRevision++;
+    this.save("conversation", conversation.id);
+    return conversation;
+  }
+  listConversations() {
+    return this.request("/chat/v1/conversations?integration_id=" + encodeURIComponent(this.options.integration));
+  }
+  selectConversation(id) {
+    if (typeof id !== "string" || !id) return Promise.reject(new TypeError("conversation id is required"));
+    return this.changeConversation(async () => {
+      await this.connectBrowser();
+      const snapshot = await this.request("/chat/v1/conversations/" + encodeURIComponent(id));
+      const conversation = this.rememberConversation(snapshot.conversation);
+      this.emit("conversation", snapshot);
+      return conversation;
+    });
+  }
+  createConversation() {
+    return this.changeConversation(async () => {
+      await this.connectBrowser();
+      const conversation = this.rememberConversation(await this.request("/chat/v1/conversations", { method: "POST", body: { integration_id: this.options.integration } }));
+      this.emit("conversation", { conversation, messages: [] });
+      return conversation;
+    });
+  }
+  getConversation() {
+    return this.changeConversation(() => this.conversation || this.ensureConversation());
   }
   async ensureConversation() {
     await this.connectBrowser();
     const saved = this.load("conversation");
     if (saved) {
-      try { const data = await this.request("/chat/v1/conversations/" + saved); this.conversation = data.conversation; return this.conversation; }
-      catch (error) { if (error.code !== "not_found") throw error; this.remove("conversation"); }
+      try { const data = await this.request("/chat/v1/conversations/" + encodeURIComponent(saved)); return this.rememberConversation(data.conversation); }
+      catch (error) { if (!["not_found", "conversation_integration_mismatch"].includes(error.code)) throw error; this.remove("conversation"); }
     }
-    this.conversation = await this.request("/chat/v1/conversations", { method: "POST", body: { integration_id: this.options.integration } });
-    this.save("conversation", this.conversation.id);return this.conversation;
+    return this.rememberConversation(await this.request("/chat/v1/conversations", { method: "POST", body: { integration_id: this.options.integration } }));
   }
   async snapshot() { const conversation = await this.getConversation(); return this.request("/chat/v1/conversations/" + conversation.id); }
   async send(text, { clientId = this.id() } = {}) {
@@ -221,11 +260,18 @@ export class AgenstraClient {
     const off = this.on("conversation", callback);
     this.chatWatchers++;
     if (this.chatWatchers === 1) this.pollChat();
-    return () => { off(); this.chatWatchers--; if (!this.chatWatchers) clearTimeout(this.chatTimer); };
+    let watching = true;
+    return () => { if (!watching) return; watching = false; off(); this.chatWatchers--; if (!this.chatWatchers) clearTimeout(this.chatTimer); };
   }
   async pollChat() {
     if (this.closed || !this.chatWatchers) return;
-    try { this.emit("conversation", await this.snapshot()); this.emit("connection", { status: "connected" }); }
+    try {
+      const conversation = await this.getConversation();
+      const selectionRevision = this.selectionRevision;
+      const snapshot = await this.request("/chat/v1/conversations/" + conversation.id);
+      if (selectionRevision === this.selectionRevision && snapshot.conversation.id === this.conversation?.id) this.emit("conversation", snapshot);
+      this.emit("connection", { status: "connected" });
+    }
     catch (error) { this.emit("error", error); this.emit("connection", { status: "disconnected" }); }
     if (!this.closed && this.chatWatchers) this.chatTimer = setTimeout(() => this.pollChat(), this.options.pollInterval || 1000);
   }

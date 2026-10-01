@@ -7,7 +7,7 @@
     :root{font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;color:#18313b;background:#f4f6f3;color-scheme:light}
     *{box-sizing:border-box}body{margin:0}button,select{font:inherit}button{cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid #116b64;outline-offset:3px}
     header{padding:22px 36px;border-bottom:1px solid #d8e0dc;display:flex;align-items:baseline;justify-content:space-between;gap:20px;background:#fff}header strong{font-size:18px;letter-spacing:-.03em}header span{color:#51636a;font-size:13px}
-    main{max-width:1360px;margin:auto;padding:36px;display:grid;grid-template-columns:minmax(360px,1fr) minmax(340px,410px);gap:36px;align-items:start}h1{font-size:30px;line-height:1.3;letter-spacing:-.04em;margin:0 0 10px}h2{margin:0;font-size:20px}.intro{margin:0 0 28px;max-width:58ch;color:#51636a}.workspace{background:#fff;border:1px solid #d8e0dc;border-radius:14px;overflow:hidden}.toolbar{padding:22px 24px;border-bottom:1px solid #d8e0dc;display:flex;justify-content:space-between;align-items:center;gap:20px}label{font-size:13px;color:#51636a}select{margin-left:8px;padding:6px 8px;border:1px solid #d8e0dc;border-radius:6px;background:#fff;color:#18313b}.content{padding:24px}table{border-collapse:collapse;width:100%;font-size:14px}th{text-align:left;font-size:12px;color:#51636a;font-weight:500}th,td{padding:13px 6px;border-bottom:1px solid #e8ede9}td:last-child,th:last-child{text-align:right}.status{color:#116b64}.detail{padding:0}.detail h3{margin:0 0 12px;font-size:24px}.detail p{margin:6px 0}.evidence{margin:18px 0 28px;font-size:13px;color:#51636a}.evidence strong{font-weight:500;color:#116b64}.suggestions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.suggestions button{background:transparent;border:1px solid #d8e0dc;border-radius:7px;padding:8px 12px;color:#18313b;font-size:13px}.suggestions button:hover{background:#fff}.try{font-size:13px;color:#51636a;margin:0}.host-error{color:#a5352c}.aside{padding-top:1px}agenstra-chat{--agenstra-height:650px}
+    main{max-width:1360px;margin:auto;padding:36px;display:grid;grid-template-columns:minmax(360px,1fr) minmax(340px,410px);gap:36px;align-items:start}h1{font-size:30px;line-height:1.3;letter-spacing:-.04em;margin:0 0 10px}h2{margin:0;font-size:20px}.intro{margin:0 0 28px;max-width:58ch;color:#51636a}.workspace{background:#fff;border:1px solid #d8e0dc;border-radius:14px;overflow:hidden}.toolbar{padding:22px 24px;border-bottom:1px solid #d8e0dc;display:flex;justify-content:space-between;align-items:center;gap:20px}label{font-size:13px;color:#51636a}select{margin-left:8px;padding:6px 8px;border:1px solid #d8e0dc;border-radius:6px;background:#fff;color:#18313b}.content{padding:24px}table{border-collapse:collapse;width:100%;font-size:14px}th{text-align:left;font-size:12px;color:#51636a;font-weight:500}th,td{padding:13px 6px;border-bottom:1px solid #e8ede9}td:last-child,th:last-child{text-align:right}.status{color:#116b64}.detail{padding:0}.detail h3{margin:0 0 12px;font-size:24px}.detail p{margin:6px 0}.evidence{margin:18px 0 28px;font-size:13px;color:#51636a}.evidence strong{font-weight:500;color:#116b64}.suggestions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.suggestions button{background:transparent;border:1px solid #d8e0dc;border-radius:7px;padding:8px 12px;color:#18313b;font-size:13px}.suggestions button:hover{background:#fff}.try{font-size:13px;color:#51636a;margin:0}.host-error{color:#a5352c}.aside{padding-top:1px}demo-chat{--agenstra-height:650px}
     @media(max-width:880px){main{grid-template-columns:1fr;padding:24px;gap:24px}header{padding:20px 24px}header span{max-width:30ch}}
   </style>
 </head>
@@ -16,7 +16,7 @@
   <main>
     <section aria-labelledby="workspace-title">
       <h1 id="workspace-title">在聊天中操作已有系统</h1>
-      <p class="intro">右侧助手会查询后端订单接口，再通过已注册的前端动作更新这里的列表。聊天组件和控制桥来自同一份框架；这个页面只负责业务展示。</p>
+      <p class="intro">右侧助手会查询后端订单接口，再通过已注册的前端动作更新这里的列表。聊天界面由本示例自行实现；框架提供会话、消息接口、上下文管理和控制桥。</p>
       <div class="workspace">
         <div class="toolbar"><h2 id="page-title">订单工作台</h2><label>状态<select id="filter"><option value="all">全部</option><option value="pending">待处理</option></select></label></div>
         <div class="content" id="host-content" aria-live="polite">正在读取演示订单…</div>
@@ -30,7 +30,10 @@
       </div>
       <p id="host-error" class="host-error" role="alert"></p>
     </section>
-    <aside class="aside" aria-label="Agent 聊天"><div id="chat"></div></aside>
+    <aside class="aside" aria-label="Agent 聊天">
+      <p><label>会话<select id="conversation-list" disabled aria-label="选择会话"></select></label> <button id="new-conversation" type="button">新建会话</button></p>
+      <div id="chat"></div>
+    </aside>
   </main>
   <script type="module" src="/host.js"></script>
 </body>

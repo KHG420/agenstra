@@ -93,17 +93,19 @@ func webInsert(tx *sql.Tx, table, id, owner string, v any) error {
 }
 
 type BrowserSession struct {
-	ID              string   `json:"id"`
-	IntegrationID   string   `json:"integration_id"`
-	ProfileDigest   string   `json:"profile_digest"`
-	Generation      int      `json:"generation"`
-	HandlerVersion  string   `json:"handler_version"`
-	Handlers        []string `json:"handlers"`
-	Context         JSON     `json:"context"`
-	ContextRevision int      `json:"context_revision"`
-	LastSeen        float64  `json:"last_seen"`
-	KeyHash         string   `json:"key_hash,omitempty"`
-	Closed          bool     `json:"closed"`
+	ID             string   `json:"id"`
+	IntegrationID  string   `json:"integration_id"`
+	ProfileDigest  string   `json:"profile_digest"`
+	Generation     int      `json:"generation"`
+	HandlerVersion string   `json:"handler_version"`
+	Handlers       []string `json:"handlers"`
+	// Context is page observation data only. Keep its persisted wire name so
+	// existing browser sessions and pinned frontend profiles remain readable.
+	Context         JSON    `json:"context"`
+	ContextRevision int     `json:"context_revision"`
+	LastSeen        float64 `json:"last_seen"`
+	KeyHash         string  `json:"key_hash,omitempty"`
+	Closed          bool    `json:"closed"`
 }
 type BrowserCommand struct {
 	ID              string  `json:"id"`

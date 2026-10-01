@@ -19,7 +19,7 @@ test("lost ACK retries the original receipt without rerunning a handler", async 
       if (acknowledgements === 1) throw new Error("ACK connection lost");
       return response({ status: "succeeded" });
     }
-    if (path.endsWith("/context")) return response({ session: { id: "tab-1", generation: 1, context_revision: 2 } });
+    if (path.endsWith("/observation")) return response({ session: { id: "tab-1", generation: 1, context_revision: 2 } });
     return response({ status: "waiting" });
   });
   c.registerActions({ "ui.navigate": async () => { calls++; return { page: "orders" }; } });
@@ -49,7 +49,7 @@ test("heartbeat flush does not declare an active handler interrupted", async () 
   const c = client(async (path, options) => {
     if (path.endsWith("/begin")) return response({ accepted: true });
     if (path.endsWith("/result")) { statuses.push(JSON.parse(options.body).status);return response({ status: "succeeded" }); }
-    if (path.endsWith("/context")) return response({ session: { id: "tab-1", generation: 1, context_revision: 2 } });
+    if (path.endsWith("/observation")) return response({ session: { id: "tab-1", generation: 1, context_revision: 2 } });
     return response({ status: "waiting" });
   });
   c.registerActions({ "ui.navigate": async () => { entered();await waiting;return { page: "orders" }; } });
@@ -149,7 +149,7 @@ test("an invalid browser result cannot emit a confirmed success", async () => {
   const events = [];
   const c = client(async path => {
     if (path.endsWith("/begin")) return response({ accepted: true });
-    if (path.endsWith("/context")) return response({ session: { id: "tab-1", generation: 1, context_revision: 2 } });
+    if (path.endsWith("/observation")) return response({ session: { id: "tab-1", generation: 1, context_revision: 2 } });
     if (path.endsWith("/result")) return response({ code: "browser_result_invalid" }, 422);
     return response({});
   });
@@ -159,4 +159,139 @@ test("an invalid browser result cannot emit a confirmed success", async () => {
   assert.deepEqual(events, ["running", "unknown"]);
   assert.equal(c.receipts[command.id].status, "unknown");
   await c.destroy({ closeSession: false });
+});
+
+test("the host selects a conversation by id and sends no agent context", async t => {
+  const paths = [], events = [], bodies = [];
+  const c = new AgenstraClient({ integration: "erp", storage: storage(), getSession: async () => "ticket", fetch: async (path, options) => {
+    paths.push(path);
+    if (options.body) bodies.push(JSON.parse(options.body));
+    if (path.endsWith("/messages")) return response({ id: "message-1", conversation_id: "selected" });
+    return response({ conversation: { id: "selected", integration_id: "erp" }, messages: [{ id: "prior" }] });
+  } });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.on("conversation", snapshot => events.push(snapshot));
+  await c.selectConversation("selected");
+  await c.send("Continue", { clientId: "stable" });
+  assert.deepEqual(paths, ["/chat/v1/conversations/selected", "/chat/v1/conversations/selected/messages"]);
+  assert.deepEqual(bodies, [{ client_id: "stable", text: "Continue", session_id: "" }]);
+  assert.equal(events[0].messages[0].id, "prior");
+  assert.equal(typeof c.setContext, "undefined");
+});
+
+test("conversation creation and listing use the current integration", async t => {
+  const requests = [];
+  const c = client(async (path, options) => {
+    requests.push({ path, body: options.body && JSON.parse(options.body) });
+    if (options.method === "POST") return response({ id: "new", integration_id: "erp-web" });
+    return response([{ id: "new", integration_id: "erp-web" }]);
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  await c.createConversation();
+  assert.equal((await c.listConversations())[0].id, "new");
+  assert.deepEqual(requests, [
+    { path: "/chat/v1/conversations", body: { integration_id: "erp-web" } },
+    { path: "/chat/v1/conversations?integration_id=erp-web", body: undefined }
+  ]);
+});
+
+test("invalid selections preserve the previous selected conversation", async t => {
+  const c = client(async path => {
+    if (path.endsWith("/missing")) return response({ code: "not_found" }, 404);
+    return response({ conversation: { id: "other", integration_id: "another-app" }, messages: [] });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.rememberConversation({ id: "current", integration_id: "erp-web" });
+  await assert.rejects(c.selectConversation("missing"), { code: "not_found" });
+  await assert.rejects(c.selectConversation("other"), { code: "conversation_integration_mismatch" });
+  assert.equal((await c.getConversation()).id, "current");
+  assert.equal(c.load("conversation"), "current");
+});
+
+test("concurrent selection and sending preserve the host's selection order", async t => {
+  let releaseFirst, entered;
+  const firstEntered = new Promise(resolve => { entered = resolve; });
+  const delayed = new Promise(resolve => { releaseFirst = resolve; });
+  const paths = [];
+  const c = client(async path => {
+    paths.push(path);
+    if (path.endsWith("/first")) { entered(); await delayed; }
+    const id = path.endsWith("/first") ? "first" : "second";
+    return response({ conversation: { id, integration_id: "erp-web" }, messages: [] });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  const first = c.selectConversation("first");await firstEntered;
+  const second = c.selectConversation("second");
+  const sent = c.send("Use the selected conversation", { clientId: "stable" });
+  releaseFirst();await Promise.all([first, second, sent]);
+  assert.equal(c.conversation.id, "second");
+  assert.equal(paths.at(-1), "/chat/v1/conversations/second/messages");
+  assert.equal(paths.includes("/chat/v1/conversations"), false);
+});
+
+test("a late poll from a previous selection cannot replace the host's displayed history", async t => {
+  let releaseOld, entered;
+  const reading = new Promise(resolve => { entered = resolve; });
+  const oldResponse = new Promise(resolve => { releaseOld = resolve; });
+  const c = client(async path => {
+    const id = path.endsWith("/old") ? "old" : "new";
+    if (id === "old") { entered();await oldResponse; }
+    return response({ conversation: { id, integration_id: "erp-web" }, messages: [] });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.rememberConversation({ id: "old", integration_id: "erp-web" });
+  c.chatWatchers = 1;
+  const events = [];
+  c.on("conversation", snapshot => events.push(snapshot.conversation.id));
+  const polling = c.pollChat();await reading;
+  await c.selectConversation("new");releaseOld();await polling;
+  assert.deepEqual(events, ["new"]);
+});
+
+test("reload restores only the selected id and asks the framework for conversation state", async t => {
+  const store = storage();
+  const original = client(async () => response({}), store);
+  original.rememberConversation({ id: "saved", integration_id: "erp-web" });
+  await original.destroy({ closeSession: false });
+  const paths = [];
+  const resumed = client(async path => {
+    paths.push(path);
+    return response({ conversation: { id: "saved", integration_id: "erp-web" }, messages: [] });
+  }, store);
+  t.after(() => resumed.destroy({ closeSession: false }));
+  assert.equal((await resumed.getConversation()).id, "saved");
+  assert.deepEqual(paths, ["/chat/v1/conversations/saved"]);
+});
+
+test("switching away and back to the same id still fences an older poll", async t => {
+  let releaseOld, entered, reads = 0;
+  const reading = new Promise(resolve => { entered = resolve; });
+  const oldResponse = new Promise(resolve => { releaseOld = resolve; });
+  const c = client(async path => {
+    const id = path.endsWith("/first") ? "first" : "second";
+    const read = ++reads;
+    if (read === 1) { entered();await oldResponse; }
+    return response({ conversation: { id, integration_id: "erp-web" }, messages: [{ status: read === 1 ? "active" : "completed" }] });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.rememberConversation({ id: "first", integration_id: "erp-web" });
+  c.chatWatchers = 1;
+  const events = [];
+  c.on("conversation", snapshot => events.push(snapshot.conversation.id));
+  const polling = c.pollChat();await reading;
+  await c.selectConversation("second");await c.selectConversation("first");
+  releaseOld();await polling;
+  assert.deepEqual(events, ["second", "first"]);
+});
+
+test("concurrent first sends create only one default conversation", async t => {
+  let creates = 0;
+  const c = client(async (path, options) => {
+    if (path === "/chat/v1/conversations") { creates++;return response({ id: "default", integration_id: "erp-web" }); }
+    assert.equal(path, "/chat/v1/conversations/default/messages");
+    return response({ client_id: JSON.parse(options.body).client_id });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  await Promise.all([c.send("One", { clientId: "one" }), c.send("Two", { clientId: "two" })]);
+  assert.equal(creates, 1);
 });

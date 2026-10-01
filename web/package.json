@@ -4,8 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./client": { "types": "./agenstra-client.d.ts", "default": "./agenstra-client.js" },
-    "./chat": { "types": "./agenstra-chat.d.ts", "default": "./agenstra-chat.js" }
+    "./client": { "types": "./agenstra-client.d.ts", "default": "./agenstra-client.js" }
   },
   "scripts": { "test": "node --test *.test.js" }
 }

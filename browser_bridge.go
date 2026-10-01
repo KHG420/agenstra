@@ -114,7 +114,10 @@ func (w *WebIntegration) frontend(digest string) (*compiledFrontend, error) {
 	}
 	return nil, hostError("browser_profile_unavailable")
 }
-func (w *WebIntegration) SetBrowserContext(owner, id, key string, generation, revision int, data JSON) (BrowserSession, error) {
+
+// UpdatePageObservation records current host page data for browser capabilities.
+// It cannot select, replace or otherwise mutate an agent's conversation context.
+func (w *WebIntegration) UpdatePageObservation(owner, id, key string, generation, revision int, data JSON) (BrowserSession, error) {
 	var current BrowserSession
 	if e := webLoad(w.Store.store.DB, "web_sessions", id, owner, &current); e != nil {
 		return current, e

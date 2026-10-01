@@ -1,3 +1,4 @@
+// Example-owned UI. Agenstra core supplies only the headless client and APIs.
 const labels = {
   "zh-CN": { title: "Agenstra 助手", subtitle: "查询数据、执行操作，并同步当前页面", chatOnly: "通过已授权的系统能力完成任务", empty: "从一个具体任务开始", hint: "例如：查询本月订单，再打开其中一笔的详情。", placeholder: "描述你想完成的操作…", send: "发送", queue: "添加任务", stop: "停止任务", approve: "批准操作", reject: "拒绝操作", approval: "执行前请核对操作和参数", input: "请补充以下信息", unknown: "操作结果尚未确认。核对实际页面后再继续；也可以停止此任务。", reconcile: "读取已确认的回执", connected: "已连接", disconnected: "连接中断，正在重试", loading: "正在连接系统…", error: "请求未完成，请检查连接或重试。", retry: "重试发送", statuses: { queued: "等待执行", creating: "准备任务", active: "正在执行", cancelling: "正在停止", completed: "已完成", failed: "未完成", cancelled: "已停止", needs_input: "等待补充信息", needs_approval: "等待确认", waiting: "等待操作结果", needs_reconciliation: "等待核对", needs_authorization: "需要恢复授权" } },
   en: { title: "Agenstra assistant", subtitle: "Query data, take action, and update this page", chatOnly: "Complete tasks using authorized system capabilities", empty: "Start with a specific task", hint: "For example: find this month's orders and open one for review.", placeholder: "Describe what you want to do…", send: "Send", queue: "Queue task", stop: "Stop task", approve: "Approve action", reject: "Reject action", approval: "Review the action and arguments before proceeding", input: "More information is needed", unknown: "The action outcome is unconfirmed. Check the actual page before continuing, or stop this task.", reconcile: "Read the verified receipt", connected: "Connected", disconnected: "Disconnected. Retrying…", loading: "Connecting to your system…", error: "The request did not complete. Check the connection or retry.", retry: "Retry send", statuses: { queued: "Queued", creating: "Preparing", active: "Working", cancelling: "Stopping", completed: "Completed", failed: "Incomplete", cancelled: "Stopped", needs_input: "Waiting for input", needs_approval: "Waiting for approval", waiting: "Waiting for the result", needs_reconciliation: "Needs review", needs_authorization: "Authorization needed" } }
@@ -25,7 +26,7 @@ function appendAnswer(element, value) {
     else element.append(document.createTextNode(chunk));
   });
 }
-export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
+export class DemoChat extends (globalThis.HTMLElement || class {}) {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -86,8 +87,12 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
     });return b;
   }
   render(snapshot) {
-    const signature = JSON.stringify(snapshot.messages);
+    const signature = JSON.stringify([snapshot.conversation?.id, snapshot.messages]);
     if (signature === this.signature) return;
+    if (this.conversationId && this.conversationId !== snapshot.conversation?.id) {
+      this.pendingSend = null;this.input.value = "";
+    }
+    this.conversationId = snapshot.conversation?.id;
     this.signature = signature;this.awaitingInput = null;
     const focusKey = this.shadowRoot.activeElement?.dataset.focusKey;
     const follow = this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight < 60;
@@ -140,9 +145,9 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
     if (focusKey) for (const button of this.log.querySelectorAll("button")) if (button.dataset.focusKey === focusKey) button.focus({ preventScroll: true });
   }
 }
-if (globalThis.customElements && !customElements.get("agenstra-chat")) customElements.define("agenstra-chat", AgenstraChat);
-export function mountAgenstraChat(container, { client, title, locale = "zh-CN" }) {
-  const element = document.createElement("agenstra-chat");
+if (globalThis.customElements && !customElements.get("demo-chat")) customElements.define("demo-chat", DemoChat);
+export function mountDemoChat(container, { client, title, locale = "zh-CN" }) {
+  const element = document.createElement("demo-chat");
   element.setAttribute("lang", locale);
   if (title) element.setAttribute("title", title);
   element.client = client;container.append(element);
