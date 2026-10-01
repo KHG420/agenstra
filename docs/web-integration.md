@@ -91,7 +91,7 @@
 
 profile 由服务端发布，在线浏览器不能新增模型可用能力。组合 release 固定前端 profile 和后端 fingerprint。托管后端恢复不可变 release；静态后端契约或绑定发生变更时，旧组合 run 在执行前以 `web_base_contract_changed` 拒绝，不能静默接受新契约。新任务使用新版本。别名不能改绑到其他业务包，改绑时使用新别名。
 
-handler 语义变化时更新 `handler_version` 和 profile 版本。注册版本必须匹配当前 profile；旧 run 保留原契约。页面重载不会将未确认的旧动作迁移到新 generation。
+handler 语义变化时更新 `handler_version` 和 profile 版本。注册版本必须匹配当前 profile；旧 run 保留原契约。页面重载不会将未确认的旧动作迁移到新 generation。恢复连接时若当前 profile digest 与旧会话不同，服务端在改变 generation 前返回 `browser_profile_changed`。SDK 发出 `connection: {status: "profile_changed"}`，并尝试按当前 handler 注册替代旧连接；仍有未结束任务或不确定动作时保留旧绑定并返回相应错误。
 
 ## 用宿主登录身份换短期票据
 
@@ -148,7 +148,7 @@ await client.send("查询待处理订单", { clientId: client.id() });
 
 `hostRouter` 和 `hostChatView` 代表宿主已有的路由和 UI。SDK 不创建任何 DOM 或样式。React/Vue 中只需在相应生命周期创建 client、订阅状态和解除订阅。结束使用或切换登录用户时调用 `client.destroy()`。一个 tab 对同一 endpoint/integration 使用一个 client。默认 `sessionStorage` 保存所选会话 ID、tab 绑定和执行回执，不保存 Agent 会话上下文；可传 `storage: null`。禁用存储后仍可通过会话列表手动恢复，服务端仍阻止重复认领。
 
-`listConversations()` 返回当前 integration 下该用户最近的最多 100 个会话。`selectConversation(id)` 验证会话归属和 integration，立即发布所选会话的历史及状态。切换失败保留此前选择；旧会话的迟到轮询不会覆盖新会话。选择和创建按调用顺序串行化。未显式选择时，`getConversation()` 恢复已保存的会话 ID；没有可用会话时自动创建。切换不取消、不迁移旧任务的浏览器绑定。
+`listConversations()` 返回当前 integration 下该用户最近的最多 100 个会话。`selectConversation(id)` 验证会话归属和 integration，立即发布所选会话的历史及状态。切换失败保留此前选择；旧会话的迟到轮询不会覆盖新会话。选择和创建按调用顺序串行化。未显式选择时，`getConversation()` 恢复已保存的会话 ID；没有可用会话时自动创建。切换不取消、不迁移旧任务的浏览器绑定。浏览器连接受阻时，仍可读取、选择和创建会话、查看任务状态以及调用 `cancelMessage`；这些操作成功不代表浏览器已连接。`watchConversation` 同时尝试浏览器连接和聊天轮询，连接错误不阻止历史显示。启用控制桥的 `send` 和 `run` 必须先完成浏览器连接。
 
 handler 在连接前注册，返回符合 output Schema 的结果；实际业务写入须在后端再次校验权限，可用 `commandId` 作为业务幂等键。`getPageObservation` 返回当前页面、筛选、选中项等数据，排除 cookie、token 和无关敏感数据；手动改变页面后调用 `updatePageObservation`。这些接口只能更新页面观察数据，不影响聊天历史、运行检查点或 Agent 上下文选择。
 
@@ -199,7 +199,20 @@ stateDiagram-v2
 
 SDK 执行前保存 command，执行后保存结果，再提交 ACK。ACK 丢失时重发原结果，不重跑 handler。服务端以 invocation ID 去重。刷新递增 generation，旧 queued/dispatched 动作取消，旧 running 变 unknown；原 generation 的缓存结果可确认原动作，并恢复同一个 operation。确认 ACK 后的恢复待办也会持久保留，以便重试网络和 revision 错误。
 
-没有原结果证据时，run 停在 `needs_reconciliation`，同浏览器会话不再投递动作。示例 UI 的“读取已确认的回执”只能读取已有成功/失败结果，不将人工猜测记为成功，不重执行旧动作。无法恢复时核对真实状态并停止旧任务；旧 tab 仍被 unknown 阻塞时，销毁旧 client 后建立新 session，再发明确的新任务。浏览器桥不承诺跨崩溃 exactly-once 外部副作用；后端写入仍须使用业务授权、审计与幂等机制。
+没有原结果证据时，run 停在 `needs_reconciliation`，同浏览器会话不再投递动作。示例 UI 的“读取已确认的回执”只能读取已有成功/失败结果，不将人工猜测记为成功，不重执行旧动作。无法恢复原结果时，先核对真实业务状态，停止绑定该浏览器会话的所有旧任务，并等待它们进入结束状态；这包括其他聊天会话的任务及尚未执行的排队消息。
+
+宿主可在原 client 上调用统一的恢复入口，无需销毁 client 或丢弃聊天选择、订阅与回执：
+
+```js
+// 所有旧任务均已结束，且没有不确定动作时：
+await client.recoverBrowser();
+// 旧动作仍为 unknown 时，须先核对实际业务状态，再明确确认：
+await client.recoverBrowser({ acknowledgeUnknown: true });
+```
+
+服务端原子关闭旧浏览器会话并创建使用当前 profile 的替代会话。执行中的命令返回 `browser_recovery_busy`，未结束任务返回 `browser_recovery_run_active`，未确认的不确定结果返回 `browser_outcome_unresolved`；SDK 对最后一种情况也发出 `reconciliation` 事件。`acknowledgeUnknown` 仅确认宿主已经核对实际状态，不会把旧 `unknown` 改成成功、迁移旧任务或重放动作。旧任务、命令和回执保留，原命令的迟到结果仍可凭原 key 补齐原证据。后续明确的新任务绑定替代会话，SDK 会忽略旧轮询和页面观察的迟到响应。
+
+SDK 在发送恢复请求前保存稳定的 request ID、注册参数和确认选择。响应丢失或服务端返回 5xx 时，重试或页面重载沿用原请求，取回同一个替代会话与 key；默认 `sessionStorage` 支持跨重载，`storage: null` 仅保留当前 client 内的恢复标记。恢复注册仍须通过当前 profile 校验；同一 request ID 改变有效注册参数或确认选择、替代会话已关闭或当前 profile digest 再次变化时返回 `browser_recovery_conflict`。浏览器桥不承诺跨崩溃 exactly-once 外部副作用；后端写入仍须使用业务授权、审计与幂等机制。
 
 ## HTTP 接口
 
@@ -216,6 +229,7 @@ SDK 执行前保存 command，执行后保存结果，再提交 ACK。ACK 丢失
 | `GET /browser/v1/integrations/{id}` | profile 和 digest |
 | `POST /browser/v1/sessions` | `{integration_id,handler_version,handlers}` |
 | `POST /browser/v1/sessions/{id}/resume`、`poll`、`close` | `{generation}` |
+| `POST /browser/v1/sessions/{id}/recover` | `{generation,handler_version,handlers,request_id,acknowledge_unknown}`；使用旧 browser key，返回 `{session,key}` |
 | `POST /browser/v1/sessions/{id}/observation` | 页面观察数据 `{generation,revision,observation}` |
 | `POST /browser/v1/runs` | `{integration_id,session_id,instruction,request_id}` |
 | `POST /browser/v1/commands/{id}/begin` | `{generation}` |
@@ -223,6 +237,8 @@ SDK 执行前保存 command，执行后保存结果，再提交 ACK。ACK 丢失
 | `GET /browser/v1/commands/{id}` | 原动作回执 |
 | `POST /browser/v1/commands/{id}/reconcile` | `{revision}`，恢复已有证据 |
 | `/web/v1/runs/{id}` 及 `input`、`approval`、`resume`、`cancel`、`events`、`artifacts/{id}` | 复用 run 协议，限用户关联的 run |
+
+`recover` 的 `request_id` 必须非空，最多 128 字节；丢失响应时必须使用相同旧会话、旧 key、generation 和请求参数重试。缺失 request ID 返回 422，身份或 browser key 无效返回 401，前述恢复状态错误返回 409。
 
 ## 验证
 
@@ -234,6 +250,6 @@ cd web
 npm test
 ```
 
-Go 回归覆盖消息并发、取消发布、去重、授权与审批、代际隔离、契约固定和票据范围；Go 上下文回归还覆盖会话隔离、补充输入、检查点恢复及宿主上下文注入拒绝；Node 测试覆盖 handler 不重跑、ACK 丢失、恢复重试、心跳、页面变化、会话选择竞态和卸载。示例的固定模型验证执行协议，不评估真实模型理解任务的能力。
+Go 回归覆盖消息并发、取消发布、去重、授权与审批、代际隔离、契约固定、票据范围，以及浏览器契约升级、跨会话排队任务、执行中/不确定动作与并发恢复重试；Go 上下文回归还覆盖会话隔离、补充输入、检查点恢复及宿主上下文注入拒绝；Node 测试覆盖 handler 不重跑、ACK 丢失、恢复重试、网关错误、旧连接迟到响应、受阻时读取历史与取消、心跳、页面变化、会话选择竞态和卸载。示例的固定模型验证执行协议，不评估真实模型理解任务的能力。
 
 跨项目任务可通过可选 `sources` 明确选择目标能力，并按发起项目委派、目标验证权限和任务范围取交集。目标身份、实际凭据、版本固定、项目记忆和各入口的完整接入说明见[跨项目任务、身份与授权](cross-project-tasks.md)。所有读取与轮询也必须明确授权。
