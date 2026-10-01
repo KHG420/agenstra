@@ -131,34 +131,41 @@ func requestRunID(owner, request string) string {
 // persist a binding before a queued run becomes visible to the worker.
 // A nonempty request ID is required for a stable identity.
 func RequestRunID(owner, request string) string { return requestRunID(owner, request) }
-func (h *AgentHost) Create(ctx context.Context, owner, pack, instruction, requestID string) (StoredRun, error) {
+func (h *AgentHost) prepareRun(ctx context.Context, owner, pack, instruction, id string) (map[string]any, error) {
 	if strings.TrimSpace(instruction) == "" || len([]rune(instruction)) > 30000 {
-		return StoredRun{}, hostError("instruction_invalid")
+		return nil, hostError("instruction_invalid")
 	}
 	if _, e := h.policy(ctx, owner, pack, true); e != nil {
-		return StoredRun{}, e
+		return nil, e
 	}
 	var release any
 	if h.ReleaseResolver != nil {
 		r, e := h.ReleaseResolver(ctx, owner, pack)
 		if e != nil {
-			return StoredRun{}, e
+			return nil, e
 		}
 		if r != "" {
 			release = r
 		}
 	}
-	id := requestRunID(owner, requestID)
 	state, e := NewState(instruction, id)
 	if e != nil {
-		return StoredRun{}, e
+		return nil, e
 	}
 	runtime, e := objectOf(state)
 	if e != nil {
-		return StoredRun{}, e
+		return nil, e
 	}
 	delete(runtime, "facts")
-	r, e := h.Store.CreateRun(owner, pack, map[string]any{"runtime": runtime, "artifact_ids": []string{}, "pack_fingerprint": nil, "pack_release": release}, id)
+	return map[string]any{"runtime": runtime, "artifact_ids": []string{}, "pack_fingerprint": nil, "pack_release": release}, nil
+}
+func (h *AgentHost) Create(ctx context.Context, owner, pack, instruction, requestID string) (StoredRun, error) {
+	id := requestRunID(owner, requestID)
+	state, e := h.prepareRun(ctx, owner, pack, instruction, id)
+	if e != nil {
+		return StoredRun{}, e
+	}
+	r, e := h.Store.CreateRun(owner, pack, state, id)
 	if !errors.Is(e, ErrStoreConflict) {
 		return r, e
 	}
