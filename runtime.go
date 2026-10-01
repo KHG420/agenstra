@@ -376,7 +376,7 @@ func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
 		features = append(features, "durable_execution")
 	}
 	packet := ContextPacket{Schema: "agenstra.context.v1", Instruction: state.Instruction, Capabilities: caps, Facts: views, Observations: obs, RoundIndex: state.RoundsUsed, RoundsRemaining: r.MaxModelRounds - state.RoundsUsed, ToolCallsRemaining: r.MaxToolCalls - state.ToolCallsUsed, Skills: skillViews, LoadedSkills: loaded, InspectedCapability: inspected, InspectedFact: state.InspectedFact, Followups: state.Followups, RuntimeFeatures: features, ContextOmissions: omissions}
-	available := r.MaxContextCharacters - utf8.RuneCountInString(r.Provider.SystemPrompt())
+	available := r.MaxContextCharacters - utf8.RuneCountInString(r.systemPrompt())
 	raw, _ := CanonicalJSON(packet)
 	if utf8.RuneCount(raw) > available {
 		views = nil
@@ -432,6 +432,10 @@ func deterministicInvocationID(runID, ref string) string {
 	sum[8] = (sum[8] & 63) | 128
 	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }
+func (r *AgentRuntime) systemPrompt() string {
+	return r.Provider.SystemPrompt() + "\n" + conversationGuidance
+}
+
 func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeModel func() error) error {
 	r.defaults()
 	if len(state.Pending) > 0 || (state.Status != "queued" && state.Status != "running") {
@@ -447,7 +451,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 	var decision Decision
 	for attempt := 0; attempt < 2; attempt++ {
 		packet := r.Context(state)
-		prompt := r.Provider.SystemPrompt() + feedback
+		prompt := r.systemPrompt() + feedback
 		for _, note := range packet.ContextOmissions {
 			if strings.HasPrefix(note, "fact ") && strings.Contains(note, "array at") {
 				extra := "\nAuthoritative full array lengths from stored Facts follow. A preview may show fewer items; inspect omitted indices before claiming coverage:\n" + note

@@ -106,6 +106,10 @@ export class DemoChat extends (globalThis.HTMLElement || class {}) {
     for (const message of messages) {
       const turn = document.createElement("article");turn.className = "turn";
       const user = document.createElement("p");user.className = "user";user.textContent = message.text;turn.append(user);
+      for (const input of message.input_history || []) {
+        if (input.prompt) { const prompt = document.createElement("div");prompt.className = "answer";prompt.textContent = input.prompt;turn.append(prompt); }
+        const supplement = document.createElement("p");supplement.className = "user";supplement.textContent = input.text;turn.append(supplement);
+      }
       const run = message.run;const runtime = run?.state?.runtime;
       const state = run?.status || message.status;
       const status = document.createElement("div");status.className = "status";status.dataset.state = state;

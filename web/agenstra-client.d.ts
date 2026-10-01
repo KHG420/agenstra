@@ -2,7 +2,8 @@ export type JSONObject = { [key: string]: unknown };
 export interface BrowserCommand { id: string; run_id: string; session_id: string; generation: number; action: string; arguments: JSONObject; status: string; context_revision: number; expires_at: number }
 export interface Run { run_id: string; status: string; revision: number; state: { runtime: JSONObject } }
 export interface ChatConversation { id: string; integration_id: string; created_at: number }
-export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; run_id: string; status: string; answer_markdown?: string; run?: Run }
+export interface ChatInput { field?: string; prompt?: string; text: string }
+export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; run_id: string; status: string; answer_markdown?: string; input_history?: ChatInput[]; run?: Run }
 export interface ConversationSnapshot { conversation: ChatConversation; messages: ChatMessage[] }
 export interface ClientOptions {
   endpoint?: string; integration: string; browser?: boolean; handlerVersion?: string;

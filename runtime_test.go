@@ -186,7 +186,9 @@ func TestCoreFiniteJSONAndContextBudget(t *testing.T) {
 		t.Fatal("NaN accepted")
 	}
 	provider := &coreTestProvider{caps: map[string]CapabilityDescription{}}
-	runtime := &AgentRuntime{Provider: provider, MaxContextCharacters: 3000}
+	// Keep the packet allowance constant while accounting for runtime guidance.
+	budget := 3000 + utf8.RuneCountInString(conversationGuidance) + 1
+	runtime := &AgentRuntime{Provider: provider, MaxContextCharacters: budget}
 	state, err := runtime.NewState(strings.Repeat("x", 2150), "")
 	if err != nil {
 		t.Fatal(err)
@@ -202,7 +204,7 @@ func TestCoreFiniteJSONAndContextBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(raw)+len(provider.SystemPrompt()) > 3000 {
+	if len(raw)+len(runtime.systemPrompt()) > budget {
 		t.Fatalf("context over budget: %d", len(raw))
 	}
 	if len(packet.Facts) != 1 || len(packet.Facts[0].Value) != 0 {
@@ -222,7 +224,7 @@ func TestCoreFiniteJSONAndContextBudget(t *testing.T) {
 func TestCoreChineseContextBudgetCountsCharacters(t *testing.T) {
 	provider := &coreTestProvider{caps: map[string]CapabilityDescription{}}
 	model := &promptCaptureModel{decisions: []Decision{{Kind: "final", AnswerMarkdown: "完成"}}}
-	runtime := &AgentRuntime{Provider: provider, Model: model, MaxContextCharacters: 1600}
+	runtime := &AgentRuntime{Provider: provider, Model: model, MaxContextCharacters: 1600 + utf8.RuneCountInString(conversationGuidance) + 1}
 	state, err := runtime.NewState(strings.Repeat("航", 1000), "")
 	if err != nil {
 		t.Fatal(err)
