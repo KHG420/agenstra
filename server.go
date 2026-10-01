@@ -106,7 +106,9 @@ func (s *HTTPServer) worker() {
 			err = s.Web.Tick(s.workerCtx)
 		}
 		if err == nil {
-			_, err = s.Host.WakeDue(s.workerCtx, 100)
+			_, scheduleErr := s.Host.DispatchDueSchedules(s.workerCtx, 100)
+			_, runErr := s.Host.WakeDue(s.workerCtx, 100)
+			err = errors.Join(scheduleErr, runErr)
 		}
 		if s.workerCtx.Err() != nil {
 			return
@@ -156,6 +158,8 @@ func serverError(w http.ResponseWriter, e error) {
 			status = 403
 		case "authorization_unavailable", "connection_unavailable":
 			status = 503
+		case "schedule_invalid", "invalid_limit", "invalid_page":
+			status = 422
 		}
 		apiError(w, status, host.Code, false)
 		return
@@ -236,6 +240,10 @@ func (s *HTTPServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	owner, e := s.owner(r)
 	if e != nil {
 		apiError(w, 401, "unauthorized", true)
+		return
+	}
+	if p == "/schedules" || strings.HasPrefix(p, "/schedules/") {
+		s.schedulesHTTP(w, r, owner)
 		return
 	}
 	if p == "/runs" {

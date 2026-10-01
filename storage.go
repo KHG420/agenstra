@@ -92,7 +92,7 @@ func (s *SQLiteStore) Initialize() error {
 			return fmt.Errorf("unsupported SQLite store schema version %d", version)
 		}
 		if version == 1 {
-			return nil
+			return initializeScheduleTables(tx)
 		}
 		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS runs (
 		 run_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, pack_id TEXT NOT NULL,
@@ -109,7 +109,10 @@ func (s *SQLiteStore) Initialize() error {
 		 run_id TEXT NOT NULL REFERENCES runs(run_id),created_at REAL NOT NULL,event_json TEXT NOT NULL);
 		 CREATE INDEX IF NOT EXISTS events_run ON events(run_id,sequence);
 		 PRAGMA user_version=1;`)
-		return err
+		if err != nil {
+			return err
+		}
+		return initializeScheduleTables(tx)
 	})
 }
 
