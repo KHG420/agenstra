@@ -126,6 +126,11 @@ func requestRunID(owner, request string) string {
 	sum[8] = (sum[8] & 63) | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }
+
+// RequestRunID returns the stable run identity used by Create. Integrations can
+// persist a binding before a queued run becomes visible to the worker.
+// A nonempty request ID is required for a stable identity.
+func RequestRunID(owner, request string) string { return requestRunID(owner, request) }
 func (h *AgentHost) Create(ctx context.Context, owner, pack, instruction, requestID string) (StoredRun, error) {
 	if strings.TrimSpace(instruction) == "" || len([]rune(instruction)) > 30000 {
 		return StoredRun{}, hostError("instruction_invalid")
@@ -647,6 +652,25 @@ func (h *AgentHost) operation(state *RuntimeState, item *Invocation, fact Fact, 
 		item.Status = "failed"
 		item.ErrorCode = strptr("operation_failed")
 		Reject(state, item.Call.CallRef, item.Call.Capability, "operation_failed", nil, "")
+	case containsString(binding.ReconciliationStates, s):
+		if item.Operation == nil {
+			args := JSON{}
+			cursor := args
+			if len(binding.PollArgument) == 0 {
+				return hostError("operation_contract_invalid")
+			}
+			for _, key := range binding.PollArgument[:len(binding.PollArgument)-1] {
+				child := JSON{}
+				cursor[key] = child
+				cursor = child
+			}
+			cursor[binding.PollArgument[len(binding.PollArgument)-1]] = id
+			item.Operation = &OperationReceipt{OperationID: operationID, Binding: binding, PollArguments: args, Deadline: h.now() + binding.TimeoutSeconds}
+		}
+		item.Status = "unknown"
+		item.ErrorCode = strptr("operation_outcome_unknown")
+		state.Status = "needs_reconciliation"
+		state.ErrorCode = item.ErrorCode
 	default:
 		return hostError("operation_state_unknown")
 	}
@@ -669,6 +693,13 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 		return h.save(run, state, "", nil, map[string]any{"kind": "reconciliation_required", "invocation_id": item.InvocationID})
 	}
 	if h.now() >= receipt.Deadline {
+		if receipt.Binding.ReconcileOnTimeout {
+			item.Status = "unknown"
+			item.ErrorCode = strptr("operation_outcome_unknown")
+			state.Status = "needs_reconciliation"
+			state.ErrorCode = item.ErrorCode
+			return h.save(run, state, "", nil, map[string]any{"kind": "reconciliation_required", "invocation_id": item.InvocationID})
+		}
 		item.Status = "failed"
 		item.ErrorCode = strptr("operation_deadline_exceeded")
 		Reject(state, item.Call.CallRef, item.Call.Capability, "operation_deadline_exceeded", nil, "")

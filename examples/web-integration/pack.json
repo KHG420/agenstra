@@ -1,0 +1,24 @@
+{
+  "schema": "agenstra.rest-pack.v2",
+  "name": "orders",
+  "version": "1.0.0",
+  "guidance": "Read the demo orders before updating the page.",
+  "base_url_env": "DEMO_API_URL",
+  "capabilities": [{
+    "name": "orders.list",
+    "description": "Query the demo orders from the host REST API",
+    "method": "GET",
+    "path": "/demo/orders",
+    "effect": "read",
+    "input_schema": { "type": "object", "properties": {}, "additionalProperties": false },
+    "output_schema": {
+      "type": "object",
+      "properties": { "orders": { "type": "array", "items": {
+        "type": "object",
+        "properties": { "id": { "type": "string" }, "customer": { "type": "string" }, "status": { "type": "string" }, "amount": { "type": "number" } },
+        "required": ["id", "customer", "status", "amount"], "additionalProperties": false
+      } } },
+      "required": ["orders"], "additionalProperties": false
+    }
+  }]
+}

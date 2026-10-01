@@ -20,15 +20,17 @@ type InvocationContext struct {
 	ConnectionID   string `json:"connection_id"`
 }
 type OperationBinding struct {
-	IDPath          []any    `json:"id_path"`
-	StatusPath      []any    `json:"status_path"`
-	PollCapability  string   `json:"poll_capability"`
-	PollArgument    []string `json:"poll_argument"`
-	PendingStates   []string `json:"pending_states"`
-	SuccessStates   []string `json:"success_states"`
-	FailureStates   []string `json:"failure_states"`
-	IntervalSeconds float64  `json:"interval_seconds"`
-	TimeoutSeconds  float64  `json:"timeout_seconds"`
+	IDPath               []any    `json:"id_path"`
+	StatusPath           []any    `json:"status_path"`
+	PollCapability       string   `json:"poll_capability"`
+	PollArgument         []string `json:"poll_argument"`
+	PendingStates        []string `json:"pending_states"`
+	SuccessStates        []string `json:"success_states"`
+	FailureStates        []string `json:"failure_states"`
+	IntervalSeconds      float64  `json:"interval_seconds"`
+	TimeoutSeconds       float64  `json:"timeout_seconds"`
+	ReconciliationStates []string `json:"reconciliation_states,omitempty"`
+	ReconcileOnTimeout   bool     `json:"reconcile_on_timeout,omitempty"`
 }
 
 func (b OperationBinding) MarshalJSON() ([]byte, error) {
@@ -94,6 +96,12 @@ func (b *OperationBinding) UnmarshalJSON(raw []byte) error {
 			}
 			seen[state] = true
 		}
+	}
+	for _, state := range parsed.ReconciliationStates {
+		if state == "" || seen[state] {
+			return errors.New("operation states must be nonempty and disjoint")
+		}
+		seen[state] = true
 	}
 	*b = OperationBinding(parsed)
 	return nil

@@ -1,0 +1,24 @@
+{
+  "schema": "agenstra.frontend-profile.v1",
+  "version": "1.0.0",
+  "handler_version": "1",
+  "context_schema": {
+    "type": "object",
+    "properties": { "page": { "type": "string" }, "status": { "type": "string" }, "selected_order": { "type": "string" } },
+    "required": ["page", "status", "selected_order"], "additionalProperties": false
+  },
+  "actions": [
+    {
+      "name": "ui.show_orders", "description": "Open the orders page and filter its list",
+      "input_schema": { "type": "object", "properties": { "status": { "enum": ["all", "pending"] } }, "required": ["status"], "additionalProperties": false },
+      "output_schema": { "type": "object", "properties": { "page": { "const": "orders" }, "status": { "type": "string" }, "visible_count": { "type": "integer" } }, "required": ["page", "status", "visible_count"], "additionalProperties": false },
+      "effect": "write", "timeout_seconds": 30
+    },
+    {
+      "name": "ui.open_order", "description": "Open the detail view of a selected order",
+      "input_schema": { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"], "additionalProperties": false },
+      "output_schema": { "type": "object", "properties": { "page": { "const": "order_detail" }, "id": { "type": "string" } }, "required": ["page", "id"], "additionalProperties": false },
+      "effect": "write", "approval_required": true, "timeout_seconds": 30
+    }
+  ]
+}

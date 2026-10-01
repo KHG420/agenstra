@@ -27,6 +27,7 @@ type HTTPServer struct {
 	workerCtx           context.Context
 	cancel              context.CancelFunc
 	handler             http.Handler
+	Web                 *WebIntegration
 }
 
 func NewHTTPServer(host *AgentHost, deployment *Deployment, workerEnabled bool, interval time.Duration) (*HTTPServer, error) {
@@ -53,6 +54,16 @@ func NewHTTPServer(host *AgentHost, deployment *Deployment, workerEnabled bool, 
 		}
 		return nil, e
 	}
+	if deployment.Config.WebIntegration != nil {
+		var e error
+		s.Web, e = NewWebIntegration(host, deployment, *deployment.Config.WebIntegration)
+		if e != nil {
+			if registryOpened {
+				_ = deployment.Registry.Close()
+			}
+			return nil, e
+		}
+	}
 	s.handler = http.HandlerFunc(s.serveHTTP)
 	s.workerCtx, s.cancel = context.WithCancel(context.Background())
 	s.ready = true
@@ -75,6 +86,9 @@ func (s *HTTPServer) Close() error {
 	s.cancel()
 	close(s.stop)
 	<-s.done
+	if s.Web != nil {
+		return s.Web.Close()
+	}
 	return nil
 }
 func (s *HTTPServer) worker() {
@@ -87,7 +101,13 @@ func (s *HTTPServer) worker() {
 			return
 		default:
 		}
-		_, err := s.Host.WakeDue(s.workerCtx, 100)
+		var err error
+		if s.Web != nil {
+			err = s.Web.Tick(s.workerCtx)
+		}
+		if err == nil {
+			_, err = s.Host.WakeDue(s.workerCtx, 100)
+		}
 		if s.workerCtx.Err() != nil {
 			return
 		}
@@ -186,6 +206,10 @@ func (s *HTTPServer) owner(r *http.Request) (string, error) {
 }
 func (s *HTTPServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
+	if s.Web != nil && (strings.HasPrefix(p, "/web/") || strings.HasPrefix(p, "/chat/v1/") || strings.HasPrefix(p, "/browser/v1/")) {
+		s.webHTTP(w, r)
+		return
+	}
 	if p == "/healthz" && r.Method == "GET" {
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 		return
