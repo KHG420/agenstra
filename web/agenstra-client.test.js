@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AgenstraClient } from "./agenstra-client.js";
+import { AgenstraClient, AgenstraActionError } from "./agenstra-client.js";
 const response = (data, status = 200) => ({ status, ok: status >= 200 && status < 300, json: async () => data });
 const command = { id: "cmd-1", run_id: "run-1", session_id: "tab-1", generation: 1, action: "ui.navigate", arguments: { page: "orders" }, context_revision: 1 };
 function storage() { const data = new Map();return { getItem: key => data.get(key) || null, setItem: (key, value) => data.set(key, value), removeItem: key => data.delete(key) }; }
@@ -294,4 +294,48 @@ test("concurrent first sends create only one default conversation", async t => {
   t.after(() => c.destroy({ closeSession: false }));
   await Promise.all([c.send("One", { clientId: "one" }), c.send("Two", { clientId: "two" })]);
   assert.equal(creates, 1);
+});
+
+test('a proven non-committed failure returns a failed receipt; ordinary exceptions remain unknown', async () => {
+  for (const [error, status] of [[new AgenstraActionError('permission_denied', 'Not allowed'), 'failed'], [new Error('Network lost after saving'), 'unknown']]) {
+    const results = [];
+    const c = client(async (path, options) => {
+      if (path.endsWith('/begin')) return response({ accepted: true });
+      if (path.endsWith('/result')) { results.push(JSON.parse(options.body)); return response({ status }); }
+      return response({ status: 'waiting' });
+    });
+    c.registerActions({ 'ui.navigate': async () => { throw error; } });
+    await c.executeCommand(command);
+    assert.equal(results[0].status, status);
+    assert.equal(results[0].error_code, status === 'failed' ? 'permission_denied' : 'browser_handler_outcome_unknown');
+    await c.destroy({ closeSession: false });
+  }
+});
+test('an unchanged handler result does not advance page revision and stale manual changes are refreshed by heartbeat', async () => {
+  const updates = [];
+  let page = 'home';
+  const c = client(async (path, options) => {
+    if (path.endsWith('/begin')) return response({ accepted: true });
+    if (path.endsWith('/observation')) { updates.push(JSON.parse(options.body)); return response({ session: { id: 'tab-1', generation: 1, context_revision: updates.length + 1 } }); }
+    if (path.endsWith('/poll')) return response({ commands: [] });
+    return response({ status: 'succeeded' });
+  });
+  c.options.getPageObservation = () => ({ page }); c.pageObservation = { page: 'home' };
+  c.registerActions({ 'ui.navigate': async () => ({ page: 'home' }) });
+  await c.executeCommand(command); assert.equal(updates.length, 0);
+  page = 'orders'; await c.pollBrowser(); assert.equal(updates.length, 1);
+  assert.deepEqual(updates[0].observation, { page: 'orders' });
+  await c.destroy({ closeSession: false });
+});
+
+test('public HTTP pages without randomUUID still get stable valid UUID request IDs', async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  const native = globalThis.crypto;
+  const c = client(async () => response({}));
+  try {
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { getRandomValues: bytes => native.getRandomValues(bytes) } });
+    const first = c.id(), second = c.id();
+    assert.match(first, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+    assert.notEqual(first, second);
+  } finally { Object.defineProperty(globalThis, 'crypto', original); await c.destroy({ closeSession: false }); }
 });

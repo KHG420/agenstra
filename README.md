@@ -8,6 +8,8 @@ An optional management interface lets administrators validate, publish, activate
 
 Optional web integration adds headless chat and conversation APIs, a framework-independent JavaScript SDK, a conversation queue, and a browser control bridge. The framework owns agent context and checkpoint recovery; hosts select a conversation by ID and supply their own chat UI, authenticated identity, business APIs, page observations, and UI handlers. Authorization, approvals and receipts reuse the existing runtime. See the [Web integration guide (Chinese)](docs/web-integration.md), or run `go run ./examples/web-integration` for a local demo without a model key.
 
+For an existing frontend/backend application, follow the [host integration checklist and lottery reference (Chinese)](docs/host-integration.md). Export the headless client with `node web/export-client.mjs /path/to/host/vendor/agenstra`; the export includes TypeScript declarations and SHA-256 provenance, with no UI or npm runtime dependency.
+
 Agenstra can serve a personal tool, a team application, or a larger system. This repository contains the framework, generic tests, deployment templates, guides, and a clearly labeled local demo. **It does not include production business packs, an external model, or credentials.** `deploy/deployment.example.json` is a template; starting it unchanged will not create an agent with working capabilities.
 
 ## Scope and architecture
