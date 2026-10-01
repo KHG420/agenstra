@@ -187,6 +187,7 @@
     $("binding-approvals").value = (config?.approval_capabilities || []).join(", ");
     $("binding-model-data").checked = Boolean(config?.allow_model_data);
     $("binding-identity-env").value = (config?.binding_environment || []).join(", ");
+    $("binding-delegations").value = JSON.stringify(config?.delegations || {}, null, 2);
     $("binding-identity").value = config?.identity ? JSON.stringify(config.identity, null, 2) : "";
     $("disable-binding").disabled = !matching?.enabled;
     $("check-binding").disabled = !matching?.enabled;
@@ -277,6 +278,7 @@
           approval_capabilities: names($("binding-approvals").value),
           allow_model_data: $("binding-model-data").checked,
           binding_environment: names($("binding-identity-env").value),
+          delegations: JSON.parse($("binding-delegations").value || "{}"),
           identity: $("binding-identity").value.trim() ? JSON.parse($("binding-identity").value) : null,
         },
       });

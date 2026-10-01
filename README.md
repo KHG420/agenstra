@@ -20,7 +20,7 @@ Agenstra can serve a personal tool, a team application, or a larger system. This
 
 Suppose an application already has search, data-transformation, and notification APIs. Once these are declared as capabilities, the agent can search, read actual fields from the returned Fact, call the transformation API, and send a notification if the task calls for one. Agenstra does not hard-code that workflow. The integrator chooses capability boundaries, usage guidance, and authorization policy.
 
-The current durable host targets **one node with persistent local storage and SQLite WAL**. A deployment can serve multiple users with separate connections and capability grants. Distributed high availability, automatic retention cleanup, model quality, and the correctness of external computations require separate design or validation.
+The current durable host targets **one node with persistent local storage and SQLite WAL**. A deployment can serve multiple users with separate connections and capability grants. One project owns one pack; a durable task can explicitly compose authorized capabilities from other projects using verified per-user connections and restricted task scopes. See [cross-project tasks](docs/cross-project-tasks.md). All capabilities, including reads, require explicit grants. Distributed high availability, automatic retention cleanup, model quality, and the correctness of external computations require separate design or validation.
 
 ```mermaid
 flowchart LR

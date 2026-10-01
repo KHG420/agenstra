@@ -21,6 +21,7 @@ type ScheduleSpec struct {
 // ScheduleRequest is the complete editable definition of a scheduled task.
 // Updates replace this definition and require the current revision.
 type ScheduleRequest struct {
+	Sources     []RunSource  `json:"sources,omitempty"`
 	Name        string       `json:"name"`
 	PackID      string       `json:"pack_id"`
 	Instruction string       `json:"instruction"`
@@ -62,6 +63,11 @@ func (r ScheduleRequest) normalized(now float64) (ScheduleRequest, float64, erro
 	if strings.TrimSpace(r.Name) == "" || len([]rune(r.Name)) > 200 || strings.TrimSpace(r.PackID) == "" || len(r.PackID) > 128 || strings.TrimSpace(r.Instruction) == "" || len([]rune(r.Instruction)) > 30000 {
 		return r, 0, hostError("schedule_invalid")
 	}
+	sources, err := normalizedSources(r.PackID, r.Sources)
+	if err != nil {
+		return r, 0, err
+	}
+	r.Sources = sources
 	spec := &r.Schedule
 	switch spec.Kind {
 	case "once":
@@ -133,7 +139,7 @@ func (h *AgentHost) CreateSchedule(ctx context.Context, owner string, request Sc
 	if err != nil {
 		return ScheduledTask{}, err
 	}
-	if _, err = h.policy(ctx, owner, request.PackID, true); err != nil {
+	if _, err = h.bindSources(ctx, owner, request.PackID, request.Sources); err != nil {
 		return ScheduledTask{}, err
 	}
 	task := ScheduledTask{ScheduleID: NewID(), OwnerID: owner, ScheduleRequest: request, Status: "active", NextRunAt: &next, CreatedAt: now, UpdatedAt: now}
@@ -167,7 +173,7 @@ func (h *AgentHost) UpdateSchedule(ctx context.Context, id, owner string, revisi
 	if err != nil {
 		return task, err
 	}
-	if _, err = h.policy(ctx, owner, request.PackID, true); err != nil {
+	if _, err = h.bindSources(ctx, owner, request.PackID, request.Sources); err != nil {
 		return task, err
 	}
 	task.ScheduleRequest, task.NextRunAt = request, &next
@@ -195,7 +201,7 @@ func (h *AgentHost) ResumeSchedule(ctx context.Context, id, owner string, revisi
 	if task.Status == "completed" {
 		return task, hostError("schedule_completed")
 	}
-	if _, err = h.policy(ctx, owner, task.PackID, true); err != nil {
+	if _, err = h.bindSources(ctx, owner, task.PackID, task.Sources); err != nil {
 		return task, err
 	}
 	if task.Status == "paused" && task.Schedule.Kind != "once" {
@@ -243,6 +249,11 @@ func (h *AgentHost) DispatchDueSchedules(ctx context.Context, limit int) (int, e
 		}
 		runID := NewID()
 		state, prepareErr := h.prepareRun(ctx, task.OwnerID, task.PackID, task.Instruction, runID)
+		if prepareErr == nil && len(task.Sources) > 0 {
+			bindings, err := h.bindSources(ctx, task.OwnerID, task.PackID, task.Sources)
+			prepareErr = err
+			state["project_sources"] = bindings
+		}
 		if prepareErr == nil {
 			// Dispatch, pause and resume also advance Revision. Count a definition's
 			// instruction once, rather than treating each tick as fresh user evidence.
@@ -255,7 +266,7 @@ func (h *AgentHost) DispatchDueSchedules(ctx context.Context, limit int) (int, e
 		// it due for retry and surface through worker readiness.
 		if prepareErr != nil {
 			switch ErrorCode(prepareErr) {
-			case "access_denied", "forbidden", "identity_unverified", "model_data_not_authorized", "capability_not_granted":
+			case "access_denied", "forbidden", "identity_unverified", "model_data_not_authorized", "capability_not_granted", "source_scope_invalid":
 			default:
 				if firstErr == nil {
 					firstErr = prepareErr

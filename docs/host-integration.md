@@ -48,3 +48,5 @@ SDK 在 `web/agenstra-client.js`，导出命令和完整配置见 [Web integrati
 业务版本与浏览器版本须分开命名。抽奖用 `activityRevision` 表示 `/api/activity` 的版本，写操作传 `expectedRevision`；`ui.get_context` 外层 `revision` 是浏览器桥版本。文件导入使用真实 preview ID、导入模式与业务版本绑定审批，避免批准后被替换文件。
 
 文件上传仍需要用户选择文件；Agent 可以执行后续检查、模式选择、审批和导入。下载 handler 确认“下载已发起”，不能假定用户电脑的保存位置。聊天 UI 和动作 handler 都应等待可核对的结果后再显示完成。
+
+跨项目任务可通过可选 `sources` 明确选择目标能力，并按发起项目委派、目标验证权限和任务范围取交集。目标身份、实际凭据、版本固定、项目记忆和各入口的完整接入说明见[跨项目任务、身份与授权](cross-project-tasks.md)。所有读取与轮询也必须明确授权。

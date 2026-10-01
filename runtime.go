@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 )
 
 type AgentRuntime struct {
+	OriginPackID         string
 	Provider             CapabilityProvider
 	Model                DecisionModel
 	Grants               map[string]bool
@@ -333,8 +335,11 @@ func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
 	sort.Strings(names)
 	for _, name := range names {
 		cap := r.Provider.Capabilities()[name]
+		if !r.Grants[cap.Name] {
+			continue
+		}
 		v := cap.ModelView()
-		v["authorized"] = cap.Effect == "read" || r.Grants[cap.Name]
+		v["authorized"] = true
 		caps = append(caps, v)
 	}
 	skillViews := []JSON{}
@@ -344,6 +349,9 @@ func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
 	}
 	sort.Strings(skillNames)
 	for _, name := range skillNames {
+		if !r.skillAllowed(name) {
+			continue
+		}
 		s := r.Provider.Skills()[name]
 		skillViews = append(skillViews, JSON{"name": s.Description.Name, "description": s.Description.Description})
 	}
@@ -371,13 +379,13 @@ func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
 	omissions = append(omissions, notes...)
 	loaded := map[string]string{}
 	for _, name := range state.LoadedSkills {
-		if s, ok := r.Provider.Skills()[name]; ok {
+		if s, ok := r.Provider.Skills()[name]; ok && r.skillAllowed(name) {
 			loaded[name] = s.Content
 		}
 	}
 	var inspected JSON
 	if state.InspectedCapability != nil {
-		if c, ok := r.Provider.Capabilities()[*state.InspectedCapability]; ok {
+		if c, ok := r.Provider.Capabilities()[*state.InspectedCapability]; ok && r.Grants[c.Name] {
 			raw, _ := json.Marshal(c)
 			_ = json.Unmarshal(raw, &inspected)
 		}
@@ -386,7 +394,7 @@ func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
 	if r.Durable {
 		features = append(features, "durable_execution")
 	}
-	packet := ContextPacket{Schema: "agenstra.context.v1", Instruction: state.Instruction, Capabilities: caps, Facts: views, Observations: obs, RoundIndex: state.RoundsUsed, RoundsRemaining: r.MaxModelRounds - state.RoundsUsed, ToolCallsRemaining: r.MaxToolCalls - state.ToolCallsUsed, Skills: skillViews, LoadedSkills: loaded, InspectedCapability: inspected, InspectedFact: state.InspectedFact, Followups: state.Followups, RuntimeFeatures: features, ContextOmissions: omissions, Memories: append([]MemoryView{}, r.Memories...)}
+	packet := ContextPacket{OriginPackID: r.OriginPackID, Schema: "agenstra.context.v1", Instruction: state.Instruction, Capabilities: caps, Facts: views, Observations: obs, RoundIndex: state.RoundsUsed, RoundsRemaining: r.MaxModelRounds - state.RoundsUsed, ToolCallsRemaining: r.MaxToolCalls - state.ToolCallsUsed, Skills: skillViews, LoadedSkills: loaded, InspectedCapability: inspected, InspectedFact: state.InspectedFact, Followups: state.Followups, RuntimeFeatures: features, ContextOmissions: omissions, Memories: append([]MemoryView{}, r.Memories...)}
 	available := r.MaxContextCharacters - utf8.RuneCountInString(r.systemPrompt())
 	return budgetContext(packet, state, available)
 }
@@ -536,12 +544,14 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			}
 		}
 	case "inspect_capability":
-		state.InspectedCapability = &decision.Name
-		if _, ok := r.Provider.Capabilities()[decision.Name]; !ok {
+		state.InspectedCapability = nil
+		if _, ok := r.Provider.Capabilities()[decision.Name]; !ok || !r.Grants[decision.Name] {
 			Reject(state, "inspect", "agent.inspect_capability", "capability_unknown", nil, "")
+		} else {
+			state.InspectedCapability = &decision.Name
 		}
 	case "read_skill":
-		if _, ok := r.Provider.Skills()[decision.Name]; !ok {
+		if _, ok := r.Provider.Skills()[decision.Name]; !ok || !r.skillAllowed(decision.Name) {
 			Reject(state, "skill", "agent.read_skill", "skill_unknown", nil, "")
 		} else {
 			next := []string{}
@@ -685,7 +695,7 @@ func (r *AgentRuntime) Run(ctx context.Context, instruction string) (RunResult, 
 		if len(state.Pending) > 0 {
 			approvalRequired := false
 			for _, item := range state.Pending {
-				if cap, ok := r.Provider.Capabilities()[item.Call.Capability]; ok && cap.ApprovalRequired {
+				if cap, ok := r.Provider.Capabilities()[item.Call.Capability]; ok && r.Grants[cap.Name] && cap.ApprovalRequired {
 					approvalRequired = true
 					break
 				}
@@ -721,4 +731,16 @@ func (r *AgentRuntime) systemPrompt() string {
 		prompt += memoryUsagePrompt
 	}
 	return prompt
+}
+
+func (r *AgentRuntime) skillAllowed(name string) bool {
+	if !strings.Contains(name, "::") {
+		return true
+	}
+	for _, cap := range r.Provider.Capabilities() {
+		if r.Grants[cap.Name] && slices.Contains(cap.SkillsList, name) {
+			return true
+		}
+	}
+	return false
 }

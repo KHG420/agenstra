@@ -29,6 +29,7 @@ type Memory struct {
 	UpdatedAt     float64 `json:"updated_at"`
 }
 type MemoryView struct {
+	PackID   string `json:"pack_id,omitempty"`
 	ID       string `json:"id"`
 	Key      string `json:"key"`
 	Value    string `json:"value"`
@@ -172,7 +173,7 @@ func memoryViews(items []Memory) []MemoryView {
 	views := []MemoryView{}
 	for _, key := range keys {
 		m := byKey[key]
-		views = append(views, MemoryView{ID: m.ID, Key: m.Key, Value: m.Value, Kind: m.Kind, Scope: m.Scope, Revision: m.Revision})
+		views = append(views, MemoryView{PackID: m.PackID, ID: m.ID, Key: m.Key, Value: m.Value, Kind: m.Kind, Scope: m.Scope, Revision: m.Revision})
 	}
 	return views
 }
@@ -202,7 +203,7 @@ func (h *AgentHost) prepareMemories(ctx context.Context, run StoredRun) (StoredR
 		}
 		known := []MemoryView{}
 		for _, m := range existing {
-			known = append(known, MemoryView{ID: m.ID, Key: m.Key, Value: m.Value, Kind: m.Kind, Scope: m.Scope, Revision: m.Revision})
+			known = append(known, MemoryView{PackID: m.PackID, ID: m.ID, Key: m.Key, Value: m.Value, Kind: m.Kind, Scope: m.Scope, Revision: m.Revision})
 		}
 		request := MemoryExtractionRequest{Text: input.Text, Existing: known, MaxCharacters: h.Settings.MaxContextCharacters}
 		_, extractErr := memoryExtractionInput(&request)
@@ -246,7 +247,25 @@ func (h *AgentHost) prepareMemories(ctx context.Context, run StoredRun) (StoredR
 		if err != nil {
 			return run, err
 		}
-		run.State["memory_snapshot"] = memoryViews(items)
+		views := memoryViews(items)
+		bindings, err := runBindings(run)
+		if err != nil {
+			return run, err
+		}
+		for _, binding := range bindings {
+			source, err := h.Store.listMemories(run.OwnerID, binding.PackID, -1, 0)
+			if err != nil {
+				return run, err
+			}
+			private := []Memory{}
+			for _, m := range source {
+				if m.Scope == "pack" {
+					private = append(private, m)
+				}
+			}
+			views = append(views, memoryViews(private)...)
+		}
+		run.State["memory_snapshot"] = views
 		state, err := h.restore(run)
 		if err != nil {
 			return run, err
@@ -266,5 +285,28 @@ func (h *AgentHost) runMemories(run StoredRun) ([]MemoryView, error) {
 			return nil, hostError("run_state_invalid")
 		}
 	}
-	return h.Store.visibleMemorySnapshot(run.OwnerID, run.PackID, views)
+	bindings, err := runBindings(run)
+	if err != nil {
+		return nil, err
+	}
+	allowed := map[string]bool{run.PackID: true}
+	for _, b := range bindings {
+		allowed[b.PackID] = true
+	}
+	out := []MemoryView{}
+	for _, v := range views {
+		pack := v.PackID
+		if pack == "" {
+			pack = run.PackID
+		}
+		if !allowed[pack] || pack != run.PackID && v.Scope != "pack" {
+			continue
+		}
+		visible, err := h.Store.visibleMemorySnapshot(run.OwnerID, pack, []MemoryView{v})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, visible...)
+	}
+	return out, nil
 }

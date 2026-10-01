@@ -1,8 +1,10 @@
 export type JSONObject = { [key: string]: unknown };
 export interface BrowserCommand { id: string; run_id: string; session_id: string; generation: number; action: string; arguments: JSONObject; status: string; context_revision: number; expires_at: number }
-export interface Run { run_id: string; status: string; revision: number; state: { runtime: JSONObject } }
+export interface RunSource { pack_id: string; capabilities: string[] }
+export interface ProjectBinding extends RunSource { release: string; subject: string }
+export interface Run { run_id: string; status: string; revision: number; state: JSONObject & { runtime: JSONObject; project_sources?: ProjectBinding[] } }
 export interface ChatConversation { id: string; integration_id: string; created_at: number }
-export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; run_id: string; status: string; answer_markdown?: string; run?: Run }
+export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; sources?: RunSource[]; run_id: string; status: string; answer_markdown?: string; run?: Run }
 export interface ConversationSnapshot { conversation: ChatConversation; messages: ChatMessage[] }
 export interface Memory {
   id: string; scope: "user" | "pack"; pack_id: string; key: string; value: string;
@@ -48,14 +50,14 @@ export class AgenstraClient {
   selectConversation(id: string): Promise<ChatConversation>;
   getConversation(): Promise<ChatConversation>;
   snapshot(): Promise<ConversationSnapshot>;
-  send(text: string, options?: { clientId?: string }): Promise<ChatMessage>;
+  send(text: string, options?: { clientId?: string; sources?: RunSource[] }): Promise<ChatMessage>;
   watchConversation(callback: (snapshot: ConversationSnapshot) => void): () => void;
   getRun(id: string): Promise<Run>;
   supplyInput(id: string, field: string, text: string, revision: number): Promise<Run>;
   approve(id: string, invocation: JSONObject, revision: number, approved: boolean): Promise<Run>;
   cancelMessage(id: string): Promise<ChatMessage>;
   reconcile(id: string, revision: number): Promise<Run>;
-  run(instruction: string, options?: { requestId?: string }): Promise<Run>;
+  run(instruction: string, options?: { requestId?: string; sources?: RunSource[] }): Promise<Run>;
   destroy(options?: { closeSession?: boolean }): Promise<void>;
 }
 export function createAgenstraClient(options: ClientOptions): AgenstraClient;

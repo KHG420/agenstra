@@ -279,6 +279,9 @@ func ErrorCode(err error) string {
 }
 
 type Fact struct {
+	SourcePackID     string     `json:"source_pack_id,omitempty"`
+	SourceRelease    string     `json:"source_release,omitempty"`
+	SourceSubject    string     `json:"source_subject,omitempty"`
 	FactID           string     `json:"fact_id"`
 	SourceCapability string     `json:"source_capability"`
 	SourceVersion    string     `json:"source_version"`
@@ -304,6 +307,7 @@ type Observation struct {
 	ArgumentsOmitted bool    `json:"arguments_omitted"`
 }
 type ContextPacket struct {
+	OriginPackID        string            `json:"origin_pack_id,omitempty"`
 	Schema              string            `json:"schema"`
 	Instruction         string            `json:"instruction"`
 	Capabilities        []JSON            `json:"capabilities"`
@@ -359,7 +363,7 @@ func (d Decision) Validate() error {
 			return errors.New("model_decision_invalid")
 		}
 		for _, c := range d.Calls {
-			if !callRefPattern.MatchString(c.CallRef) || len(c.Capability) < 1 || len(c.Capability) > 128 || len(c.Reason) < 1 || len(c.Reason) > 500 || c.Arguments == nil {
+			if !callRefPattern.MatchString(c.CallRef) || len(c.Capability) < 1 || len(c.Capability) > 330 || len(c.Reason) < 1 || len(c.Reason) > 500 || c.Arguments == nil {
 				return errors.New("model_decision_invalid")
 			}
 		}
@@ -377,7 +381,7 @@ func (d Decision) Validate() error {
 			return errors.New("model_decision_invalid")
 		}
 	case "read_skill", "inspect_capability":
-		if len(d.Name) < 1 || len(d.Name) > 128 {
+		if len(d.Name) < 1 || len(d.Name) > 330 {
 			return errors.New("model_decision_invalid")
 		}
 	case "inspect_fact":

@@ -154,11 +154,11 @@ func serverError(w http.ResponseWriter, e error) {
 		switch host.Code {
 		case "not_found":
 			status = 404
-		case "access_denied", "forbidden", "identity_unverified", "model_data_not_authorized":
+		case "access_denied", "forbidden", "identity_unverified", "model_data_not_authorized", "capability_not_granted":
 			status = 403
 		case "authorization_unavailable", "connection_unavailable":
 			status = 503
-		case "schedule_invalid", "invalid_limit", "invalid_page", "memory_invalid":
+		case "source_scope_invalid", "schedule_invalid", "invalid_limit", "invalid_page", "memory_invalid":
 			status = 422
 		}
 		apiError(w, status, host.Code, false)
@@ -264,9 +264,10 @@ func (s *HTTPServer) runsHTTP(w http.ResponseWriter, r *http.Request, owner stri
 	switch r.Method {
 	case "POST":
 		var body struct {
-			PackID      string  `json:"pack_id"`
-			Instruction string  `json:"instruction"`
-			RequestID   *string `json:"request_id"`
+			Sources     []RunSource `json:"sources,omitempty"`
+			PackID      string      `json:"pack_id"`
+			Instruction string      `json:"instruction"`
+			RequestID   *string     `json:"request_id"`
 		}
 		if e := decodeBody(r, &body); e != nil || len(body.PackID) < 1 || len(body.PackID) > 128 || len(body.Instruction) < 1 || len(body.Instruction) > 30000 || (body.RequestID != nil && (len(*body.RequestID) < 1 || len(*body.RequestID) > 128)) {
 			apiError(w, 422, "invalid_request", true)
@@ -276,7 +277,7 @@ func (s *HTTPServer) runsHTTP(w http.ResponseWriter, r *http.Request, owner stri
 		if body.RequestID != nil {
 			requestID = *body.RequestID
 		}
-		run, e := s.Host.Create(r.Context(), owner, body.PackID, body.Instruction, requestID)
+		run, e := s.Host.CreateWithSources(r.Context(), owner, body.PackID, body.Instruction, requestID, body.Sources)
 		if e != nil {
 			serverError(w, e)
 			return
