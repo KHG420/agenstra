@@ -2,6 +2,13 @@
 export class AgenstraError extends Error {
   constructor(code, status = 0) { super(code); this.name = "AgenstraError"; this.code = code; this.status = status; }
 }
+/** Throw only when the host has evidence the action did not commit a side effect. */
+export class AgenstraActionError extends Error {
+  constructor(code, message = code) {
+    if (!/^[a-z][a-z0-9_]{0,95}$/.test(code)) throw new TypeError("Invalid action error code");
+    super(message); this.name = "AgenstraActionError"; this.code = code;
+  }
+}
 export class AgenstraClient {
   constructor(options) {
     if (!options?.integration || typeof options.getSession !== "function") throw new TypeError("integration and getSession are required");
@@ -34,7 +41,13 @@ export class AgenstraClient {
   load(key) { try { return JSON.parse(this.storage?.getItem(this.prefix + ":" + key) || "null"); } catch { return null; } }
   save(key, value) { try { this.storage?.setItem(this.prefix + ":" + key, JSON.stringify(value)); } catch { /* Server claims still prevent execution on replay. */ } }
   remove(key) { try { this.storage?.removeItem(this.prefix + ":" + key); } catch { /* Storage may be disabled by the host. */ } }
-  id() { return globalThis.crypto.randomUUID(); }
+  id() {
+    if (typeof globalThis.crypto.randomUUID === "function") return globalThis.crypto.randomUUID();
+    const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+    const hex = Array.from(bytes, n => n.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
   async request(path, { method = "GET", body, browserKey, retry = true } = {}) {
     if (this.closed) throw new AgenstraError("client_closed");
     if (!this.token) { const session = await this.options.getSession(); this.token = typeof session === "string" ? session : session.token; }
@@ -108,6 +121,10 @@ export class AgenstraClient {
   async pollBrowser() {
     if (this.closed) return;
     try {
+      if (this.options.getPageObservation) {
+        const latest = await this.options.getPageObservation();
+        if (JSON.stringify(latest) !== JSON.stringify(this.pageObservation)) await this.updatePageObservation(latest);
+      }
       await this.flushReceipts();
       const data = await this.request("/browser/v1/sessions/" + this.browser.id + "/poll", { method: "POST", browserKey: this.browser.key, body: { generation: this.browser.generation } });
       if (data.blocked_unknown) this.emit("reconciliation", { status: "unknown" });
@@ -146,13 +163,18 @@ export class AgenstraClient {
       const result = await handler(structuredClone(command.arguments), { commandId: command.id, runId: command.run_id });
       receipt.status = "succeeded"; receipt.result = result ?? {};
       this.save("receipts", this.receipts);
-      try { await this.updatePageObservation(this.options.getPageObservation ? await this.options.getPageObservation() : this.pageObservation); } catch (error) { this.emit("error", error); }
+      try {
+        const latest = this.options.getPageObservation ? await this.options.getPageObservation() : this.pageObservation;
+        if (JSON.stringify(latest) !== JSON.stringify(this.pageObservation)) await this.updatePageObservation(latest);
+      } catch (error) { this.emit("error", error); }
       await this.flushReceipts();
       this.emit("action", { command, status: ["confirmed", "acked"].includes(receipt.status) ? "succeeded" : "unknown" });
     } catch (error) {
       const receipt = this.receipts[command.id];
       if (receipt && receipt.status !== "succeeded" && receipt.status !== "acked") {
-        receipt.status = "unknown"; receipt.error_code = "browser_handler_outcome_unknown";
+        const definite = receipt.status === "running" && error instanceof AgenstraActionError;
+        receipt.status = definite ? "failed" : "unknown";
+        receipt.error_code = definite ? error.code : "browser_handler_outcome_unknown";
         this.save("receipts", this.receipts);
         try { await this.flushReceipts(); } catch { /* Retain the receipt for reconnection. */ }
       }

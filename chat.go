@@ -220,6 +220,7 @@ func (w *WebIntegration) advanceConversation(ctx context.Context, owner, id stri
 		m.Status = status
 		if runtime, ok := run.State["runtime"].(map[string]any); ok {
 			m.AnswerMarkdown, _ = runtime["answer_markdown"].(string)
+			m.ErrorCode, _ = runtime["error_code"].(string)
 		}
 		if e = w.Store.store.write(func(tx *sql.Tx) error {
 			var latest ChatMessage

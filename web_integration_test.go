@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -552,5 +553,70 @@ func TestWebDisabledKeepsLegacyRoutes(t *testing.T) {
 		if out.Code != 404 {
 			t.Fatal(path, out.Code)
 		}
+	}
+}
+
+// Multiple sequential page changes need fresh observations in the same run.
+func TestBrowserRepeatedPageObservationAcrossThreeActions(t *testing.T) {
+	decisions := []Decision{}
+	for i := 1; i <= 3; i++ {
+		decisions = append(decisions,
+			Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []ToolCall{{CallRef: fmt.Sprintf("context-%d", i), Capability: "ui.get_context", Arguments: JSON{}, Reason: "Refresh page revision"}}},
+			Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []ToolCall{{CallRef: fmt.Sprintf("navigate-%d", i), Capability: "ui.navigate", Arguments: JSON{"page": fmt.Sprintf("page-%d", i)}, Reason: "Next page"}}})
+	}
+	f := newWebFixture(t, &hostModel{decisions: decisions}, false)
+	r := f.run(t)
+	for i := 1; i <= 3; i++ {
+		if r.Status != "waiting" {
+			t.Fatalf("step %d: %s", i, r.Status)
+		}
+		c := f.dispatch(t)
+		accepted, _, e := f.w.BeginBrowserCommand(t.Context(), "alice", c.ID, f.key, 1)
+		if e != nil || !accepted {
+			t.Fatalf("step %d begin: %v %v", i, accepted, e)
+		}
+		page := JSON{"page": fmt.Sprintf("page-%d", i)}
+		f.session, e = f.w.UpdatePageObservation("alice", f.session.ID, f.key, 1, f.session.ContextRevision, page)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = f.w.CompleteBrowserCommand("alice", c.ID, f.key, 1, "succeeded", page, ""); e != nil {
+			t.Fatal(e)
+		}
+		f.now += 2
+		r, e = f.h.Drive(t.Context(), r.RunID, "alice")
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
+	if r.Status != "completed" {
+		t.Fatalf("final: %s", r.Status)
+	}
+}
+
+func TestChatTerminalFailureRetainsRunErrorCode(t *testing.T) {
+	f := newWebFixture(t, &hostModel{decisions: browserDecisions()}, false)
+	f.h.Settings.MaxModelRounds = 1
+	c, e := f.w.CreateConversation(t.Context(), "alice", "records-web")
+	if e != nil {
+		t.Fatal(e)
+	}
+	m, e := f.w.SubmitMessage(t.Context(), "alice", c.ID, "budget-failure", "Open orders", f.session.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = f.w.Tick(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	run, e := f.h.Drive(t.Context(), m.RunID, "alice")
+	if e != nil || run.Status != "failed" {
+		t.Fatalf("run: %s %v", run.Status, e)
+	}
+	_, messages, e := f.w.Conversation(t.Context(), "alice", c.ID)
+	if e != nil || len(messages) != 1 {
+		t.Fatal(messages, e)
+	}
+	if messages[0].Status != "failed" || messages[0].ErrorCode != "model_round_budget_exhausted" {
+		t.Fatalf("terminal message lost failure reason: %+v", messages[0])
 	}
 }

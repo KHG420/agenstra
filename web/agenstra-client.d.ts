@@ -13,6 +13,8 @@ export interface ClientOptions {
   onListenerError?(error: unknown): void;
 }
 export class AgenstraError extends Error { code: string; status: number; clientId?: string }
+/** Only for a failure whose lack of committed side effects the host can prove. */
+export class AgenstraActionError extends Error { constructor(code: string, message?: string); code: string }
 export class AgenstraClient {
   constructor(options: ClientOptions);
   options: ClientOptions;
