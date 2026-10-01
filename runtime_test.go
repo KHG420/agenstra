@@ -205,8 +205,8 @@ func TestCoreFiniteJSONAndContextBudget(t *testing.T) {
 	if len(raw)+len(provider.SystemPrompt()) > 3000 {
 		t.Fatalf("context over budget: %d", len(raw))
 	}
-	if len(packet.Facts) != 1 || len(packet.Facts[0].Value) != 0 {
-		t.Fatalf("fallback lost identity or leaked preview: %+v", packet.Facts)
+	if len(packet.Facts) != 1 || packet.Facts[0].FactID != fact.FactID || len(packet.Facts[0].OmittedPaths) == 0 {
+		t.Fatalf("budgeting lost identity or incomplete-preview markers: %+v", packet.Facts)
 	}
 	found := false
 	for _, note := range packet.ContextOmissions {
