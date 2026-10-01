@@ -158,7 +158,7 @@ func serverError(w http.ResponseWriter, e error) {
 			status = 403
 		case "authorization_unavailable", "connection_unavailable":
 			status = 503
-		case "schedule_invalid", "invalid_limit", "invalid_page":
+		case "schedule_invalid", "invalid_limit", "invalid_page", "memory_invalid":
 			status = 422
 		}
 		apiError(w, status, host.Code, false)
@@ -240,6 +240,10 @@ func (s *HTTPServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	owner, e := s.owner(r)
 	if e != nil {
 		apiError(w, 401, "unauthorized", true)
+		return
+	}
+	if p == "/memories" || strings.HasPrefix(p, "/memories/") {
+		s.memoriesHTTP(w, r, owner, "")
 		return
 	}
 	if p == "/schedules" || strings.HasPrefix(p, "/schedules/") {

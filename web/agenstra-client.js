@@ -239,6 +239,14 @@ export class AgenstraClient {
     this.save("conversation", conversation.id);
     return conversation;
   }
+  memoryPath(id = "", suffix = "") {
+    return "/web/v1/memories" + (id ? "/" + encodeURIComponent(id) : "") + suffix + "?integration_id=" + encodeURIComponent(this.options.integration);
+  }
+  listMemories({ limit = 100, offset = 0 } = {}) { return this.request(this.memoryPath() + "&limit=" + encodeURIComponent(limit) + "&offset=" + encodeURIComponent(offset)); }
+  getMemory(id) { return this.request(this.memoryPath(id)); }
+  setMemory(update) { return this.request(this.memoryPath(), { method: "POST", body: update }); }
+  deleteMemory(id, revision) { return this.request(this.memoryPath(id), { method: "DELETE", body: { revision } }); }
+  memoryHistory(id) { return this.request(this.memoryPath(id, "/history")); }
   listConversations() {
     return this.request("/chat/v1/conversations?integration_id=" + encodeURIComponent(this.options.integration));
   }

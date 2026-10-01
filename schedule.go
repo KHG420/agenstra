@@ -243,6 +243,11 @@ func (h *AgentHost) DispatchDueSchedules(ctx context.Context, limit int) (int, e
 		}
 		runID := NewID()
 		state, prepareErr := h.prepareRun(ctx, task.OwnerID, task.PackID, task.Instruction, runID)
+		if prepareErr == nil {
+			// Dispatch, pause and resume also advance Revision. Count a definition's
+			// instruction once, rather than treating each tick as fresh user evidence.
+			setMemoryInput(state, "schedule:"+task.ScheduleID+":"+webHash(task.PackID+"\x00"+task.Instruction), task.Instruction)
+		}
 		if err = ctx.Err(); err != nil {
 			return count, err
 		}

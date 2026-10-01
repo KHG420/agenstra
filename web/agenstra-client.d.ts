@@ -4,6 +4,19 @@ export interface Run { run_id: string; status: string; revision: number; state: 
 export interface ChatConversation { id: string; integration_id: string; created_at: number }
 export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; run_id: string; status: string; answer_markdown?: string; run?: Run }
 export interface ConversationSnapshot { conversation: ChatConversation; messages: ChatMessage[] }
+export interface Memory {
+  id: string; scope: "user" | "pack"; pack_id: string; key: string; value: string;
+  kind: "preference" | "constraint" | "convention"; status: "active" | "candidate" | "forgotten";
+  origin: "manual" | "explicit" | "inferred"; revision: number; evidence_count: number;
+  source_id: string; quote: string; created_at: number; updated_at: number;
+}
+export interface MemoryUpdate {
+  scope: "user" | "pack"; key: string; value: string; kind: Memory["kind"]; revision: number;
+}
+export interface MemoryHistory {
+  revisions: Memory[];
+  evidence: { source_id: string; quote: string; value: string; mode: string; created_at: number }[];
+}
 export interface ClientOptions {
   endpoint?: string; integration: string; browser?: boolean; handlerVersion?: string;
   getSession(): Promise<string | { token: string; expires_at?: number }>;
@@ -23,6 +36,12 @@ export class AgenstraClient {
   on(name: string, callback: (value: any) => void): () => void;
   connectBrowser(): Promise<unknown>;
   updatePageObservation(observation: JSONObject): Promise<void>;
+  /** Framework-owned memory management; authenticated owner and pack are resolved server-side. */
+  listMemories(options?: { limit?: number; offset?: number }): Promise<Memory[]>;
+  getMemory(id: string): Promise<Memory>;
+  setMemory(update: MemoryUpdate): Promise<Memory>;
+  deleteMemory(id: string, revision: number): Promise<Memory>;
+  memoryHistory(id: string): Promise<MemoryHistory>;
   listConversations(): Promise<ChatConversation[]>;
   createConversation(): Promise<ChatConversation>;
   /** Select a framework-owned conversation. Context restoration is server-side. */

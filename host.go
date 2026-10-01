@@ -157,14 +157,20 @@ func (h *AgentHost) prepareRun(ctx context.Context, owner, pack, instruction, id
 		return nil, e
 	}
 	delete(runtime, "facts")
-	return map[string]any{"runtime": runtime, "artifact_ids": []string{}, "pack_fingerprint": nil, "pack_release": release}, nil
+	envelope := map[string]any{"runtime": runtime, "artifact_ids": []string{}, "pack_fingerprint": nil, "pack_release": release}
+	setMemoryInput(envelope, id+":instruction", instruction)
+	return envelope, nil
 }
 func (h *AgentHost) Create(ctx context.Context, owner, pack, instruction, requestID string) (StoredRun, error) {
+	return h.createWithMemoryInput(ctx, owner, pack, instruction, requestID, instruction)
+}
+func (h *AgentHost) createWithMemoryInput(ctx context.Context, owner, pack, instruction, requestID, input string) (StoredRun, error) {
 	id := requestRunID(owner, requestID)
 	state, e := h.prepareRun(ctx, owner, pack, instruction, id)
 	if e != nil {
 		return StoredRun{}, e
 	}
+	setMemoryInput(state, id+":instruction", input)
 	r, e := h.Store.CreateRun(owner, pack, state, id)
 	if !errors.Is(e, ErrStoreConflict) {
 		return r, e
@@ -260,6 +266,11 @@ func (h *AgentHost) save(run StoredRun, state *RuntimeState, fingerprint string,
 		fp = fingerprint
 	}
 	envelope := map[string]any{"runtime": runtime, "artifact_ids": ids, "pack_fingerprint": fp, "pack_release": run.State["pack_release"]}
+	for _, key := range []string{"memory_inputs", "memory_snapshot", "memory_errors"} {
+		if value, exists := run.State[key]; exists {
+			envelope[key] = value
+		}
+	}
 	b, e := CanonicalJSON(envelope)
 	if e != nil {
 		return run, e
@@ -304,6 +315,13 @@ func (h *AgentHost) SupplyInput(ctx context.Context, id, owner, field, text stri
 	if state.Status != "needs_input" || state.InputField == nil || *state.InputField != field {
 		return run, hostError("input_not_requested")
 	}
+	inputs := []memoryInput{}
+	if raw, err := CanonicalJSON(run.State["memory_inputs"]); err == nil && run.State["memory_inputs"] != nil {
+		if err := strictUnmarshal(raw, &inputs); err != nil {
+			return run, hostError("run_state_invalid")
+		}
+	}
+	run.State["memory_inputs"] = append(inputs, memoryInput{ID: fmt.Sprintf("%s:input:%d", id, revision), Text: text})
 	state.Followups = append(state.Followups, field+": "+text)
 	state.InputField = nil
 	state.InputPrompt = nil
@@ -886,6 +904,10 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 		return run, hostError("pack_changed")
 	}
 	runtime := &AgentRuntime{Provider: provider, Model: h.Model, Grants: policy.GrantedCapabilities, ConnectionID: NewID(), Durable: true, MaxModelRounds: h.Settings.MaxModelRounds, MaxToolCalls: h.Settings.MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.Settings.MaxContextCharacters}
+	run, e = h.prepareMemories(ctx, run)
+	if e != nil {
+		return run, e
+	}
 	state.Status = "running"
 	state.ErrorCode = nil
 	run, e = h.save(run, state, fp, nil, map[string]any{"kind": "run_resumed"})
@@ -960,6 +982,10 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 			return run, e
 		}
 		runtime.Grants = policy.GrantedCapabilities
+		runtime.Memories, e = h.runMemories(run)
+		if e != nil {
+			return run, e
+		}
 		before := func() error {
 			var e error
 			run, e = h.save(run, state, "", nil, map[string]any{"kind": "model_requested", "round": state.RoundsUsed})

@@ -92,7 +92,10 @@ func (s *SQLiteStore) Initialize() error {
 			return fmt.Errorf("unsupported SQLite store schema version %d", version)
 		}
 		if version == 1 {
-			return initializeScheduleTables(tx)
+			if err := initializeScheduleTables(tx); err != nil {
+				return err
+			}
+			return initializeMemoryTables(tx)
 		}
 		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS runs (
 		 run_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, pack_id TEXT NOT NULL,
@@ -112,7 +115,10 @@ func (s *SQLiteStore) Initialize() error {
 		if err != nil {
 			return err
 		}
-		return initializeScheduleTables(tx)
+		if err := initializeScheduleTables(tx); err != nil {
+			return err
+		}
+		return initializeMemoryTables(tx)
 	})
 }
 

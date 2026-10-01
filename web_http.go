@@ -114,6 +114,19 @@ func (s *HTTPServer) webHTTP(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 401, "unauthorized", false)
 		return
 	}
+	if p == "/web/v1/memories" || strings.HasPrefix(p, "/web/v1/memories/") {
+		pack, err := integration.integrationPack(r.URL.Query().Get("integration_id"))
+		if err != nil {
+			webError(w, err)
+			return
+		}
+		copy := r.Clone(r.Context())
+		u := *r.URL
+		u.Path = strings.TrimPrefix(p, "/web/v1")
+		copy.URL = &u
+		s.memoriesHTTP(w, copy, owner, pack)
+		return
+	}
 	if strings.HasPrefix(p, "/web/v1/runs/") {
 		path := strings.TrimPrefix(p, "/web/v1")
 		id := strings.Split(strings.TrimPrefix(path, "/runs/"), "/")[0]

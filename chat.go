@@ -195,7 +195,7 @@ func (w *WebIntegration) advanceConversation(ctx context.Context, owner, id stri
 			if e != nil {
 				return e
 			}
-			run, e = w.Host.Create(ctx, owner, pack, m.Instruction, "chat:"+id+":"+m.ClientID)
+			run, e = w.Host.createWithMemoryInput(ctx, owner, pack, m.Instruction, "chat:"+id+":"+m.ClientID, m.Text)
 			if e != nil {
 				// A concurrent creator may still publish this identity. Keep the slot
 				// occupied and retry; an error never proves the run cannot exist.

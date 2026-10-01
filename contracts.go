@@ -319,6 +319,7 @@ type ContextPacket struct {
 	Followups           []string          `json:"followups"`
 	RuntimeFeatures     []string          `json:"runtime_features"`
 	ContextOmissions    []string          `json:"context_omissions"`
+	Memories            []MemoryView      `json:"memories,omitempty"`
 }
 type ToolCall struct {
 	CallRef    string `json:"call_ref"`

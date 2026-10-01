@@ -10,6 +10,8 @@ Optional web integration adds headless chat and conversation APIs, a framework-i
 
 Built-in scheduled tasks support one-time timestamps, fixed intervals, and five-field Cron with IANA timezones. Hosts manage schedules through public Go methods or authenticated `/schedules` HTTP APIs, and follow each execution through the existing run APIs. Definitions and history survive restarts; triggering rechecks authorization and preserves approvals. See the [scheduled task integration guide (Chinese)](docs/scheduled-tasks.md).
 
+Host-managed memory retains user preferences, lasting constraints, and pack conventions across runs. Explicit defaults take effect immediately; habits demonstrated in three independent inputs automatically become defaults. Hosts can list, edit, forget, and inspect provenance through Go, authenticated HTTP APIs, and the Web SDK. See the [memory design and management guide (Chinese)](docs/memory-management.md).
+
 For an existing frontend/backend application, follow the [host integration checklist and lottery reference (Chinese)](docs/host-integration.md). Export the headless client with `node web/export-client.mjs /path/to/host/vendor/agenstra`; the export includes TypeScript declarations and SHA-256 provenance, with no UI or npm runtime dependency.
 
 Agenstra can serve a personal tool, a team application, or a larger system. This repository contains the framework, generic tests, deployment templates, guides, and a clearly labeled local demo. **It does not include production business packs, an external model, or credentials.** `deploy/deployment.example.json` is a template; starting it unchanged will not create an agent with working capabilities.

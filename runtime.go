@@ -23,6 +23,7 @@ type AgentRuntime struct {
 	MaxToolCalls         int
 	MaxRepeatedCall      int
 	MaxContextCharacters int
+	Memories             []MemoryView
 }
 
 func (r *AgentRuntime) defaults() {
@@ -385,8 +386,8 @@ func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
 	if r.Durable {
 		features = append(features, "durable_execution")
 	}
-	packet := ContextPacket{Schema: "agenstra.context.v1", Instruction: state.Instruction, Capabilities: caps, Facts: views, Observations: obs, RoundIndex: state.RoundsUsed, RoundsRemaining: r.MaxModelRounds - state.RoundsUsed, ToolCallsRemaining: r.MaxToolCalls - state.ToolCallsUsed, Skills: skillViews, LoadedSkills: loaded, InspectedCapability: inspected, InspectedFact: state.InspectedFact, Followups: state.Followups, RuntimeFeatures: features, ContextOmissions: omissions}
-	available := r.MaxContextCharacters - utf8.RuneCountInString(r.Provider.SystemPrompt())
+	packet := ContextPacket{Schema: "agenstra.context.v1", Instruction: state.Instruction, Capabilities: caps, Facts: views, Observations: obs, RoundIndex: state.RoundsUsed, RoundsRemaining: r.MaxModelRounds - state.RoundsUsed, ToolCallsRemaining: r.MaxToolCalls - state.ToolCallsUsed, Skills: skillViews, LoadedSkills: loaded, InspectedCapability: inspected, InspectedFact: state.InspectedFact, Followups: state.Followups, RuntimeFeatures: features, ContextOmissions: omissions, Memories: append([]MemoryView{}, r.Memories...)}
+	available := r.MaxContextCharacters - utf8.RuneCountInString(r.systemPrompt())
 	return budgetContext(packet, state, available)
 }
 func Reject(state *RuntimeState, callRef, capability, code string, args map[string]any, factID string) {
@@ -425,7 +426,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 	var decision Decision
 	for attempt := 0; attempt < 2; attempt++ {
 		packet := r.Context(state)
-		prompt := r.Provider.SystemPrompt() + feedback
+		prompt := r.systemPrompt() + feedback
 		for _, note := range packet.ContextOmissions {
 			if strings.HasPrefix(note, "fact ") && strings.Contains(note, "array at") {
 				extra := "\nAuthoritative full array lengths from stored Facts follow. A preview may show fewer items; inspect omitted indices before claiming coverage:\n" + note
@@ -712,4 +713,12 @@ func (r *AgentRuntime) Run(ctx context.Context, instruction string) (RunResult, 
 }
 func NewState(instruction, runID string) (*RuntimeState, error) {
 	return (&AgentRuntime{}).NewState(instruction, runID)
+}
+
+func (r *AgentRuntime) systemPrompt() string {
+	prompt := r.Provider.SystemPrompt()
+	if len(r.Memories) > 0 {
+		prompt += memoryUsagePrompt
+	}
+	return prompt
 }
