@@ -20,9 +20,12 @@ func (e *HostError) Error() string { return e.Code }
 func hostError(code string) error  { return &HostError{Code: code} }
 
 type ExecutionPolicy struct {
-	GrantedCapabilities  map[string]bool `json:"granted_capabilities"`
-	ApprovalCapabilities map[string]bool `json:"approval_capabilities"`
-	AllowModelData       bool            `json:"allow_model_data"`
+	GrantedCapabilities  map[string]bool     `json:"granted_capabilities"`
+	ApprovalCapabilities map[string]bool     `json:"approval_capabilities"`
+	AllowModelData       bool                `json:"allow_model_data"`
+	Subject              string              `json:"subject,omitempty"`
+	PermissionsVerified  bool                `json:"permissions_verified,omitempty"`
+	Delegations          map[string][]string `json:"delegations,omitempty"`
 }
 type HostSettings struct {
 	LeaseSeconds             float64 `json:"lease_seconds"`
@@ -131,46 +134,41 @@ func requestRunID(owner, request string) string {
 // persist a binding before a queued run becomes visible to the worker.
 // A nonempty request ID is required for a stable identity.
 func RequestRunID(owner, request string) string { return requestRunID(owner, request) }
-func (h *AgentHost) Create(ctx context.Context, owner, pack, instruction, requestID string) (StoredRun, error) {
+func (h *AgentHost) prepareRun(ctx context.Context, owner, pack, instruction, id string) (map[string]any, error) {
 	if strings.TrimSpace(instruction) == "" || len([]rune(instruction)) > 30000 {
-		return StoredRun{}, hostError("instruction_invalid")
+		return nil, hostError("instruction_invalid")
 	}
 	if _, e := h.policy(ctx, owner, pack, true); e != nil {
-		return StoredRun{}, e
+		return nil, e
 	}
 	var release any
 	if h.ReleaseResolver != nil {
 		r, e := h.ReleaseResolver(ctx, owner, pack)
 		if e != nil {
-			return StoredRun{}, e
+			return nil, e
 		}
 		if r != "" {
 			release = r
 		}
 	}
-	id := requestRunID(owner, requestID)
 	state, e := NewState(instruction, id)
 	if e != nil {
-		return StoredRun{}, e
+		return nil, e
 	}
 	runtime, e := objectOf(state)
 	if e != nil {
-		return StoredRun{}, e
+		return nil, e
 	}
 	delete(runtime, "facts")
-	r, e := h.Store.CreateRun(owner, pack, map[string]any{"runtime": runtime, "artifact_ids": []string{}, "pack_fingerprint": nil, "pack_release": release}, id)
-	if !errors.Is(e, ErrStoreConflict) {
-		return r, e
-	}
-	existing, e := h.Store.GetRun(id, owner)
-	if e != nil {
-		return existing, e
-	}
-	original, ok := existing.State["runtime"].(map[string]any)
-	if existing.PackID != pack || !ok || original["instruction"] != instruction {
-		return existing, hostError("request_id_conflict")
-	}
-	return existing, nil
+	envelope := map[string]any{"runtime": runtime, "artifact_ids": []string{}, "pack_fingerprint": nil, "pack_release": release}
+	setMemoryInput(envelope, id+":instruction", instruction)
+	return envelope, nil
+}
+func (h *AgentHost) Create(ctx context.Context, owner, pack, instruction, requestID string) (StoredRun, error) {
+	return h.createWithMemoryInput(ctx, owner, pack, instruction, requestID, instruction)
+}
+func (h *AgentHost) createWithMemoryInput(ctx context.Context, owner, pack, instruction, requestID, input string) (StoredRun, error) {
+	return h.createWithSources(ctx, owner, pack, instruction, requestID, input, nil)
 }
 func (h *AgentHost) Get(ctx context.Context, id, owner string) (StoredRun, error) {
 	r, e := h.Store.GetRun(id, owner)
@@ -253,6 +251,11 @@ func (h *AgentHost) save(run StoredRun, state *RuntimeState, fingerprint string,
 		fp = fingerprint
 	}
 	envelope := map[string]any{"runtime": runtime, "artifact_ids": ids, "pack_fingerprint": fp, "pack_release": run.State["pack_release"]}
+	for _, key := range []string{"memory_inputs", "memory_snapshot", "memory_errors", "project_sources"} {
+		if value, exists := run.State[key]; exists {
+			envelope[key] = value
+		}
+	}
 	b, e := CanonicalJSON(envelope)
 	if e != nil {
 		return run, e
@@ -297,6 +300,13 @@ func (h *AgentHost) SupplyInput(ctx context.Context, id, owner, field, text stri
 	if state.Status != "needs_input" || state.InputField == nil || *state.InputField != field {
 		return run, hostError("input_not_requested")
 	}
+	inputs := []memoryInput{}
+	if raw, err := CanonicalJSON(run.State["memory_inputs"]); err == nil && run.State["memory_inputs"] != nil {
+		if err := strictUnmarshal(raw, &inputs); err != nil {
+			return run, hostError("run_state_invalid")
+		}
+	}
+	run.State["memory_inputs"] = append(inputs, memoryInput{ID: fmt.Sprintf("%s:input:%d", id, revision), Text: text})
 	state.Followups = append(state.Followups, field+": "+text)
 	state.InputField = nil
 	state.InputPrompt = nil
@@ -338,6 +348,13 @@ func (h *AgentHost) Approve(ctx context.Context, id, owner, invocationID, argsSH
 	}
 	kind := "approval_denied"
 	if approved {
+		policy, err := h.projectPolicy(ctx, run)
+		if err != nil {
+			return run, err
+		}
+		if !policy.GrantedCapabilities[item.Call.Capability] {
+			return run, hostError("capability_not_granted")
+		}
 		item.ApprovedHash = &argsSHA
 		item.ApprovedUntil = item.ApprovalExpiresAt
 		item.Status = "prepared"
@@ -380,7 +397,7 @@ func pauseAuth(code string) bool {
 }
 func definiteAuth(code string) bool {
 	switch code {
-	case "product_api_unauthorized", "product_api_forbidden", "upstream_http_401", "upstream_http_403", "unauthorized", "forbidden", "identity_unverified":
+	case "product_api_unauthorized", "product_api_forbidden", "upstream_http_401", "upstream_http_403", "unauthorized", "forbidden", "identity_unverified", "access_denied", "capability_not_granted", "model_data_not_authorized", "authorization_unavailable", "connection_unavailable":
 		return true
 	}
 	return false
@@ -393,6 +410,9 @@ func pollAccess(provider CapabilityProvider, policy ExecutionPolicy, binding Ope
 	if !ok || cap.Effect != "read" {
 		return hostError("operation_poll_must_be_read")
 	}
+	if !policy.GrantedCapabilities[cap.Name] {
+		return hostError("capability_not_granted")
+	}
 	if cap.ApprovalRequired || policy.ApprovalCapabilities[cap.Name] {
 		return hostError("operation_poll_requires_unattended_access")
 	}
@@ -400,7 +420,7 @@ func pollAccess(provider CapabilityProvider, policy ExecutionPolicy, binding Ope
 }
 func (h *AgentHost) execute(ctx context.Context, run StoredRun, state *RuntimeState, item *Invocation, provider CapabilityProvider, runtime *AgentRuntime) (StoredRun, error) {
 	cap, ok := provider.Capabilities()[item.Call.Capability]
-	policy, e := h.policy(ctx, run.OwnerID, run.PackID, true)
+	policy, e := h.projectPolicy(ctx, run)
 	if e != nil {
 		return run, e
 	}
@@ -413,12 +433,13 @@ func (h *AgentHost) execute(ctx context.Context, run StoredRun, state *RuntimeSt
 			return run, e
 		}
 	}
-	if cap.Effect != "read" && !policy.GrantedCapabilities[cap.Name] {
+	if !policy.GrantedCapabilities[cap.Name] {
 		state.Status = "needs_authorization"
 		state.ErrorCode = strptr("capability_not_granted")
 		return h.save(run, state, "", nil, map[string]any{"kind": "call_denied", "invocation_id": item.InvocationID})
 	}
 	inv := invocationContext(run, item, runtime.ConnectionID)
+	identifyInvocation(&inv, run, provider, item.Call.Capability, policy)
 	facts := map[string]Fact{}
 	for _, f := range state.Facts {
 		facts[f.FactID] = f
@@ -474,7 +495,9 @@ func (h *AgentHost) execute(ctx context.Context, run StoredRun, state *RuntimeSt
 	}
 	item.Status = "in_flight"
 	item.Attempts++
-	run, e = h.save(run, state, "", nil, map[string]any{"kind": "call_started", "invocation_id": item.InvocationID, "capability": cap.Name, "arguments_sha256": digest})
+	audit := invocationAudit("call_started", inv)
+	audit["capability"], audit["arguments_sha256"] = cap.Name, digest
+	run, e = h.save(run, state, "", nil, audit)
 	if e != nil {
 		return run, e
 	}
@@ -541,7 +564,9 @@ func (h *AgentHost) execute(ctx context.Context, run StoredRun, state *RuntimeSt
 	if outcome.Fact != nil {
 		factID = outcome.Fact.FactID
 	}
-	return h.save(run, state, "", nil, map[string]any{"kind": "call_finished", "invocation_id": item.InvocationID, "fact_id": factID, "error_code": strptr(outcome.ErrorCode)})
+	audit = invocationAudit("call_finished", inv)
+	audit["fact_id"], audit["error_code"] = factID, strptr(outcome.ErrorCode)
+	return h.save(run, state, "", nil, audit)
 }
 func operationValue(value any, path []any) (any, error) {
 	for _, p := range path {
@@ -713,7 +738,7 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 		state.ErrorCode = strptr("poll_budget_exhausted")
 		return h.save(run, state, "", nil, nil)
 	}
-	policy, e := h.policy(ctx, run.OwnerID, run.PackID, true)
+	policy, e := h.projectPolicy(ctx, run)
 	if e != nil {
 		return run, e
 	}
@@ -727,9 +752,12 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 	state.PollCallsUsed++
 	call := ToolCall{CallRef: fmt.Sprintf("poll-%s-%d", item.InvocationID, receipt.Polls), Capability: receipt.Binding.PollCapability, Arguments: receipt.PollArguments, Reason: "Read persisted operation status"}
 	inv := invocationContext(run, item, runtime.ConnectionID)
+	identifyInvocation(&inv, run, provider, call.Capability, policy)
 	inv.InvocationID = fmt.Sprintf("%s:poll:%d", item.InvocationID, receipt.Polls)
 	inv.IdempotencyKey = inv.InvocationID
-	run, e = h.save(run, state, "", nil, map[string]any{"kind": "operation_poll_started", "invocation_id": item.InvocationID, "poll": receipt.Polls})
+	audit := invocationAudit("operation_poll_started", inv)
+	audit["poll"] = receipt.Polls
+	run, e = h.save(run, state, "", nil, audit)
 	if e != nil {
 		return run, e
 	}
@@ -859,17 +887,11 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 	if state.Status == "waiting" && run.NextWakeAt != nil && h.now() < *run.NextWakeAt {
 		return run, nil
 	}
-	policy, e := h.policy(ctx, run.OwnerID, run.PackID, true)
+	policy, e := h.projectPolicy(ctx, run)
 	if e != nil {
 		return run, e
 	}
-	var provider CapabilityProvider
-	if h.ReleaseProviderFactory != nil {
-		release, _ := run.State["pack_release"].(string)
-		provider, e = h.ReleaseProviderFactory(ctx, run.OwnerID, run.PackID, release)
-	} else {
-		provider, e = h.ProviderFactory(ctx, run.OwnerID, run.PackID)
-	}
+	provider, e := h.openRunProvider(ctx, run)
 	if e != nil {
 		return run, e
 	}
@@ -878,7 +900,11 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 	if previous, ok := run.State["pack_fingerprint"].(string); ok && previous != fp {
 		return run, hostError("pack_changed")
 	}
-	runtime := &AgentRuntime{Provider: provider, Model: h.Model, Grants: policy.GrantedCapabilities, ConnectionID: NewID(), Durable: true, MaxModelRounds: h.Settings.MaxModelRounds, MaxToolCalls: h.Settings.MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.Settings.MaxContextCharacters}
+	runtime := &AgentRuntime{Provider: provider, Model: h.Model, Grants: policy.GrantedCapabilities, OriginPackID: run.PackID, ConnectionID: NewID(), Durable: true, MaxModelRounds: h.Settings.MaxModelRounds, MaxToolCalls: h.Settings.MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.Settings.MaxContextCharacters}
+	run, e = h.prepareMemories(ctx, run)
+	if e != nil {
+		return run, e
+	}
 	state.Status = "running"
 	state.ErrorCode = nil
 	run, e = h.save(run, state, fp, nil, map[string]any{"kind": "run_resumed"})
@@ -948,11 +974,31 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 			}
 			continue
 		}
-		policy, e = h.policy(ctx, run.OwnerID, run.PackID, true)
+		policy, e = h.projectPolicy(ctx, run)
 		if e != nil {
 			return run, e
 		}
 		runtime.Grants = policy.GrantedCapabilities
+		runtime.Memories, e = h.runMemories(run)
+		if e != nil {
+			return run, e
+		}
+		visible := []MemoryView{}
+		for _, m := range runtime.Memories {
+			allowed := m.PackID == "" || m.PackID == run.PackID
+			if !allowed {
+				for name, grant := range policy.GrantedCapabilities {
+					if grant && strings.HasPrefix(name, m.PackID+"::") {
+						allowed = true
+						break
+					}
+				}
+			}
+			if allowed {
+				visible = append(visible, m)
+			}
+		}
+		runtime.Memories = visible
 		before := func() error {
 			var e error
 			run, e = h.save(run, state, "", nil, map[string]any{"kind": "model_requested", "round": state.RoundsUsed})

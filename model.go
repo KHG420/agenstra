@@ -41,14 +41,29 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet ContextPacket
 	if err != nil {
 		return Decision{}, ModelDecisionError{"model_decision_invalid"}
 	}
-	payload := JSON{"model": m.Model, "response_format": JSON{"type": "json_object"}, "messages": []any{JSON{"role": "system", "content": prompt}, JSON{"role": "user", "content": string(contextJSON)}}}
+	body, err := m.requestJSON(ctx, contextJSON, prompt)
+	if err != nil {
+		return Decision{}, err
+	}
+	decision, err := strictDecision(body)
+	if err != nil {
+		var oversized DecisionTooManyCallsError
+		if errors.As(err, &oversized) {
+			return Decision{}, oversized
+		}
+		return Decision{}, ModelDecisionError{"model_decision_invalid"}
+	}
+	return decision, nil
+}
+func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, prompt string) ([]byte, error) {
+	payload := JSON{"model": m.Model, "response_format": JSON{"type": "json_object"}, "messages": []any{JSON{"role": "system", "content": prompt}, JSON{"role": "user", "content": string(input)}}}
 	raw, err := CanonicalJSON(payload)
 	if err != nil {
-		return Decision{}, ModelDecisionError{"model_decision_invalid"}
+		return nil, ModelDecisionError{"model_decision_invalid"}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.BaseURL+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
-		return Decision{}, ModelDecisionError{"model_unavailable"}
+		return nil, ModelDecisionError{"model_unavailable"}
 	}
 	req.Header.Set("Authorization", "Bearer "+m.APIKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -58,15 +73,15 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet ContextPacket
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		return Decision{}, ModelDecisionError{"model_unavailable"}
+		return nil, ModelDecisionError{"model_unavailable"}
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= 400 {
-		return Decision{}, ModelDecisionError{"model_http_error"}
+		return nil, ModelDecisionError{"model_http_error"}
 	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, 8<<20))
 	if err != nil {
-		return Decision{}, ModelDecisionError{"model_decision_invalid"}
+		return nil, ModelDecisionError{"model_decision_invalid"}
 	}
 	var envelope struct {
 		Choices []struct {
@@ -76,16 +91,8 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet ContextPacket
 		} `json:"choices"`
 	}
 	if json.Unmarshal(body, &envelope) != nil || len(envelope.Choices) == 0 || envelope.Choices[0].Message.Content == "" {
-		return Decision{}, ModelDecisionError{"model_decision_invalid"}
+		return nil, ModelDecisionError{"model_decision_invalid"}
 	}
-	decision, err := strictDecision([]byte(envelope.Choices[0].Message.Content))
-	if err != nil {
-		var oversized DecisionTooManyCallsError
-		if errors.As(err, &oversized) {
-			return Decision{}, oversized
-		}
-		return Decision{}, ModelDecisionError{"model_decision_invalid"}
-	}
-	return decision, nil
+	return []byte(envelope.Choices[0].Message.Content), nil
 }
 func (m *HTTPJSONDecisionModel) Close() error { return nil }

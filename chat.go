@@ -66,6 +66,10 @@ func (w *WebIntegration) ListConversations(ctx context.Context, owner, integrati
 	return items, rows.Err()
 }
 func (w *WebIntegration) SubmitMessage(ctx context.Context, owner, conversation, clientID, text, session string) (ChatMessage, error) {
+	return w.SubmitMessageWithSources(ctx, owner, conversation, clientID, text, session, nil)
+}
+
+func (w *WebIntegration) SubmitMessageWithSources(ctx context.Context, owner, conversation, clientID, text, session string, sources []RunSource) (ChatMessage, error) {
 	var c ChatConversation
 	var m ChatMessage
 	if !w.Config.Chat {
@@ -81,6 +85,13 @@ func (w *WebIntegration) SubmitMessage(ctx context.Context, owner, conversation,
 	if _, e = w.Host.policy(ctx, owner, pack, true); e != nil {
 		return m, e
 	}
+	sources, e = normalizedSources(pack, sources)
+	if e != nil {
+		return m, e
+	}
+	if _, e = w.Host.bindSources(ctx, owner, pack, sources); e != nil {
+		return m, e
+	}
 	if clientID == "" || len(clientID) > 128 || strings.TrimSpace(text) == "" || utf8.RuneCountInString(text) > 12000 {
 		return m, hostError("chat_message_invalid")
 	}
@@ -91,7 +102,7 @@ func (w *WebIntegration) SubmitMessage(ctx context.Context, owner, conversation,
 			if e := webDecode(raw, &m); e != nil {
 				return e
 			}
-			if m.Text != text || m.SessionID != session {
+			if m.Text != text || m.SessionID != session || !equalSources(m.Sources, sources) {
 				return hostError("chat_message_conflict")
 			}
 			return nil
@@ -107,7 +118,7 @@ func (w *WebIntegration) SubmitMessage(ctx context.Context, owner, conversation,
 			return hostError("conversation_full")
 		}
 		request := "chat:" + conversation + ":" + clientID
-		m = ChatMessage{ID: NewID(), ClientID: clientID, Text: text, ConversationID: conversation, SessionID: session, RunID: RequestRunID(owner, request), Status: "queued", CreatedAt: w.Store.store.now()}
+		m = ChatMessage{Sources: sources, ID: NewID(), ClientID: clientID, Text: text, ConversationID: conversation, SessionID: session, RunID: RequestRunID(owner, request), Status: "queued", CreatedAt: w.Store.store.now()}
 		if e := w.bindRun(tx, owner, m.RunID, request, c.IntegrationID, session); e != nil {
 			return e
 		}
@@ -195,7 +206,7 @@ func (w *WebIntegration) advanceConversation(ctx context.Context, owner, id stri
 			if e != nil {
 				return e
 			}
-			run, e = w.Host.Create(ctx, owner, pack, m.Instruction, "chat:"+id+":"+m.ClientID)
+			run, e = w.Host.createWithSources(ctx, owner, pack, m.Instruction, "chat:"+id+":"+m.ClientID, m.Text, m.Sources)
 			if e != nil {
 				// A concurrent creator may still publish this identity. Keep the slot
 				// occupied and retry; an error never proves the run cannot exist.
@@ -471,6 +482,10 @@ func (w *WebIntegration) cancelUnpublishedChatRun(owner, integration string, m C
 
 // CreateBrowserRun enables the bridge without requiring ChatService or its UI.
 func (w *WebIntegration) CreateBrowserRun(ctx context.Context, owner, integration, session, instruction, request string) (StoredRun, error) {
+	return w.CreateBrowserRunWithSources(ctx, owner, integration, session, instruction, request, nil)
+}
+
+func (w *WebIntegration) CreateBrowserRunWithSources(ctx context.Context, owner, integration, session, instruction, request string, sources []RunSource) (StoredRun, error) {
 	if w.profiles[integration] == nil {
 		return StoredRun{}, hostError("browser_integration_unavailable")
 	}
@@ -479,6 +494,9 @@ func (w *WebIntegration) CreateBrowserRun(ctx context.Context, owner, integratio
 	}
 	if _, e := w.Host.policy(ctx, owner, integration, true); e != nil {
 		return StoredRun{}, e
+	}
+	if _, err := w.Host.bindSources(ctx, owner, integration, sources); err != nil {
+		return StoredRun{}, err
 	}
 	run := RequestRunID(owner, "browser:"+request)
 	e := w.Store.store.write(func(tx *sql.Tx) error {
@@ -502,5 +520,5 @@ func (w *WebIntegration) CreateBrowserRun(ctx context.Context, owner, integratio
 	if e != nil {
 		return StoredRun{}, e
 	}
-	return w.Host.Create(ctx, owner, integration, instruction, "browser:"+request)
+	return w.Host.CreateWithSources(ctx, owner, integration, instruction, "browser:"+request, sources)
 }

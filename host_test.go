@@ -69,7 +69,7 @@ func (p *hostProvider) Invoke(ctx context.Context, name string, args map[string]
 func testHost(t *testing.T, store *SQLiteStore, provider *hostProvider, model *hostModel) *AgentHost {
 	t.Helper()
 	return NewAgentHost(store, func(context.Context, string, string) (CapabilityProvider, error) { return provider, nil }, model, func(context.Context, string, string) (ExecutionPolicy, error) {
-		return ExecutionPolicy{GrantedCapabilities: map[string]bool{"records.get": true, "job.submit": true}, AllowModelData: true}, nil
+		return ExecutionPolicy{GrantedCapabilities: map[string]bool{"records.get": true, "job.submit": true, "job.status": true}, AllowModelData: true}, nil
 	})
 }
 func callDecision(name string) Decision {

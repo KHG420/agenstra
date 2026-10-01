@@ -146,6 +146,7 @@ type ChatInput struct {
 }
 
 type ChatMessage struct {
+	Sources        []RunSource    `json:"sources,omitempty"`
 	ID             string         `json:"id"`
 	ClientID       string         `json:"client_id"`
 	Text           string         `json:"text"`

@@ -28,7 +28,7 @@ func webError(w http.ResponseWriter, e error) {
 		status = 401
 	case "access_denied", "identity_unverified", "model_data_not_authorized", "capability_not_granted":
 		status = 403
-	case "chat_message_invalid", "browser_context_invalid", "browser_result_invalid", "browser_handler_unknown", "request_id_required":
+	case "source_scope_invalid", "chat_message_invalid", "browser_context_invalid", "browser_result_invalid", "browser_handler_unknown", "request_id_required":
 		status = 422
 	}
 	apiError(w, status, code, false)
@@ -112,6 +112,19 @@ func (s *HTTPServer) webHTTP(w http.ResponseWriter, r *http.Request) {
 	owner, e := integration.ticketOwner(webBearer(r))
 	if e != nil {
 		apiError(w, 401, "unauthorized", false)
+		return
+	}
+	if p == "/web/v1/memories" || strings.HasPrefix(p, "/web/v1/memories/") {
+		pack, err := integration.integrationPack(r.URL.Query().Get("integration_id"))
+		if err != nil {
+			webError(w, err)
+			return
+		}
+		copy := r.Clone(r.Context())
+		u := *r.URL
+		u.Path = strings.TrimPrefix(p, "/web/v1")
+		copy.URL = &u
+		s.memoriesHTTP(w, copy, owner, pack)
 		return
 	}
 	if strings.HasPrefix(p, "/web/v1/runs/") {
@@ -201,9 +214,10 @@ func (s *HTTPServer) chatHTTP(w http.ResponseWriter, r *http.Request, owner stri
 	}
 	if len(parts) == 3 && parts[0] == "conversations" && parts[2] == "messages" && r.Method == "POST" {
 		var b struct {
-			ClientID  string `json:"client_id"`
-			Text      string `json:"text"`
-			SessionID string `json:"session_id"`
+			Sources   []RunSource `json:"sources,omitempty"`
+			ClientID  string      `json:"client_id"`
+			Text      string      `json:"text"`
+			SessionID string      `json:"session_id"`
 		}
 		if decodeBody(r, &b) != nil {
 			apiError(w, 422, "invalid_request", false)
@@ -213,7 +227,7 @@ func (s *HTTPServer) chatHTTP(w http.ResponseWriter, r *http.Request, owner stri
 			apiError(w, 401, "browser_session_invalid", false)
 			return
 		}
-		m, e := s.Web.SubmitMessage(r.Context(), owner, parts[1], b.ClientID, b.Text, b.SessionID)
+		m, e := s.Web.SubmitMessageWithSources(r.Context(), owner, parts[1], b.ClientID, b.Text, b.SessionID, b.Sources)
 		if e != nil {
 			webError(w, e)
 			return
@@ -285,10 +299,11 @@ func (s *HTTPServer) browserHTTP(w http.ResponseWriter, r *http.Request, owner s
 	}
 	if p == "runs" && r.Method == "POST" {
 		var b struct {
-			IntegrationID string `json:"integration_id"`
-			SessionID     string `json:"session_id"`
-			Instruction   string `json:"instruction"`
-			RequestID     string `json:"request_id"`
+			IntegrationID string      `json:"integration_id"`
+			SessionID     string      `json:"session_id"`
+			Instruction   string      `json:"instruction"`
+			RequestID     string      `json:"request_id"`
+			Sources       []RunSource `json:"sources,omitempty"`
 		}
 		if decodeBody(r, &b) != nil {
 			apiError(w, 422, "invalid_request", false)
@@ -298,7 +313,7 @@ func (s *HTTPServer) browserHTTP(w http.ResponseWriter, r *http.Request, owner s
 			apiError(w, 401, "browser_session_invalid", false)
 			return
 		}
-		run, e := s.Web.CreateBrowserRun(r.Context(), owner, b.IntegrationID, b.SessionID, b.Instruction, b.RequestID)
+		run, e := s.Web.CreateBrowserRunWithSources(r.Context(), owner, b.IntegrationID, b.SessionID, b.Instruction, b.RequestID, b.Sources)
 		if e != nil {
 			webError(w, e)
 			return

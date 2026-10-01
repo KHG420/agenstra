@@ -8,6 +8,10 @@ An optional management interface lets administrators validate, publish, activate
 
 Optional web integration adds headless chat and conversation APIs, a framework-independent JavaScript SDK, a conversation queue, and a browser control bridge. The framework owns agent context and checkpoint recovery; hosts select a conversation by ID and supply their own chat UI, authenticated identity, business APIs, page observations, and UI handlers. Authorization, approvals and receipts reuse the existing runtime. See the [Web integration guide (Chinese)](docs/web-integration.md), or run `go run ./examples/web-integration` for a local demo without a model key.
 
+Built-in scheduled tasks support one-time timestamps, fixed intervals, and five-field Cron with IANA timezones. Hosts manage schedules through public Go methods or authenticated `/schedules` HTTP APIs, and follow each execution through the existing run APIs. Definitions and history survive restarts; triggering rechecks authorization and preserves approvals. See the [scheduled task integration guide (Chinese)](docs/scheduled-tasks.md).
+
+Host-managed memory retains user preferences, lasting constraints, and pack conventions across runs. Explicit defaults take effect immediately; habits demonstrated in three independent inputs automatically become defaults. Hosts can list, edit, forget, and inspect provenance through Go, authenticated HTTP APIs, and the Web SDK. See the [memory design and management guide (Chinese)](docs/memory-management.md).
+
 For an existing frontend/backend application, follow the [host integration checklist and lottery reference (Chinese)](docs/host-integration.md). Export the headless client with `node web/export-client.mjs /path/to/host/vendor/agenstra`; the export includes TypeScript declarations and SHA-256 provenance, with no UI or npm runtime dependency.
 
 Agenstra can serve a personal tool, a team application, or a larger system. This repository contains the framework, generic tests, deployment templates, guides, and a clearly labeled local demo. **It does not include production business packs, an external model, or credentials.** `deploy/deployment.example.json` is a template; starting it unchanged will not create an agent with working capabilities.
@@ -16,7 +20,7 @@ Agenstra can serve a personal tool, a team application, or a larger system. This
 
 Suppose an application already has search, data-transformation, and notification APIs. Once these are declared as capabilities, the agent can search, read actual fields from the returned Fact, call the transformation API, and send a notification if the task calls for one. Agenstra does not hard-code that workflow. The integrator chooses capability boundaries, usage guidance, and authorization policy.
 
-The current durable host targets **one node with persistent local storage and SQLite WAL**. A deployment can serve multiple users with separate connections and capability grants. Distributed high availability, automatic retention cleanup, model quality, and the correctness of external computations require separate design or validation.
+The current durable host targets **one node with persistent local storage and SQLite WAL**. A deployment can serve multiple users with separate connections and capability grants. One project owns one pack; a durable task can explicitly compose authorized capabilities from other projects using verified per-user connections and restricted task scopes. See [cross-project tasks](docs/cross-project-tasks.md). All capabilities, including reads, require explicit grants. Distributed high availability, automatic retention cleanup, model quality, and the correctness of external computations require separate design or validation.
 
 ```mermaid
 flowchart LR
@@ -146,7 +150,7 @@ The importer **does not** infer approvals, idempotency, or background-job comple
 
 - Before an external call, the host persists its invocation ID, exact arguments, and hash. After an uncertain outcome, it can replay only a capability declared safe or backed by real upstream idempotency. Other calls enter `needs_reconciliation` so the integrator can check the external system.
 - An approval applies to a specific user, invocation, and argument hash. Identity, grants, and leases are checked again before submission; skill text cannot bypass them.
-- Complete tool results are stored separately as Facts with provenance. The model sees a bounded preview and may inspect the full result by path. A Fact ID identifies local evidence, not an external resource.
+- Complete tool results are stored separately as Facts with provenance. Context budgeting preserves task constraints and Fact identities, prioritizes recent evidence, and explicitly marks omitted details for inspection. Full values remain available for tool arguments through Fact references. See the [context management design (Chinese)](docs/context-management.md). A Fact ID identifies local evidence, not an external resource.
 - For an `OperationBinding`, the host saves the external job receipt and polls the status capability. An HTTP success or `queued` response does not mean the job has finished.
 - Runs, events, Facts, and continuation APIs are scoped by `owner_id`. A deployment may configure multiple users with different capability sets.
 

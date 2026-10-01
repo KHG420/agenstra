@@ -57,7 +57,7 @@ func TestHTTPModelRESTDurableEndToEnd(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	dep := &Deployment{Config: DeploymentConfig{Packs: map[string]PackConfig{"records": {Path: path}}, Users: map[string]UserConfig{"alice": {APIKeyEnv: "ALICE_KEY", Packs: map[string]ConnectionConfig{"records": {Environment: map[string]string{"RECORDS_URL": "UPSTREAM_URL"}, AllowModelData: true}}}}, Settings: DefaultHostSettings()}, Environment: map[string]string{"ALICE_KEY": "test-alice-key", "UPSTREAM_URL": upstream.URL}}
+	dep := &Deployment{Config: DeploymentConfig{Packs: map[string]PackConfig{"records": {Path: path}}, Users: map[string]UserConfig{"alice": {APIKeyEnv: "ALICE_KEY", Packs: map[string]ConnectionConfig{"records": {Environment: map[string]string{"RECORDS_URL": "UPSTREAM_URL"}, GrantedCapabilities: []string{"records.get"}, AllowModelData: true}}}}, Settings: DefaultHostSettings()}, Environment: map[string]string{"ALICE_KEY": "test-alice-key", "UPSTREAM_URL": upstream.URL}}
 	store := testStore(t)
 	model, e := NewHTTPJSONDecisionModel("test-model", gateway.URL, "test-model-token", time.Second, nil)
 	if e != nil {
