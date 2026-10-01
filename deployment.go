@@ -39,8 +39,9 @@ type ConnectionConfig struct {
 	Identity             *IdentityConfig   `json:"identity"`
 }
 type UserConfig struct {
-	APIKeyEnv string                      `json:"api_key_env"`
-	Packs     map[string]ConnectionConfig `json:"packs"`
+	APIKeyEnv      string                      `json:"api_key_env"`
+	Packs          map[string]ConnectionConfig `json:"packs"`
+	BrowserActions map[string][]string         `json:"browser_actions,omitempty"`
 }
 type PackConfig struct {
 	Path string `json:"path"`
@@ -52,11 +53,12 @@ type ManagementConfig struct {
 	SecretDir      string `json:"secret_dir"`
 }
 type DeploymentConfig struct {
-	DatabasePath string                `json:"database_path"`
-	Packs        map[string]PackConfig `json:"packs"`
-	Users        map[string]UserConfig `json:"users"`
-	Management   *ManagementConfig     `json:"management"`
-	Settings     HostSettings          `json:"settings"`
+	DatabasePath   string                `json:"database_path"`
+	Packs          map[string]PackConfig `json:"packs"`
+	Users          map[string]UserConfig `json:"users"`
+	Management     *ManagementConfig     `json:"management"`
+	Settings       HostSettings          `json:"settings"`
+	WebIntegration *WebIntegrationConfig `json:"web_integration,omitempty"`
 }
 type Deployment struct {
 	Config         DeploymentConfig

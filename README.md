@@ -6,7 +6,9 @@ Agenstra is a general-purpose agent framework written in Go that you can deploy 
 
 An optional management interface lets administrators validate, publish, activate, and roll back capability packs through a CLI or web page, then configure user connections and grants. Managed releases are fixed by content hash: new runs use the active release, while existing managed runs keep the release they started with. Authorization and connection identity are still checked at execution time.
 
-Agenstra can serve a personal tool, a team application, or a larger system. This repository contains the framework, generic tests, deployment templates, and guides. **It does not include a domain-specific capability pack, skill files, an external model, or credentials.** `deploy/deployment.example.json` is a template; starting it unchanged will not create an agent with working capabilities.
+Optional web integration adds headless chat and conversation APIs, a framework-independent JavaScript SDK, a conversation queue, and a browser control bridge. The framework owns agent context and checkpoint recovery; hosts select a conversation by ID and supply their own chat UI, authenticated identity, business APIs, page observations, and UI handlers. Authorization, approvals and receipts reuse the existing runtime. See the [Web integration guide (Chinese)](docs/web-integration.md), or run `go run ./examples/web-integration` for a local demo without a model key.
+
+Agenstra can serve a personal tool, a team application, or a larger system. This repository contains the framework, generic tests, deployment templates, guides, and a clearly labeled local demo. **It does not include production business packs, an external model, or credentials.** `deploy/deployment.example.json` is a template; starting it unchanged will not create an agent with working capabilities.
 
 ## Scope and architecture
 

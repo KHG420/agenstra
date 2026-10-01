@@ -1,0 +1,23 @@
+{
+  "database_path": "runs.sqlite3",
+  "packs": { "orders": { "path": "pack.json" } },
+  "users": {
+    "demo": {
+      "packs": {
+        "orders": {
+          "environment": { "DEMO_API_URL": "DEMO_API_URL" },
+          "granted_capabilities": ["orders.list"],
+          "allow_model_data": true
+        }
+      },
+      "browser_actions": { "orders-web": ["ui.show_orders", "ui.open_order"] }
+    }
+  },
+  "web_integration": {
+    "database_path": "web.sqlite3",
+    "chat": true,
+    "browser_bridge": true,
+    "session_key_env": "DEMO_SESSION_KEY",
+    "integrations": { "orders-web": { "pack_id": "orders", "frontend_profile_path": "frontend.json" } }
+  }
+}

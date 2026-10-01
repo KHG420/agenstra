@@ -1,0 +1,302 @@
+/** Framework-independent browser client. Credentials are provided by the host. */
+export class AgenstraError extends Error {
+  constructor(code, status = 0) { super(code); this.name = "AgenstraError"; this.code = code; this.status = status; }
+}
+export class AgenstraClient {
+  constructor(options) {
+    if (!options?.integration || typeof options.getSession !== "function") throw new TypeError("integration and getSession are required");
+    this.options = options;
+    this.endpoint = (options.endpoint || "").replace(/\/$/, "");
+    this.fetch = options.fetch || globalThis.fetch.bind(globalThis);
+    this.actions = new Map();
+    this.listeners = new Map();
+    this.storage = options.storage;
+    if (this.storage === undefined) { try { this.storage = globalThis.sessionStorage; } catch { this.storage = null; } }
+    this.prefix = "agenstra:v1:" + this.endpoint + ":" + options.integration;
+    this.token = null;
+    this.closed = false;
+    this.pageObservation = {};
+    this.observationChain = Promise.resolve();
+    this.selectionChain = Promise.resolve();
+    this.selectionRevision = 0;
+    this.receipts = this.load("receipts") || {};
+    this.chatWatchers = 0;
+    this.aborters = new Set();
+    this.pagehide = () => { this.destroy({ closeSession: false }); };
+    globalThis.addEventListener?.("pagehide", this.pagehide);
+  }
+  on(name, callback) {
+    if (!this.listeners.has(name)) this.listeners.set(name, new Set());
+    this.listeners.get(name).add(callback);
+    return () => this.listeners.get(name)?.delete(callback);
+  }
+  emit(name, value) { for (const fn of this.listeners.get(name) || []) { try { fn(value); } catch (error) { this.options.onListenerError?.(error); } } }
+  load(key) { try { return JSON.parse(this.storage?.getItem(this.prefix + ":" + key) || "null"); } catch { return null; } }
+  save(key, value) { try { this.storage?.setItem(this.prefix + ":" + key, JSON.stringify(value)); } catch { /* Server claims still prevent execution on replay. */ } }
+  remove(key) { try { this.storage?.removeItem(this.prefix + ":" + key); } catch { /* Storage may be disabled by the host. */ } }
+  id() { return globalThis.crypto.randomUUID(); }
+  async request(path, { method = "GET", body, browserKey, retry = true } = {}) {
+    if (this.closed) throw new AgenstraError("client_closed");
+    if (!this.token) { const session = await this.options.getSession(); this.token = typeof session === "string" ? session : session.token; }
+    if (this.closed) throw new AgenstraError("client_closed");
+    const aborter = new AbortController();
+    this.aborters.add(aborter);
+    try {
+      const headers = { Authorization: "Bearer " + this.token };
+      if (body !== undefined) headers["Content-Type"] = "application/json";
+      if (browserKey) headers["X-Agenstra-Browser-Key"] = browserKey;
+      const response = await this.fetch(this.endpoint + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: aborter.signal, credentials: "same-origin" });
+      if (response.status === 401 && retry) { this.token = null; return await this.request(path, { method, body, browserKey, retry: false }); }
+      const data = await response.json();
+      if (!response.ok) throw new AgenstraError(data.code || data.detail?.code || "request_failed", response.status);
+      return data;
+    } finally { this.aborters.delete(aborter); }
+  }
+  registerActions(actions) {
+    if (this.browserPromise) throw new AgenstraError("register_actions_before_connect");
+    for (const [name, handler] of Object.entries(actions)) {
+      if (!name.startsWith("ui.") || typeof handler !== "function" || this.actions.has(name)) throw new TypeError("invalid or duplicate action: " + name);
+      this.actions.set(name, handler);
+    }
+    return this;
+  }
+  async connectBrowser() {
+    if (!this.options.browser) return null;
+    if (this.browserPromise) return this.browserPromise;
+    this.browserPromise = this.connectBrowserOnce().catch(error => { this.browserPromise = null; throw error; });
+    return this.browserPromise;
+  }
+  async connectBrowserOnce() {
+    const saved = this.load("browser");
+    if (saved && saved.handler_version === this.options.handlerVersion) {
+      try {
+        const data = await this.request("/browser/v1/sessions/" + saved.id + "/resume", { method: "POST", browserKey: saved.key, body: { generation: saved.generation } });
+        this.browser = { ...data.session, key: saved.key };
+      } catch (error) {
+        // A different signed-in owner cannot resume the previous user's session.
+        if (!["not_found", "browser_session_invalid", "browser_generation_changed"].includes(error.code)) throw error;
+        this.remove("browser"); this.receipts = {}; this.save("receipts", {});
+      }
+    }
+    if (!this.browser) {
+      const data = await this.request("/browser/v1/sessions", { method: "POST", body: { integration_id: this.options.integration, handler_version: this.options.handlerVersion, handlers: [...this.actions.keys()] } });
+      this.browser = { ...data.session, key: data.key };
+    }
+    this.save("browser", this.browser);
+    await this.flushReceipts();
+    await this.publishPageObservation();
+    if (!this.closed) this.browserTimer = setTimeout(() => this.pollBrowser(), 0);
+    this.emit("connection", { status: "connected" });
+    return this.browser;
+  }
+  updatePageObservation(observation) {
+    // Page observations are tool data, never the conversation's agent context.
+    // Serialize updates so page revisions cannot race in one tab.
+    this.pageObservation = structuredClone(observation);
+    if (!this.browser) return Promise.resolve();
+    this.observationChain = this.observationChain.catch(() => {}).then(() => this.publishPageObservation());
+    return this.observationChain;
+  }
+  async publishPageObservation() {
+    if (!this.browser) return;
+    const observation = this.options.getPageObservation ? await this.options.getPageObservation() : this.pageObservation;
+    const data = await this.request("/browser/v1/sessions/" + this.browser.id + "/observation", { method: "POST", browserKey: this.browser.key, body: { generation: this.browser.generation, revision: this.browser.context_revision, observation } });
+    this.browser = { ...data.session, key: this.browser.key };
+    this.pageObservation = structuredClone(observation);
+    this.save("browser", this.browser);
+  }
+  async pollBrowser() {
+    if (this.closed) return;
+    try {
+      await this.flushReceipts();
+      const data = await this.request("/browser/v1/sessions/" + this.browser.id + "/poll", { method: "POST", browserKey: this.browser.key, body: { generation: this.browser.generation } });
+      if (data.blocked_unknown) this.emit("reconciliation", { status: "unknown" });
+      for (const command of data.commands) void this.executeCommand(command);
+    } catch (error) {
+      this.emit("error", error);
+      this.emit("connection", { status: "disconnected" });
+      if (["browser_generation_changed", "browser_session_invalid"].includes(error.code)) return;
+    }
+    if (!this.closed) this.browserTimer = setTimeout(() => this.pollBrowser(), this.options.pollInterval || 1000);
+  }
+  async executeCommand(command) {
+    if (this.executing) return;
+    const cached = this.receipts[command.id];
+    if (cached) { await this.flushReceipts(); return; }
+    this.executing = true;
+    this.activeCommand = command.id;
+    try {
+      // Persist before claiming. A crash cannot cause the handler to be rerun.
+      const receipt = { command, status: "starting" };
+      this.receipts[command.id] = receipt; this.save("receipts", this.receipts);
+      await this.observationChain;
+      // Observe page changes before claiming an action against a page revision.
+      if (this.options.getPageObservation) {
+        const latest = await this.options.getPageObservation();
+        if (JSON.stringify(latest) !== JSON.stringify(this.pageObservation)) await this.updatePageObservation(latest);
+      }
+      const begun = await this.request("/browser/v1/commands/" + command.id + "/begin", { method: "POST", browserKey: this.browser.key, body: { generation: command.generation } });
+      if (!begun.accepted) {
+        receipt.status = "acked"; this.save("receipts", this.receipts); return;
+      }
+      receipt.status = "running"; this.save("receipts", this.receipts);
+      this.emit("action", { command, status: "running" });
+      const handler = this.actions.get(command.action);
+      if (!handler) throw new AgenstraError("browser_handler_unavailable");
+      const result = await handler(structuredClone(command.arguments), { commandId: command.id, runId: command.run_id });
+      receipt.status = "succeeded"; receipt.result = result ?? {};
+      this.save("receipts", this.receipts);
+      try { await this.updatePageObservation(this.options.getPageObservation ? await this.options.getPageObservation() : this.pageObservation); } catch (error) { this.emit("error", error); }
+      await this.flushReceipts();
+      this.emit("action", { command, status: ["confirmed", "acked"].includes(receipt.status) ? "succeeded" : "unknown" });
+    } catch (error) {
+      const receipt = this.receipts[command.id];
+      if (receipt && receipt.status !== "succeeded" && receipt.status !== "acked") {
+        receipt.status = "unknown"; receipt.error_code = "browser_handler_outcome_unknown";
+        this.save("receipts", this.receipts);
+        try { await this.flushReceipts(); } catch { /* Retain the receipt for reconnection. */ }
+      }
+      this.emit("error", error);
+    } finally { this.executing = false; this.activeCommand = null; }
+  }
+  async flushReceipts() {
+    if (this.flushPromise) return this.flushPromise;
+    this.flushPromise = this.flushReceiptsOnce().finally(() => { this.flushPromise = null; });
+    return this.flushPromise;
+  }
+  async flushReceiptsOnce() {
+    if (!this.browser) return;
+    for (const receipt of Object.values(this.receipts)) {
+      if (receipt.status === "acked") continue;
+      if (receipt.status === "confirmed") { await this.finishReceipt(receipt); continue; }
+      if (receipt.command.id === this.activeCommand && ["starting", "running"].includes(receipt.status)) continue;
+      if (receipt.status === "starting" || receipt.status === "running") {
+        receipt.status = "unknown"; receipt.error_code = "browser_client_interrupted"; this.save("receipts", this.receipts);
+      }
+      const command = receipt.command;
+      if (command.session_id !== this.browser.id) continue;
+      let result;
+      try { result = await this.request("/browser/v1/commands/" + command.id + "/result", { method: "POST", browserKey: this.browser.key, body: { generation: command.generation, status: receipt.status, result: receipt.result || null, error_code: receipt.error_code || "" } }); }
+      catch (error) {
+        if (error.code === "browser_result_invalid") { receipt.status = "unknown"; receipt.result = null; receipt.error_code = "browser_result_invalid"; this.save("receipts", this.receipts); continue; }
+        if (error.code === "browser_result_conflict") {
+          const existing = await this.request("/browser/v1/commands/" + command.id, { browserKey: this.browser.key });
+          if (["failed", "expired", "cancelled"].includes(existing.status)) { receipt.status = "acked"; this.save("receipts", this.receipts); continue; }
+        }
+        throw error;
+      }
+      if (result.status === "unknown") { this.emit("reconciliation", result); continue; }
+      receipt.status = "confirmed"; this.save("receipts", this.receipts);
+      await this.finishReceipt(receipt);
+    }
+  }
+  async finishReceipt(receipt) {
+    // Keep the recovery work durable after ACK. A lost get/reconcile response,
+    // or the Host entering reconciliation later, must be retried on reload.
+    const run = await this.getRun(receipt.command.run_id);
+    if (run.status === "needs_reconciliation") await this.reconcile(receipt.command.id, run.revision);
+    if (["completed", "failed", "cancelled"].includes(run.status)) {
+      receipt.status = "acked"; this.save("receipts", this.receipts);
+    }
+  }
+  changeConversation(operation) {
+    // Selection, restoration and creation share a queue. A late response cannot
+    // overwrite a newer selection or create an extra default conversation.
+    const pending = this.selectionChain.then(() => {
+      if (this.closed) throw new AgenstraError("client_closed");
+      return operation();
+    });
+    this.selectionChain = pending.catch(() => {});
+    return pending;
+  }
+  rememberConversation(conversation) {
+    if (this.closed) throw new AgenstraError("client_closed");
+    if (conversation.integration_id !== this.options.integration) throw new AgenstraError("conversation_integration_mismatch");
+    this.conversation = conversation;
+    this.selectionRevision++;
+    this.save("conversation", conversation.id);
+    return conversation;
+  }
+  listConversations() {
+    return this.request("/chat/v1/conversations?integration_id=" + encodeURIComponent(this.options.integration));
+  }
+  selectConversation(id) {
+    if (typeof id !== "string" || !id) return Promise.reject(new TypeError("conversation id is required"));
+    return this.changeConversation(async () => {
+      await this.connectBrowser();
+      const snapshot = await this.request("/chat/v1/conversations/" + encodeURIComponent(id));
+      const conversation = this.rememberConversation(snapshot.conversation);
+      this.emit("conversation", snapshot);
+      return conversation;
+    });
+  }
+  createConversation() {
+    return this.changeConversation(async () => {
+      await this.connectBrowser();
+      const conversation = this.rememberConversation(await this.request("/chat/v1/conversations", { method: "POST", body: { integration_id: this.options.integration } }));
+      this.emit("conversation", { conversation, messages: [] });
+      return conversation;
+    });
+  }
+  getConversation() {
+    return this.changeConversation(() => this.conversation || this.ensureConversation());
+  }
+  async ensureConversation() {
+    await this.connectBrowser();
+    const saved = this.load("conversation");
+    if (saved) {
+      try { const data = await this.request("/chat/v1/conversations/" + encodeURIComponent(saved)); return this.rememberConversation(data.conversation); }
+      catch (error) { if (!["not_found", "conversation_integration_mismatch"].includes(error.code)) throw error; this.remove("conversation"); }
+    }
+    return this.rememberConversation(await this.request("/chat/v1/conversations", { method: "POST", body: { integration_id: this.options.integration } }));
+  }
+  async snapshot() { const conversation = await this.getConversation(); return this.request("/chat/v1/conversations/" + conversation.id); }
+  async send(text, { clientId = this.id() } = {}) {
+    const conversation = await this.getConversation();
+    try { return await this.request("/chat/v1/conversations/" + conversation.id + "/messages", { method: "POST", browserKey: this.browser?.key, body: { client_id: clientId, text, session_id: this.browser?.id || "" } }); }
+    catch (error) { error.clientId = clientId; throw error; }
+  }
+  watchConversation(callback) {
+    const off = this.on("conversation", callback);
+    this.chatWatchers++;
+    if (this.chatWatchers === 1) this.pollChat();
+    let watching = true;
+    return () => { if (!watching) return; watching = false; off(); this.chatWatchers--; if (!this.chatWatchers) clearTimeout(this.chatTimer); };
+  }
+  async pollChat() {
+    if (this.closed || !this.chatWatchers) return;
+    try {
+      const conversation = await this.getConversation();
+      const selectionRevision = this.selectionRevision;
+      const snapshot = await this.request("/chat/v1/conversations/" + conversation.id);
+      if (selectionRevision === this.selectionRevision && snapshot.conversation.id === this.conversation?.id) this.emit("conversation", snapshot);
+      this.emit("connection", { status: "connected" });
+    }
+    catch (error) { this.emit("error", error); this.emit("connection", { status: "disconnected" }); }
+    if (!this.closed && this.chatWatchers) this.chatTimer = setTimeout(() => this.pollChat(), this.options.pollInterval || 1000);
+  }
+  getRun(id) { return this.request("/web/v1/runs/" + id); }
+  supplyInput(id, field, text, revision) { return this.request("/web/v1/runs/" + id + "/input", { method: "POST", body: { field, text, revision } }); }
+  approve(id, invocation, revision, approved) { return this.request("/web/v1/runs/" + id + "/approval", { method: "POST", body: { invocation_id: invocation.invocation_id, arguments_sha256: invocation.arguments_sha256, revision, approved } }); }
+  cancelMessage(id) { return this.request("/chat/v1/messages/" + id + "/cancel", { method: "POST", body: {} }); }
+  reconcile(id, revision) { return this.request("/browser/v1/commands/" + id + "/reconcile", { method: "POST", body: { revision } }); }
+  async run(instruction, { requestId = this.id() } = {}) {
+    await this.connectBrowser();
+    return this.request("/browser/v1/runs", { method: "POST", browserKey: this.browser.key, body: { integration_id: this.options.integration, session_id: this.browser.id, instruction, request_id: requestId } });
+  }
+  async destroy({ closeSession = true } = {}) {
+    if (this.closed) return;
+    this.closed = true;
+    clearTimeout(this.browserTimer);clearTimeout(this.chatTimer);
+    globalThis.removeEventListener?.("pagehide", this.pagehide);
+    for (const aborter of this.aborters) aborter.abort();
+    this.listeners.clear();
+    if (closeSession && this.browser && this.token) {
+      const aborter = new AbortController();const timer = setTimeout(() => aborter.abort(), 2000);
+      try { await this.fetch(this.endpoint + "/browser/v1/sessions/" + this.browser.id + "/close", { method: "POST", headers: { Authorization: "Bearer " + this.token, "Content-Type": "application/json", "X-Agenstra-Browser-Key": this.browser.key }, body: JSON.stringify({ generation: this.browser.generation }), signal: aborter.signal, credentials: "same-origin", keepalive: true }); } catch { /* The server expires interrupted actions independently. */ }
+      finally { clearTimeout(timer); }
+      this.remove("browser");
+    }
+  }
+}
+export function createAgenstraClient(options) { return new AgenstraClient(options); }

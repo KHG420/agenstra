@@ -1,0 +1,10 @@
+{
+  "name": "@agenstra/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./client": { "types": "./agenstra-client.d.ts", "default": "./agenstra-client.js" }
+  },
+  "scripts": { "test": "node --test *.test.js" }
+}
