@@ -33,7 +33,8 @@ func contextBudgetFact(value JSON) Fact {
 func contextBudgetRuntime(t *testing.T, budget int) (*AgentRuntime, *RuntimeState, *contextBudgetProvider) {
 	t.Helper()
 	provider := &contextBudgetProvider{coreTestProvider: coreTestProvider{caps: map[string]CapabilityDescription{}}, skills: map[string]Skill{}}
-	runtime := &AgentRuntime{Provider: provider, Grants: map[string]bool{}, MaxContextCharacters: budget}
+	// Preserve the packet allowance while counting the runtime's fixed guidance.
+	runtime := &AgentRuntime{Provider: provider, Grants: map[string]bool{}, MaxContextCharacters: budget + utf8.RuneCountInString(conversationGuidance) + 1}
 	state, err := runtime.NewState("Read records", "")
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +56,7 @@ func assertContextBudget(t *testing.T, packet ContextPacket, prompt string, budg
 }
 
 func TestContextBudgetHistoryKeepsRecentEvidenceAndCompleteState(t *testing.T) {
-	runtime, state, provider := contextBudgetRuntime(t, 9000)
+	runtime, state, _ := contextBudgetRuntime(t, 9000)
 	for i := 0; i < 12; i++ {
 		fact := contextBudgetFact(JSON{"data": JSON{"id": fmt.Sprint(i), "body": strings.Repeat("x", 1500)}})
 		state.Facts = append(state.Facts, fact)
@@ -63,7 +64,7 @@ func TestContextBudgetHistoryKeepsRecentEvidenceAndCompleteState(t *testing.T) {
 	}
 	original, _ := CanonicalJSON(state)
 	packet := runtime.Context(state)
-	size := assertContextBudget(t, packet, provider.SystemPrompt(), 9000)
+	size := assertContextBudget(t, packet, runtime.systemPrompt(), runtime.MaxContextCharacters)
 	if len(packet.Facts) != 12 || len(packet.Observations) != 12 {
 		t.Fatal("lost identities or recent outcomes", packet)
 	}
@@ -121,7 +122,7 @@ func TestContextBudgetSkillsInspectionAndDeterminism(t *testing.T) {
 	}
 	state.InspectedFact = JSON{"fact_id": state.Facts[0].FactID, "path": []any{"data", "id"}, "preview": JSON{"value": "0"}, "omitted_paths": []any{}}
 	packet := runtime.Context(state)
-	assertContextBudget(t, packet, provider.SystemPrompt(), 6500)
+	assertContextBudget(t, packet, runtime.systemPrompt(), runtime.MaxContextCharacters)
 	if !reflect.DeepEqual(packet.InspectedFact, state.InspectedFact) || !reflect.DeepEqual(packet.Followups, state.Followups) {
 		t.Fatal("lost current inspection or followups")
 	}
@@ -149,7 +150,7 @@ func TestContextBudgetCatalogDefersSchemasWithoutLosingInspectedContract(t *test
 	}
 	state.InspectedCapability = strptr("record.read-7")
 	packet := runtime.Context(state)
-	assertContextBudget(t, packet, provider.SystemPrompt(), 8000)
+	assertContextBudget(t, packet, runtime.systemPrompt(), runtime.MaxContextCharacters)
 	deferred := 0
 	for i, item := range packet.Capabilities {
 		if item["name"] != fmt.Sprintf("record.read-%d", i) || item["authorized"] != true {
@@ -170,12 +171,12 @@ func TestContextBudgetCatalogDefersSchemasWithoutLosingInspectedContract(t *test
 }
 
 func TestContextBudgetHistoryOmissionCount(t *testing.T) {
-	runtime, state, provider := contextBudgetRuntime(t, 1200)
+	runtime, state, _ := contextBudgetRuntime(t, 1200)
 	for i := 0; i < 20; i++ {
 		state.ModelObservations = append(state.ModelObservations, Observation{CallRef: fmt.Sprintf("read-%d", i), Capability: "record.read", Status: "failed", ErrorCode: strptr("upstream_unavailable"), Arguments: JSON{}})
 	}
 	packet := runtime.Context(state)
-	assertContextBudget(t, packet, provider.SystemPrompt(), 1200)
+	assertContextBudget(t, packet, runtime.systemPrompt(), runtime.MaxContextCharacters)
 	if len(packet.Observations) >= 12 || packet.Observations[len(packet.Observations)-1].CallRef != "read-19" || !reflect.DeepEqual(packet.ContextOmissions, []string{fmt.Sprintf("observations: %d older entries", 20-len(packet.Observations))}) {
 		t.Fatal("history or omission count incorrect", packet)
 	}
@@ -184,7 +185,7 @@ func TestContextBudgetHistoryOmissionCount(t *testing.T) {
 func TestContextBudgetReferenceAvailability(t *testing.T) {
 	for _, scope := range []string{"expired", "other_connection", "current_connection"} {
 		t.Run(scope, func(t *testing.T) {
-			runtime, state, provider := contextBudgetRuntime(t, 8000)
+			runtime, state, _ := contextBudgetRuntime(t, 8000)
 			for i := 0; i < 12; i++ {
 				state.Facts = append(state.Facts, contextBudgetFact(JSON{"data": JSON{"id": fmt.Sprint(i), "body": strings.Repeat("x", 1000)}}))
 			}
@@ -202,7 +203,7 @@ func TestContextBudgetReferenceAvailability(t *testing.T) {
 				}
 			}
 			packet := runtime.Context(state)
-			assertContextBudget(t, packet, provider.SystemPrompt(), 8000)
+			assertContextBudget(t, packet, runtime.systemPrompt(), runtime.MaxContextCharacters)
 			available := scope == "current_connection"
 			if packet.Facts[0].ReferenceAvailable != available || packet.Facts[11].ReferenceAvailable != available {
 				t.Fatal("compaction changed reference availability")
@@ -257,7 +258,7 @@ func TestContextBudgetRepairFeedbackSharesTheInputBudget(t *testing.T) {
 	}
 	calls := 0
 	runtime.Model = contextBudgetModel(func(_ context.Context, packet ContextPacket, prompt string) (Decision, error) {
-		assertContextBudget(t, packet, prompt, 1200)
+		assertContextBudget(t, packet, prompt, runtime.MaxContextCharacters)
 		calls++
 		if calls == 1 {
 			return Decision{}, ModelDecisionError{"model_decision_invalid"}

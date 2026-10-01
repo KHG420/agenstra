@@ -256,7 +256,7 @@ func TestMemoryContextSharesBudgetAndPreservesRequiredConventions(t *testing.T) 
 		runtime.Memories = append(runtime.Memories, MemoryView{ID: NewID(), Key: fmt.Sprintf("preference.%d", i), Value: strings.Repeat("偏好", 180), Kind: "preference", Scope: "user", Revision: 1})
 	}
 	packet := runtime.Context(state)
-	assertContextBudget(t, packet, runtime.systemPrompt(), 2200)
+	assertContextBudget(t, packet, runtime.systemPrompt(), runtime.MaxContextCharacters)
 	if len(packet.Memories) >= 8 || len(packet.ContextOmissions) == 0 {
 		t.Fatal("memory not budgeted", packet.Memories)
 	}

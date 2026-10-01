@@ -4,7 +4,8 @@ export interface RunSource { pack_id: string; capabilities: string[] }
 export interface ProjectBinding extends RunSource { release: string; subject: string }
 export interface Run { run_id: string; status: string; revision: number; state: JSONObject & { runtime: JSONObject; project_sources?: ProjectBinding[] } }
 export interface ChatConversation { id: string; integration_id: string; created_at: number }
-export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; sources?: RunSource[]; run_id: string; status: string; answer_markdown?: string; run?: Run }
+export interface ChatInput { field?: string; prompt?: string; text: string }
+export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; sources?: RunSource[]; run_id: string; status: string; answer_markdown?: string; input_history?: ChatInput[]; run?: Run }
 export interface ConversationSnapshot { conversation: ChatConversation; messages: ChatMessage[] }
 export interface Memory {
   id: string; scope: "user" | "pack"; pack_id: string; key: string; value: string;

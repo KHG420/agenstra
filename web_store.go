@@ -136,6 +136,15 @@ type ChatConversation struct {
 	IntegrationID string  `json:"integration_id"`
 	CreatedAt     float64 `json:"created_at"`
 }
+
+// ChatInput is an accepted response to a task's request for missing information.
+// Its prompt and text are projected from the framework-owned run checkpoint.
+type ChatInput struct {
+	Field  string `json:"field,omitempty"`
+	Prompt string `json:"prompt,omitempty"`
+	Text   string `json:"text"`
+}
+
 type ChatMessage struct {
 	Sources        []RunSource    `json:"sources,omitempty"`
 	ID             string         `json:"id"`
@@ -148,6 +157,7 @@ type ChatMessage struct {
 	Instruction    string         `json:"instruction,omitempty"`
 	ErrorCode      string         `json:"error_code,omitempty"`
 	AnswerMarkdown string         `json:"answer_markdown,omitempty"`
+	InputHistory   []ChatInput    `json:"input_history,omitempty"`
 	CreatedAt      float64        `json:"created_at"`
 	Run            map[string]any `json:"run,omitempty"`
 }

@@ -726,7 +726,7 @@ func NewState(instruction, runID string) (*RuntimeState, error) {
 }
 
 func (r *AgentRuntime) systemPrompt() string {
-	prompt := r.Provider.SystemPrompt()
+	prompt := r.Provider.SystemPrompt() + "\n" + conversationGuidance
 	if len(r.Memories) > 0 {
 		prompt += memoryUsagePrompt
 	}

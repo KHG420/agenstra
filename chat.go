@@ -329,6 +329,38 @@ func (w *WebIntegration) Tick(ctx context.Context) error {
 	}
 	return nil
 }
+
+// Recover the visible exchanges from the same checkpoint used for agent context.
+// Accepted inputs and request_input decisions are ordered, including repeated fields.
+func chatInputHistory(run StoredRun) []ChatInput {
+	runtime, _ := run.State["runtime"].(map[string]any)
+	followups, _ := runtime["followups"].([]any)
+	decisions, _ := runtime["decisions"].([]any)
+	inputs := []ChatInput{}
+	next := 0
+	for _, value := range followups {
+		text, ok := value.(string)
+		if !ok {
+			continue
+		}
+		field, answer, found := strings.Cut(text, ": ")
+		if !found {
+			field, answer = "", text
+		}
+		input := ChatInput{Field: field, Text: answer}
+		for next < len(decisions) {
+			decision, _ := decisions[next].(map[string]any)
+			next++
+			if decision["kind"] == "request_input" && decision["field"] == field {
+				input.Prompt, _ = decision["prompt"].(string)
+				break
+			}
+		}
+		inputs = append(inputs, input)
+	}
+	return inputs
+}
+
 func (w *WebIntegration) Conversation(ctx context.Context, owner, id string) (ChatConversation, []ChatMessage, error) {
 	var c ChatConversation
 	if e := webLoad(w.Store.store.DB, "web_conversations", id, owner, &c); e != nil {
@@ -350,11 +382,19 @@ func (w *WebIntegration) Conversation(ctx context.Context, owner, id string) (Ch
 	}
 	for i := range messages {
 		messages[i].Instruction = ""
+		if messages[i].Status == "queued" || messages[i].Status == "creating" {
+			continue
+		}
+		run, e := w.Host.Get(ctx, messages[i].RunID, owner)
+		// A queued message cancelled before publication has no run checkpoint.
+		if errors.Is(e, ErrRunNotFound) && messages[i].Status == "cancelled" {
+			continue
+		}
+		if e != nil {
+			return c, nil, e
+		}
+		messages[i].InputHistory = chatInputHistory(run)
 		if messages[i].Status == "active" || messages[i].Status == "cancelling" {
-			run, e := w.Host.Get(ctx, messages[i].RunID, owner)
-			if e != nil {
-				return c, nil, e
-			}
 			messages[i].Run = runView(run)
 		}
 	}

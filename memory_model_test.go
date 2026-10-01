@@ -108,6 +108,9 @@ func TestMemoryHTTPJSONModelAutomaticallyLearnsAndRecallsAcrossRuns(t *testing.T
 		if n < 3 && len(packet.Memories) != 0 || n >= 3 && (len(packet.Memories) != 1 || packet.Memories[0].Value != "zh-CN") {
 			t.Error("incorrect cross-run projection", n, packet.Memories)
 		}
+		if !strings.Contains(b.Messages[0].Content, conversationGuidance) {
+			t.Error("conversation instructions missing")
+		}
 		if n >= 3 && !strings.Contains(b.Messages[0].Content, memoryUsagePrompt) {
 			t.Error("memory precedence instructions missing")
 		}
@@ -132,7 +135,8 @@ func TestMemoryHostSkipsOversizedLearningAndContinuesBusinessRun(t *testing.T) {
 		return nil, nil
 	}}
 	h, _ := memoryTestHost(t, model)
-	h.Settings.MaxContextCharacters = 1000
+	// Allow the business prompt, but keep the extraction prompt over budget.
+	h.Settings.MaxContextCharacters = utf8.RuneCountInString(memoryExtractionPrompt) - 1
 	run := memoryRun(t, h, "alice", "records", "请用中文写报告", "budget")
 	errors, ok := run.State["memory_errors"].([]any)
 	if !ok || len(errors) != 1 || errors[0].(map[string]any)["code"] != "memory_extraction_too_large" || len(model.inputs) != 0 {
