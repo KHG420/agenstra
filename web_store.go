@@ -137,6 +137,7 @@ type ChatConversation struct {
 	CreatedAt     float64 `json:"created_at"`
 }
 type ChatMessage struct {
+	Sources        []RunSource    `json:"sources,omitempty"`
 	ID             string         `json:"id"`
 	ClientID       string         `json:"client_id"`
 	Text           string         `json:"text"`

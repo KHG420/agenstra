@@ -155,14 +155,15 @@
             <label for="binding-environment">环境变量映射（JSON）</label>
             <textarea id="binding-environment" rows="4" spellcheck="false" placeholder='{"RECORDS_API_URL":"RECORDS_API_URL"}' required>{}</textarea>
             <div class="form-grid">
-              <div><label for="binding-grants">授权能力</label><input id="binding-grants" placeholder="records.get, records.update"><small>逗号分隔；读操作也可列出以便审计。</small></div>
+              <div><label for="binding-grants">授权能力</label><input id="binding-grants" placeholder="records.get, records.update"><small>逗号分隔；包括读取在内的每项能力都需要授权。</small></div>
               <div><label for="binding-approvals">需审批能力</label><input id="binding-approvals" placeholder="records.update"><small>逗号分隔；调用仍需按参数逐次审批。</small></div>
             </div>
             <label class="checkbox"><input id="binding-model-data" type="checkbox">允许将该连接的数据发送给模型</label>
             <details class="advanced">
               <summary>高级连接选项</summary>
               <label for="binding-identity-env">连接身份变量</label><input id="binding-identity-env" placeholder="TENANT_ID, ACCOUNT_ID"><small>这些非密钥变量的当前值会进入连接指纹。</small>
-              <label for="binding-identity">身份查询配置（JSON，可选）</label><textarea id="binding-identity" rows="5" spellcheck="false" placeholder='{"url_env":"IDENTITY_URL","token_env":"IDENTITY_TOKEN"}'></textarea>
+              <label for="binding-delegations">允许委派到其他项目的能力（JSON）</label><textarea id="binding-delegations" rows="4" spellcheck="false" aria-describedby="binding-delegations-help" placeholder='{"weather":["weather.query"]}'>{}</textarea><small id="binding-delegations-help">键是目标项目的能力包 ID，值是允许委派的本地能力名。任务仍需明确选择能力，目标项目也会检查用户权限。</small>
+              <label for="binding-identity">身份查询配置（JSON，可选）</label><textarea id="binding-identity" rows="5" spellcheck="false" placeholder='{"url_env":"IDENTITY_URL","token_env":"IDENTITY_TOKEN","expected_subject":"account-123","capabilities_path":["capabilities"]}'></textarea>
             </details>
             <div class="actions"><button class="button primary" type="submit">保存连接</button><button id="check-binding" class="button secondary" type="button">检查连接</button><button id="disable-binding" class="button danger" type="button">停用连接</button></div>
             <p id="binding-feedback" class="feedback inline-feedback" role="status" aria-live="polite"></p>

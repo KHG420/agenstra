@@ -1,9 +1,24 @@
 export type JSONObject = { [key: string]: unknown };
 export interface BrowserCommand { id: string; run_id: string; session_id: string; generation: number; action: string; arguments: JSONObject; status: string; context_revision: number; expires_at: number }
-export interface Run { run_id: string; status: string; revision: number; state: { runtime: JSONObject } }
+export interface RunSource { pack_id: string; capabilities: string[] }
+export interface ProjectBinding extends RunSource { release: string; subject: string }
+export interface Run { run_id: string; status: string; revision: number; state: JSONObject & { runtime: JSONObject; project_sources?: ProjectBinding[] } }
 export interface ChatConversation { id: string; integration_id: string; created_at: number }
-export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; run_id: string; status: string; answer_markdown?: string; run?: Run }
+export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; sources?: RunSource[]; run_id: string; status: string; answer_markdown?: string; run?: Run }
 export interface ConversationSnapshot { conversation: ChatConversation; messages: ChatMessage[] }
+export interface Memory {
+  id: string; scope: "user" | "pack"; pack_id: string; key: string; value: string;
+  kind: "preference" | "constraint" | "convention"; status: "active" | "candidate" | "forgotten";
+  origin: "manual" | "explicit" | "inferred"; revision: number; evidence_count: number;
+  source_id: string; quote: string; created_at: number; updated_at: number;
+}
+export interface MemoryUpdate {
+  scope: "user" | "pack"; key: string; value: string; kind: Memory["kind"]; revision: number;
+}
+export interface MemoryHistory {
+  revisions: Memory[];
+  evidence: { source_id: string; quote: string; value: string; mode: string; created_at: number }[];
+}
 export interface ClientOptions {
   endpoint?: string; integration: string; browser?: boolean; handlerVersion?: string;
   getSession(): Promise<string | { token: string; expires_at?: number }>;
@@ -23,20 +38,26 @@ export class AgenstraClient {
   on(name: string, callback: (value: any) => void): () => void;
   connectBrowser(): Promise<unknown>;
   updatePageObservation(observation: JSONObject): Promise<void>;
+  /** Framework-owned memory management; authenticated owner and pack are resolved server-side. */
+  listMemories(options?: { limit?: number; offset?: number }): Promise<Memory[]>;
+  getMemory(id: string): Promise<Memory>;
+  setMemory(update: MemoryUpdate): Promise<Memory>;
+  deleteMemory(id: string, revision: number): Promise<Memory>;
+  memoryHistory(id: string): Promise<MemoryHistory>;
   listConversations(): Promise<ChatConversation[]>;
   createConversation(): Promise<ChatConversation>;
   /** Select a framework-owned conversation. Context restoration is server-side. */
   selectConversation(id: string): Promise<ChatConversation>;
   getConversation(): Promise<ChatConversation>;
   snapshot(): Promise<ConversationSnapshot>;
-  send(text: string, options?: { clientId?: string }): Promise<ChatMessage>;
+  send(text: string, options?: { clientId?: string; sources?: RunSource[] }): Promise<ChatMessage>;
   watchConversation(callback: (snapshot: ConversationSnapshot) => void): () => void;
   getRun(id: string): Promise<Run>;
   supplyInput(id: string, field: string, text: string, revision: number): Promise<Run>;
   approve(id: string, invocation: JSONObject, revision: number, approved: boolean): Promise<Run>;
   cancelMessage(id: string): Promise<ChatMessage>;
   reconcile(id: string, revision: number): Promise<Run>;
-  run(instruction: string, options?: { requestId?: string }): Promise<Run>;
+  run(instruction: string, options?: { requestId?: string; sources?: RunSource[] }): Promise<Run>;
   destroy(options?: { closeSession?: boolean }): Promise<void>;
 }
 export function createAgenstraClient(options: ClientOptions): AgenstraClient;

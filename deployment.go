@@ -25,18 +25,20 @@ func (e *DeploymentError) Error() string { return e.Code }
 func deploymentError(code string) error  { return &DeploymentError{Code: code} }
 
 type IdentityConfig struct {
-	URLEnv          string `json:"url_env"`
-	TokenEnv        string `json:"token_env"`
-	SubjectPath     []any  `json:"subject_path"`
-	ExpectedSubject string `json:"expected_subject"`
+	URLEnv           string `json:"url_env"`
+	TokenEnv         string `json:"token_env"`
+	SubjectPath      []any  `json:"subject_path"`
+	ExpectedSubject  string `json:"expected_subject"`
+	CapabilitiesPath []any  `json:"capabilities_path,omitempty"`
 }
 type ConnectionConfig struct {
-	Environment          map[string]string `json:"environment"`
-	BindingEnvironment   []string          `json:"binding_environment"`
-	GrantedCapabilities  []string          `json:"granted_capabilities"`
-	ApprovalCapabilities []string          `json:"approval_capabilities"`
-	AllowModelData       bool              `json:"allow_model_data"`
-	Identity             *IdentityConfig   `json:"identity"`
+	Environment          map[string]string   `json:"environment"`
+	BindingEnvironment   []string            `json:"binding_environment"`
+	GrantedCapabilities  []string            `json:"granted_capabilities"`
+	ApprovalCapabilities []string            `json:"approval_capabilities"`
+	AllowModelData       bool                `json:"allow_model_data"`
+	Identity             *IdentityConfig     `json:"identity"`
+	Delegations          map[string][]string `json:"delegations,omitempty"`
 }
 type UserConfig struct {
 	APIKeyEnv      string                      `json:"api_key_env"`
@@ -219,85 +221,131 @@ func (d *Deployment) Secret(ref string) (string, error) {
 	}
 	return value, nil
 }
-func (d *Deployment) validateIdentity(ctx context.Context, ownerID string, c ConnectionConfig) error {
+
+// verifiedIdentity reads the authority endpoint using the user's target token.
+// Local grants are a ceiling; only the endpoint can attest the account's authority.
+func (d *Deployment) verifiedIdentity(ctx context.Context, owner string, c ConnectionConfig) (string, map[string]bool, error) {
 	if c.Identity == nil {
-		return nil
+		return "", nil, nil
 	}
 	id := c.Identity
-	address, e := d.Secret(id.URLEnv)
-	if e != nil {
-		return e
+	address, err := d.Secret(id.URLEnv)
+	if err != nil {
+		return "", nil, err
 	}
-	token, e := d.Secret(id.TokenEnv)
-	if e != nil {
-		return e
+	token, err := d.Secret(id.TokenEnv)
+	if err != nil {
+		return "", nil, err
 	}
-	req, e := http.NewRequestWithContext(ctx, "GET", address, nil)
-	if e != nil {
-		return deploymentError("identity_unverified")
+	req, err := http.NewRequestWithContext(ctx, "GET", address, nil)
+	if err != nil {
+		return "", nil, deploymentError("identity_unverified")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, e := d.IdentityClient.Do(req)
-	if e != nil {
-		return deploymentError("identity_unverified")
+	client := d.IdentityClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	// Never forward a user's bearer token to a redirect target.
+	safeClient := *client
+	safeClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := safeClient.Do(req)
+	if err != nil {
+		return "", nil, deploymentError("identity_unverified")
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return deploymentError("identity_unverified")
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, deploymentError("identity_unverified")
 	}
-	var subject any
-	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&subject) != nil {
-		return deploymentError("identity_unverified")
+	var body any
+	decoder := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
+	if decoder.Decode(&body) != nil {
+		return "", nil, deploymentError("identity_unverified")
 	}
 	steps := id.SubjectPath
 	if len(steps) == 0 {
 		steps = []any{"sub"}
 	}
-	for _, step := range steps {
-		switch s := step.(type) {
-		case string:
-			m, ok := subject.(map[string]any)
-			if !ok {
-				return deploymentError("identity_unverified")
-			}
-			subject = m[s]
-		case float64:
-			a, ok := subject.([]any)
-			i := int(s)
-			if !ok || s != float64(i) || i < 0 || i >= len(a) {
-				return deploymentError("identity_unverified")
-			}
-			subject = a[i]
-		default:
-			return deploymentError("identity_unverified")
-		}
-	}
+	value, err := operationValue(body, steps)
+	subject, ok := value.(string)
 	expected := id.ExpectedSubject
 	if expected == "" {
-		expected = ownerID
+		expected = owner
 	}
-	if subject != expected {
-		return deploymentError("identity_unverified")
+	if err != nil || !ok || subject == "" || subject != expected {
+		return "", nil, deploymentError("identity_unverified")
 	}
-	return nil
+	if len(id.CapabilitiesPath) == 0 {
+		return subject, nil, nil
+	}
+	value, err = operationValue(body, id.CapabilitiesPath)
+	list, ok := value.([]any)
+	if err != nil || !ok {
+		return "", nil, deploymentError("identity_unverified")
+	}
+	permissions := map[string]bool{}
+	for _, v := range list {
+		name, ok := v.(string)
+		if !ok || strings.TrimSpace(name) == "" || strings.Contains(name, "::") || len(name) > 200 {
+			return "", nil, deploymentError("identity_unverified")
+		}
+		permissions[name] = true
+	}
+	return subject, permissions, nil
+}
+func (d *Deployment) validateIdentity(ctx context.Context, owner string, c ConnectionConfig) error {
+	_, _, err := d.verifiedIdentity(ctx, owner, c)
+	return err
 }
 func (d *Deployment) PolicyResolver(ctx context.Context, ownerID, packID string) (ExecutionPolicy, error) {
-	c, e := d.connection(ownerID, packID)
-	if e != nil {
-		return ExecutionPolicy{}, e
+	c, err := d.connection(ownerID, packID)
+	if err != nil {
+		return ExecutionPolicy{}, err
 	}
-	if e = d.validateIdentity(ctx, ownerID, c); e != nil {
-		return ExecutionPolicy{}, e
+	subject, permissions, err := d.verifiedIdentity(ctx, ownerID, c)
+	if err != nil {
+		return ExecutionPolicy{}, err
 	}
-	grants := map[string]bool{}
-	approvals := map[string]bool{}
+	grants, approvals := map[string]bool{}, map[string]bool{}
 	for _, v := range c.GrantedCapabilities {
-		grants[v] = true
+		grants[v] = permissions == nil || permissions[v]
 	}
 	for _, v := range c.ApprovalCapabilities {
 		approvals[v] = true
 	}
-	return ExecutionPolicy{GrantedCapabilities: grants, ApprovalCapabilities: approvals, AllowModelData: c.AllowModelData}, nil
+	return ExecutionPolicy{GrantedCapabilities: grants, ApprovalCapabilities: approvals, AllowModelData: c.AllowModelData, Subject: subject, PermissionsVerified: permissions != nil, Delegations: c.Delegations}, nil
+}
+
+// credentialSubject only attests providers whose actual bearer token reference
+// matches the identity token reference. It never compares or stores secret values.
+func credentialSubject(provider CapabilityProvider, owner string, c ConnectionConfig) string {
+	if c.Identity == nil || len(c.Identity.CapabilitiesPath) == 0 {
+		return ""
+	}
+	var token *string
+	switch p := provider.(type) {
+	case *RestPack:
+		// Mixed static header authentication cannot be attested as this bearer identity.
+		if len(p.Manifest.HeadersEnv) > 0 {
+			return ""
+		}
+		token = p.Manifest.TokenEnv
+	case *MCPPack:
+		if p.Manifest.Source.Transport != "streamable_http" {
+			return ""
+		}
+		token = p.Manifest.Source.TokenEnv
+	default:
+		return ""
+	}
+	if token == nil || *token == "" || c.Environment[*token] != c.Identity.TokenEnv {
+		return ""
+	}
+	subject := c.Identity.ExpectedSubject
+	if subject == "" {
+		subject = owner
+	}
+	return subject
 }
 func endpointValue(raw string) string {
 	u, e := url.Parse(raw)
@@ -402,7 +450,11 @@ func (d *Deployment) BindingID(ownerID, packID, path string, c ConnectionConfig,
 		if len(steps) == 0 {
 			steps = []any{"sub"}
 		}
-		identity = map[string]any{"url": endpointValue(address), "subject_path": steps, "expected_subject": expected}
+		details := map[string]any{"url": endpointValue(address), "subject_path": steps, "expected_subject": expected}
+		if len(c.Identity.CapabilitiesPath) > 0 {
+			details["capabilities_path"] = c.Identity.CapabilitiesPath
+		}
+		identity = details
 	}
 	var workingDirectory any
 	if cwdEnv, ok := source["cwd_env"].(string); ok {
@@ -471,7 +523,7 @@ func (d *Deployment) ReleaseProviderFactory(ctx context.Context, ownerID, packID
 	if e != nil {
 		return nil, e
 	}
-	return &boundProvider{CapabilityProvider: provider, binding: bindingID}, nil
+	return &boundProvider{CapabilityProvider: provider, binding: bindingID, subject: credentialSubject(provider, ownerID, c)}, nil
 }
 func (d *Deployment) AdminKey() (string, error) {
 	if d.Config.Management == nil {
@@ -492,6 +544,9 @@ func (d *Deployment) AdminKey() (string, error) {
 type boundProvider struct {
 	CapabilityProvider
 	binding string
+	subject string
 }
 
 func (p *boundProvider) BindingID() string { return p.binding }
+
+func (p *boundProvider) BoundSubject() string { return p.subject }

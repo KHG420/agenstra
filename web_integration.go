@@ -239,6 +239,7 @@ func (w *WebIntegration) policy(ctx context.Context, owner, pack string) (Execut
 	for _, name := range actions {
 		grants[name] = true
 	}
+	grants["ui.get_context"], grants["ui.command_status"] = true, true
 	p.GrantedCapabilities = grants
 	return p, nil
 }
@@ -386,7 +387,7 @@ func (p *browserProvider) Invoke(ctx context.Context, name string, args map[stri
 	if !policy.AllowModelData {
 		return CapabilityResult{ErrorCode: "model_data_not_authorized"}, nil
 	}
-	if name != "ui.get_context" && name != "ui.command_status" && !policy.GrantedCapabilities[name] {
+	if !policy.GrantedCapabilities[name] {
 		return CapabilityResult{ErrorCode: "capability_not_granted"}, nil
 	}
 	binding, e := p.web.Store.binding(inv.OwnerID, inv.RunID)

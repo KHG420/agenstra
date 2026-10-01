@@ -33,7 +33,7 @@ func contextBudgetFact(value JSON) Fact {
 func contextBudgetRuntime(t *testing.T, budget int) (*AgentRuntime, *RuntimeState, *contextBudgetProvider) {
 	t.Helper()
 	provider := &contextBudgetProvider{coreTestProvider: coreTestProvider{caps: map[string]CapabilityDescription{}}, skills: map[string]Skill{}}
-	runtime := &AgentRuntime{Provider: provider, MaxContextCharacters: budget}
+	runtime := &AgentRuntime{Provider: provider, Grants: map[string]bool{}, MaxContextCharacters: budget}
 	state, err := runtime.NewState("Read records", "")
 	if err != nil {
 		t.Fatal(err)
@@ -144,6 +144,7 @@ func TestContextBudgetCatalogDefersSchemasWithoutLosingInspectedContract(t *test
 	runtime, state, provider := contextBudgetRuntime(t, 8000)
 	for i := 0; i < 8; i++ {
 		name := fmt.Sprintf("record.read-%d", i)
+		runtime.Grants[name] = true
 		provider.caps[name] = CapabilityDescription{Name: name, Version: "1", Description: "Read", Effect: "compute", InputSchema: JSON{"type": "object", "properties": JSON{"id": JSON{"type": "string", "description": strings.Repeat("x", 1400)}}, "required": []string{"id"}}}
 	}
 	state.InspectedCapability = strptr("record.read-7")
@@ -151,7 +152,7 @@ func TestContextBudgetCatalogDefersSchemasWithoutLosingInspectedContract(t *test
 	assertContextBudget(t, packet, provider.SystemPrompt(), 8000)
 	deferred := 0
 	for i, item := range packet.Capabilities {
-		if item["name"] != fmt.Sprintf("record.read-%d", i) || item["authorized"] != false {
+		if item["name"] != fmt.Sprintf("record.read-%d", i) || item["authorized"] != true {
 			t.Fatal("catalog identity or authorization changed", item)
 		}
 		if item["schema_requires_inspection"] == true {
@@ -230,6 +231,7 @@ func TestContextBudgetRequiredInformationFailsBeforeModelIO(t *testing.T) {
 			case "inspected_fact":
 				state.InspectedFact = JSON{"preview": JSON{"value": strings.Repeat("x", 5000)}}
 			case "inspected_capability":
+				runtime.Grants["record.read"] = true
 				provider.caps["record.read"] = CapabilityDescription{Name: "record.read", InputSchema: JSON{"description": strings.Repeat("x", 5000)}}
 				state.InspectedCapability = strptr("record.read")
 			case "skill":
@@ -325,7 +327,7 @@ func TestContextBudgetMultiRoundInspectAndForwardCompleteValue(t *testing.T) {
 			return Decision{}, nil
 		}
 	})
-	runtime := &AgentRuntime{Provider: provider, Model: model, MaxContextCharacters: 6500}
+	runtime := &AgentRuntime{Provider: provider, Model: model, Grants: map[string]bool{"record.read": true, "record.forward": true}, MaxContextCharacters: 6500}
 	result, err := runtime.Run(t.Context(), "Read records and forward the complete body of the first record")
 	if err != nil || result.Status != "completed" || rounds != 4 || len(result.Facts) != 5 || received != strings.Repeat("x", 9000) || result.Observations[4].Arguments["payload"] != received {
 		t.Fatal("multi-round run lost complete evidence", result, err)

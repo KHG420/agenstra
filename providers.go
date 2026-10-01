@@ -18,6 +18,10 @@ type InvocationContext struct {
 	IdempotencyKey string `json:"idempotency_key"`
 	OwnerID        string `json:"owner_id"`
 	ConnectionID   string `json:"connection_id"`
+	OriginPackID   string `json:"origin_pack_id,omitempty"`
+	TargetPackID   string `json:"target_pack_id,omitempty"`
+	TargetSubject  string `json:"target_subject,omitempty"`
+	TargetRelease  string `json:"target_release,omitempty"`
 }
 type OperationBinding struct {
 	IDPath               []any    `json:"id_path"`
@@ -121,6 +125,7 @@ type CapabilityDescription struct {
 	ReferenceScope      string            `json:"reference_scope"`
 	ApprovalRequired    bool              `json:"approval_required"`
 	Operation           *OperationBinding `json:"operation"`
+	SourcePackID        string            `json:"source_pack_id,omitempty"`
 }
 
 func (c CapabilityDescription) MarshalJSON() ([]byte, error) {
@@ -238,7 +243,7 @@ func ExecuteCall(ctx context.Context, provider CapabilityProvider, grants map[st
 	if !ok {
 		return CallOutcome{ErrorCode: "capability_unknown"}, nil
 	}
-	if cap.Effect != "read" && !grants[cap.Name] {
+	if !grants[cap.Name] {
 		return CallOutcome{ErrorCode: "capability_not_granted"}, nil
 	}
 	if inv != nil {
@@ -262,6 +267,7 @@ func ExecuteCall(ctx context.Context, provider CapabilityProvider, grants map[st
 	fact := Fact{FactID: NewID(), SourceCapability: cap.Name, SourceVersion: cap.Version, Value: JSON{"data": result.Data}, Quality: "provider_reported", ObservedAt: time.Now().UTC(), ReferenceScope: scope, ExpiresAt: result.ExpiresAt}
 	if inv != nil {
 		fact.ConnectionID = &inv.ConnectionID
+		fact.SourcePackID, fact.SourceRelease, fact.SourceSubject = inv.TargetPackID, inv.TargetRelease, inv.TargetSubject
 	}
 	return CallOutcome{Fact: &fact}, nil
 }

@@ -128,6 +128,25 @@ func budgetContext(packet ContextPacket, state *RuntimeState, available int) Con
 		noteLimit--
 		packet = withNotes(packet, baseOmissions)
 	}
+	// Defaults may be omitted under severe pressure. Explicit constraints and
+	// project conventions remain required, like current inspections and followups.
+	packet.Memories = slices.Clone(packet.Memories)
+	omittedMemories := 0
+	for _, note := range baseOmissions {
+		if strings.HasPrefix(note, "memories:") {
+			_, _ = fmt.Sscanf(note, "memories: %d defaults omitted", &omittedMemories)
+		}
+	}
+	for i := len(packet.Memories) - 1; i >= 0 && contextCharacters(packet) > available; i-- {
+		if packet.Memories[i].Kind != "preference" {
+			continue
+		}
+		packet.Memories = slices.Delete(packet.Memories, i, i+1)
+		omittedMemories++
+		baseOmissions = slices.DeleteFunc(baseOmissions, func(note string) bool { return strings.HasPrefix(note, "memories:") })
+		baseOmissions = append(baseOmissions, fmt.Sprintf("memories: %d defaults omitted", omittedMemories))
+		packet = withNotes(packet, baseOmissions)
+	}
 	if contextCharacters(packet) > available {
 		return packet
 	}
