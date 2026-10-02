@@ -8,6 +8,11 @@ import (
 // ContextTelemetry describes the final input projection, outside model context.
 // Tokens are added only by a model measurement; character counts are exact.
 type ContextTelemetry struct {
+	Policy                   ContextPolicy         `json:"policy"`
+	Strategy                 string                `json:"strategy"`
+	PolicyUnit               string                `json:"policy_unit"`
+	ProjectionReason         string                `json:"projection_reason"`
+	TargetMet                bool                  `json:"target_met"`
 	InputTokens              *int64                `json:"input_tokens"`
 	ReportedInputTokens      *int64                `json:"reported_input_tokens"`
 	TokenMeasurementSource   string                `json:"token_measurement_source,omitempty"`

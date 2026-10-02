@@ -488,6 +488,8 @@ type Invocation struct {
 	Reconciled        bool              `json:"reconciled,omitempty"`
 }
 type RuntimeState struct {
+	ContextPolicy       *ContextPolicy     `json:"context_policy,omitempty"`
+	ContextPolicyCursor int                `json:"context_policy_cursor,omitempty"`
 	ContextTelemetry    *ContextTelemetry  `json:"context_telemetry,omitempty"`
 	SchemaVersion       int                `json:"schema_version"`
 	RunID               string             `json:"run_id"`

@@ -294,7 +294,11 @@ func (s *SQLiteStore) Checkpoint(runID, ownerID, token string, state map[string]
 		if steeringErr != nil {
 			return steeringErr
 		}
-		if sequence > steeringCursor(state) {
+		policySequence, policyErr := latestContextPolicy(tx, runID)
+		if policyErr != nil {
+			return policyErr
+		}
+		if sequence > steeringCursor(state) || policySequence > contextPolicyCursor(state) {
 			if status == "completed" || status == "needs_input" {
 				return errSteeringPending
 			}

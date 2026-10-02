@@ -58,6 +58,7 @@ export class AgenstraClient {
   send(text: string, options?: { clientId?: string; sources?: RunSource[] }): Promise<ChatMessage>;
   watchConversation(callback: (snapshot: ConversationSnapshot) => void): () => void;
   getRun(id: string): Promise<Run>;
+  setContextPolicy(id: string, policy: ContextPolicy, revision: number, options?: { requestId?: string }): Promise<Run>;
   getRunTelemetry(id: string): Promise<RunTelemetry>;
   getRunEvents(id: string, options?: { after?: number; limit?: number }): Promise<RunEvent[]>;
   /** Applied at a safe boundary; reuse requestId when retrying a lost response. */
@@ -74,7 +75,9 @@ export class AgenstraClient {
 }
 export function createAgenstraClient(options: ClientOptions): AgenstraClient;
 
+export interface ContextPolicy { trigger_ratio: number; target_ratio: number }
 export interface HostSettings {
+ context_policy: ContextPolicy;
  model_context_window_tokens?: number; max_model_input_tokens?: number; model_output_reserve_tokens?: number; model_protocol_reserve_tokens?: number;
  lease_seconds: number; max_model_rounds: number; max_tool_calls: number; max_poll_calls: number; max_run_seconds: number;
  max_context_characters: number; max_artifact_bytes: number; max_active_artifact_bytes: number; max_state_bytes: number;
@@ -85,6 +88,7 @@ export interface HostSettings {
 export interface EffectiveRunConfig { version: 1; source: "run_snapshot" | "current_host"; settings: HostSettings; model: ModelInfo }
 export interface ModelInfo { name?: string; context_window_tokens: number | null; max_input_tokens: number | null; max_output_tokens: number | null }
 export interface ContextTelemetry {
+ policy: ContextPolicy; strategy: "projection"; policy_unit: "characters" | "tokens"; projection_reason: "none" | "soft_threshold" | "hard_limit"; target_met: boolean;
  input_tokens: number | null; reported_input_tokens: number | null; token_measurement_source?: "tokenizer" | "utf8_bytes_estimate"; model_context_window_tokens: number | null; effective_input_token_limit: number | null; reserved_output_tokens: number | null; tokens_remaining: number | null; token_utilization: number | null;
  schema: "agenstra.context-telemetry.v1"; projection_id: string; round: number; measured_at: number;
  input_characters: number; character_limit: number; characters_remaining: number; character_utilization: number; over_limit: boolean;
@@ -104,7 +108,7 @@ export interface RunBudget {
  tokens: { limit: number | null; remaining: number | null; reported_tokens: number; estimated_tokens: number; reserved_tokens: number; unknown_tokens: number; charged_tokens: number };
  usage: ModelUsage; usage_by_purpose: Record<string, ModelUsage>; deadline: number; seconds_remaining: number;
 }
-export interface RunTelemetry { schema: "agenstra.run-telemetry.v1"; run_id: string; run_revision: number; observed_at: number; context: ContextTelemetry | null; effective_config: EffectiveRunConfig; budget: RunBudget }
+export interface RunTelemetry { context_policy: ContextPolicy; schema: "agenstra.run-telemetry.v1"; run_id: string; run_revision: number; observed_at: number; context: ContextTelemetry | null; effective_config: EffectiveRunConfig; budget: RunBudget }
 export interface ProgressItem { capability: string; call_ref?: string; status: string; fact_id?: string | null; error_code?: string | null }
 export interface RunProgress { completed?: ProgressItem[]; pending?: ProgressItem[]; blocked?: ProgressItem[]; completed_count: number; blocked_count: number; omitted_items: number; no_progress_rounds: number; stagnation_warning?: boolean }
 export interface Invocation { invocation_id: string; call: { call_ref: string; capability: string; arguments: JSONObject; reason: string }; status: string; arguments_sha256: string; attempts: number; error_code: string | null; fact_id: string | null; approval_expires_at: number | null; operation: JSONObject | null }

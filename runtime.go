@@ -15,6 +15,7 @@ import (
 )
 
 type AgentRuntime struct {
+	ContextPolicy              ContextPolicy
 	ModelContextWindowTokens   int64
 	MaxModelInputTokens        int64
 	ModelOutputReserveTokens   int
@@ -420,8 +421,8 @@ func (r *AgentRuntime) contextCandidate(state *RuntimeState) ContextPacket {
 
 func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
 	packet := r.contextCandidate(state)
-	available := r.MaxContextCharacters - utf8.RuneCountInString(r.systemPrompt())
-	return budgetContext(packet, state, available)
+	projected, _, _ := r.characterProjection(state, packet, r.systemPrompt())
+	return projected
 }
 func Reject(state *RuntimeState, callRef, capability, code string, args map[string]any, factID string) {
 	if args == nil {
@@ -446,6 +447,9 @@ func deterministicInvocationID(runID, ref string) string {
 }
 func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeModel func() error) error {
 	r.defaults()
+	if err := r.contextPolicy(state).Validate(); err != nil {
+		return err
+	}
 	if len(state.Pending) > 0 || (state.Status != "queued" && state.Status != "running") {
 		return nil
 	}
@@ -504,13 +508,27 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			}
 		}
 		candidate := packet
-		packet = budgetContext(packet, state, r.MaxContextCharacters-utf8.RuneCountInString(prompt))
+		packet, reason, targetMet := r.characterProjection(state, packet, prompt)
 		packet, window, tokenLimit, reserve, measurement, measureErr := r.tokenProjection(state, packet, prompt)
+		if measureErr == nil && contextCharacters(packet)+utf8.RuneCountInString(prompt) > r.MaxContextCharacters {
+			packet = budgetContext(packet, state, r.MaxContextCharacters-utf8.RuneCountInString(prompt))
+			packet, window, tokenLimit, reserve, measurement, measureErr = r.tokenProjection(state, packet, prompt)
+		}
 		if tokenLimit != nil {
 			packet.MaxModelInputTokens = *tokenLimit
 		}
+		candidate.MaxModelInputTokens = packet.MaxModelInputTokens
+		candidate.MaxModelOutputTokens = packet.MaxModelOutputTokens
 		state.ContextTelemetry = measureContext(state, prompt, candidate, packet, r.MaxContextCharacters)
+		state.ContextTelemetry.Policy = r.contextPolicy(state)
+		state.ContextTelemetry.Strategy = "projection"
+		state.ContextTelemetry.ProjectionReason = reason
+		state.ContextTelemetry.TargetMet = targetMet
+		state.ContextTelemetry.PolicyUnit = "characters"
 		c := state.ContextTelemetry
+		if c.Policy.TriggerRatio > 0 && c.ProjectionReason != "none" {
+			c.TargetMet = float64(c.InputCharacters) <= float64(c.CharacterLimit)*c.Policy.TargetRatio
+		}
 		c.ModelContextWindowTokens = window
 		c.EffectiveInputTokenLimit = tokenLimit
 		c.ReservedOutputTokens = reserve
@@ -518,6 +536,13 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			state.Status = "failed"
 			state.ErrorCode = strptr(ErrorCode(measureErr))
 			return nil
+		}
+		if tokenLimit != nil {
+			c.PolicyUnit = "tokens"
+			c.TargetMet = measurement.TargetMet
+			if measurement.ProjectionReason != "none" {
+				c.ProjectionReason = measurement.ProjectionReason
+			}
 		}
 		c.InputTokens = &measurement.Tokens
 		c.TokenMeasurementSource = measurement.Source
