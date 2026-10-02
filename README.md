@@ -204,3 +204,9 @@ go build ./cmd/...
 ```
 
 The tests generate temporary REST/MCP contracts, model doubles, and SQLite databases. They need no domain pack or live external service. Before production use, validate real identities, model decisions, API contracts, long-running tasks, and operating conditions in the target environment. Current trade-offs and pre-launch checks are in the [architecture guide (Chinese)](docs/architecture.md) and [deployment guide (Chinese)](docs/deployment.md).
+
+## License
+
+Agenstra is licensed under the [MIT License](LICENSE). Commercial use, modification, and redistribution are permitted, provided the copyright and license notices are retained. The software is provided without warranty.
+
+Third-party dependencies retain their respective licenses.
