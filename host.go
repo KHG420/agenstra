@@ -176,8 +176,19 @@ func (h *AgentHost) prepareRun(ctx context.Context, owner, pack, instruction, id
 		return nil, e
 	}
 	delete(runtime, "facts")
-	envelope := map[string]any{"runtime": runtime, "artifact_ids": []string{}, "pack_fingerprint": nil, "pack_release": release}
+	settings := normalizedRunSettings(h.Settings)
+	if err := settings.Validate(); err != nil {
+		return nil, err
+	}
+	envelope := map[string]any{"runtime": runtime, "artifact_ids": []string{}, "pack_fingerprint": nil, "pack_release": release, "effective_config": EffectiveRunConfig{Version: 1, Source: "run_snapshot", Settings: settings}}
 	setMemoryInput(envelope, id+":instruction", instruction)
+	raw, err := CanonicalJSON(envelope)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > settings.MaxStateBytes {
+		return nil, hostError("run_state_too_large")
+	}
 	return envelope, nil
 }
 func (h *AgentHost) Create(ctx context.Context, owner, pack, instruction, requestID string) (StoredRun, error) {
@@ -195,6 +206,9 @@ func (h *AgentHost) Get(ctx context.Context, id, owner string) (StoredRun, error
 	return r, e
 }
 func (h *AgentHost) restore(run StoredRun) (*RuntimeState, error) {
+	if _, err := h.effectiveRunConfig(run); err != nil {
+		return nil, err
+	}
 	runtime, ok := run.State["runtime"].(map[string]any)
 	if !ok {
 		return nil, hostError("run_state_invalid")
@@ -259,7 +273,7 @@ func (h *AgentHost) save(run StoredRun, state *RuntimeState, fingerprint string,
 			return run, e
 		}
 	}
-	if size > h.Settings.MaxActiveArtifactBytes {
+	if size > h.runSettings(run).MaxActiveArtifactBytes {
 		return run, hostError("run_artifacts_too_large")
 	}
 	var fp any = run.State["pack_fingerprint"]
@@ -267,7 +281,7 @@ func (h *AgentHost) save(run StoredRun, state *RuntimeState, fingerprint string,
 		fp = fingerprint
 	}
 	envelope := map[string]any{"runtime": runtime, "artifact_ids": ids, "pack_fingerprint": fp, "pack_release": run.State["pack_release"]}
-	for _, key := range []string{"memory_inputs", "memory_snapshot", "memory_errors", "project_sources"} {
+	for _, key := range []string{"memory_inputs", "memory_snapshot", "memory_errors", "project_sources", "effective_config"} {
 		if value, exists := run.State[key]; exists {
 			envelope[key] = value
 		}
@@ -276,7 +290,7 @@ func (h *AgentHost) save(run StoredRun, state *RuntimeState, fingerprint string,
 	if e != nil {
 		return run, e
 	}
-	if len(b) > h.Settings.MaxStateBytes {
+	if len(b) > h.runSettings(run).MaxStateBytes {
 		return run, hostError("run_state_too_large")
 	}
 	invs := []map[string]any{}
@@ -289,7 +303,7 @@ func (h *AgentHost) save(run StoredRun, state *RuntimeState, fingerprint string,
 	}
 	events := []map[string]any{}
 	if event != nil {
-		if progress := runProgress(state, h.Settings.MaxStagnantRounds); progress != nil {
+		if progress := runProgress(state, h.runSettings(run).MaxStagnantRounds); progress != nil {
 			event["progress"] = progress
 		}
 		event["status"] = state.Status
@@ -447,7 +461,7 @@ func (h *AgentHost) execute(ctx context.Context, run StoredRun, state *RuntimeSt
 	if err != nil || prepared == nil {
 		return run, err
 	}
-	callCtx, cancel := context.WithTimeout(ctx, time.Duration(h.Settings.InvocationTimeoutSeconds*1e9))
+	callCtx, cancel := context.WithTimeout(ctx, time.Duration(h.runSettings(run).InvocationTimeoutSeconds*1e9))
 	outcome, err := ExecuteCall(callCtx, provider, prepared.grants, item.Call, &prepared.inv)
 	cancel()
 	if ctx.Err() != nil {
@@ -519,7 +533,7 @@ func (h *AgentHost) prepareInvocation(ctx context.Context, run StoredRun, state 
 	item.Call = normalized
 	item.ArgumentsSHA256 = digest
 	if item.Status == "in_flight" || item.Status == "unknown" {
-		if cap.Replay == "never" || item.Attempts >= h.Settings.MaxInvocationAttempts {
+		if cap.Replay == "never" || item.Attempts >= h.runSettings(run).MaxInvocationAttempts {
 			item.Status = "unknown"
 			state.Status = "needs_reconciliation"
 			state.ErrorCode = strptr("provider_outcome_unknown")
@@ -531,7 +545,7 @@ func (h *AgentHost) prepareInvocation(ctx context.Context, run StoredRun, state 
 	validApproval := item.ApprovedHash != nil && *item.ApprovedHash == digest && item.ApprovedUntil != nil && h.now() < *item.ApprovedUntil
 	if (cap.ApprovalRequired || policy.ApprovalCapabilities[cap.Name]) && !validApproval {
 		item.Status = "needs_approval"
-		expires := h.now() + h.Settings.ApprovalSeconds
+		expires := h.now() + h.runSettings(run).ApprovalSeconds
 		item.ApprovalExpiresAt = &expires
 		item.ApprovedHash = nil
 		item.ApprovedUntil = nil
@@ -564,9 +578,9 @@ func (h *AgentHost) settleInvocation(run StoredRun, state *RuntimeState, item *I
 		item.ErrorCode = strptr(outcome.ErrorCode)
 		state.Status = "needs_reconciliation"
 		var wake *float64
-		if cap.Replay != "never" && item.Attempts < h.Settings.MaxInvocationAttempts {
+		if cap.Replay != "never" && item.Attempts < h.runSettings(run).MaxInvocationAttempts {
 			state.Status = "waiting"
-			v := h.now() + h.Settings.RetryIntervalSeconds
+			v := h.now() + h.runSettings(run).RetryIntervalSeconds
 			wake = &v
 		}
 		state.ErrorCode = strptr(outcome.ErrorCode)
@@ -578,7 +592,7 @@ func (h *AgentHost) settleInvocation(run StoredRun, state *RuntimeState, item *I
 			return run, e
 		}
 		code := ""
-		if len(b) > h.Settings.MaxArtifactBytes {
+		if len(b) > h.runSettings(run).MaxArtifactBytes {
 			code = "result_too_large"
 		} else {
 			size := len(b)
@@ -586,7 +600,7 @@ func (h *AgentHost) settleInvocation(run StoredRun, state *RuntimeState, item *I
 				b, _ := CanonicalJSON(f)
 				size += len(b)
 			}
-			if size > h.Settings.MaxActiveArtifactBytes {
+			if size > h.runSettings(run).MaxActiveArtifactBytes {
 				code = "run_artifacts_too_large"
 			}
 		}
@@ -779,7 +793,7 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 	if h.now() < receipt.NextPollAt && !item.PollInFlight {
 		return run, nil
 	}
-	if state.PollCallsUsed >= h.Settings.MaxPollCalls {
+	if state.PollCallsUsed >= h.runSettings(run).MaxPollCalls {
 		state.Status = "failed"
 		state.ErrorCode = strptr("poll_budget_exhausted")
 		return h.save(run, state, "", nil, nil)
@@ -807,7 +821,7 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 	if e != nil {
 		return run, e
 	}
-	callCtx, cancel := context.WithTimeout(ctx, time.Duration(h.Settings.InvocationTimeoutSeconds*1e9))
+	callCtx, cancel := context.WithTimeout(ctx, time.Duration(h.runSettings(run).InvocationTimeoutSeconds*1e9))
 	outcome, e := ExecuteCall(callCtx, provider, policy.GrantedCapabilities, call, &inv)
 	cancel()
 	if ctx.Err() != nil {
@@ -828,7 +842,7 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 		if e != nil {
 			return run, e
 		}
-		if len(b) > h.Settings.MaxArtifactBytes {
+		if len(b) > h.runSettings(run).MaxArtifactBytes {
 			return run, hostError("result_too_large")
 		}
 		size := len(b)
@@ -840,7 +854,7 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 				facts = append(facts, f)
 			}
 		}
-		if size > h.Settings.MaxActiveArtifactBytes {
+		if size > h.runSettings(run).MaxActiveArtifactBytes {
 			return run, hostError("run_artifacts_too_large")
 		}
 		state.Facts = append(facts, *outcome.Fact)
@@ -946,12 +960,12 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 	if previous, ok := run.State["pack_fingerprint"].(string); ok && previous != fp {
 		return run, hostError("pack_changed")
 	}
-	runtime := &AgentRuntime{Provider: provider, Model: h.Model, Grants: policy.GrantedCapabilities, OriginPackID: run.PackID, ConnectionID: NewID(), Durable: true, MaxModelRounds: h.Settings.MaxModelRounds, MaxToolCalls: h.Settings.MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.Settings.MaxContextCharacters}
+	runtime := &AgentRuntime{Provider: provider, Model: h.Model, Grants: policy.GrantedCapabilities, OriginPackID: run.PackID, ConnectionID: NewID(), Durable: true, MaxModelRounds: h.runSettings(run).MaxModelRounds, MaxToolCalls: h.runSettings(run).MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.runSettings(run).MaxContextCharacters}
 	runtime.CompletionValidator = h.CompletionValidator
-	runtime.MaxModelTokens = h.Settings.MaxModelTokens
-	runtime.MaxModelOutputTokens = h.Settings.MaxModelOutputTokens
-	runtime.MaxStagnantRounds = h.Settings.MaxStagnantRounds
-	runtime.MaxConcurrentTools = h.Settings.MaxConcurrentTools
+	runtime.MaxModelTokens = h.runSettings(run).MaxModelTokens
+	runtime.MaxModelOutputTokens = h.runSettings(run).MaxModelOutputTokens
+	runtime.MaxStagnantRounds = h.runSettings(run).MaxStagnantRounds
+	runtime.MaxConcurrentTools = h.runSettings(run).MaxConcurrentTools
 	run, e = h.prepareMemories(ctx, run)
 	if e != nil {
 		return run, e
@@ -975,7 +989,7 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 			state.ErrorCode = strptr("cancel_requested")
 			break
 		}
-		if h.now()-run.CreatedAt >= h.Settings.MaxRunSeconds {
+		if h.now()-run.CreatedAt >= h.runSettings(run).MaxRunSeconds {
 			state.Status = "failed"
 			state.ErrorCode = strptr("run_deadline_exceeded")
 			for i := range state.Pending {
@@ -1081,7 +1095,7 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 			run, e = h.save(run, state, "", nil, map[string]any{"kind": "model_requested", "round": state.RoundsUsed})
 			return e
 		}
-		modelCtx, cancel := context.WithTimeout(ctx, time.Duration(h.Settings.ModelTimeoutSeconds*1e9))
+		modelCtx, cancel := context.WithTimeout(ctx, time.Duration(h.runSettings(run).ModelTimeoutSeconds*1e9))
 		e = runtime.Step(modelCtx, state, before)
 		expired := errors.Is(modelCtx.Err(), context.DeadlineExceeded)
 		cancel()

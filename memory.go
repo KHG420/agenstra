@@ -205,11 +205,11 @@ func (h *AgentHost) prepareMemories(ctx context.Context, run StoredRun) (StoredR
 		for _, m := range existing {
 			known = append(known, MemoryView{PackID: m.PackID, ID: m.ID, Key: m.Key, Value: m.Value, Kind: m.Kind, Scope: m.Scope, Revision: m.Revision})
 		}
-		request := MemoryExtractionRequest{Text: input.Text, Existing: known, MaxCharacters: h.Settings.MaxContextCharacters}
+		request := MemoryExtractionRequest{Text: input.Text, Existing: known, MaxCharacters: h.runSettings(run).MaxContextCharacters}
 		_, extractErr := memoryExtractionInput(&request)
 		var proposals []MemoryProposal
 		if extractErr == nil {
-			extractCtx, cancel := context.WithTimeout(ctx, time.Duration(h.Settings.ModelTimeoutSeconds*1e9))
+			extractCtx, cancel := context.WithTimeout(ctx, time.Duration(h.runSettings(run).ModelTimeoutSeconds*1e9))
 			proposals, extractErr = extractor.ExtractMemories(extractCtx, request)
 			cancel()
 		}

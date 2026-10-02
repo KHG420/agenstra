@@ -83,14 +83,14 @@ func invokeParallel(ctx context.Context, provider CapabilityProvider, tasks []pa
 }
 
 func (h *AgentHost) parallelBatch(ctx context.Context, run StoredRun, state *RuntimeState, provider CapabilityProvider) (bool, error) {
-	if _, ok := provider.(ConcurrentCapabilityProvider); !ok || concurrentToolLimit(h.Settings.MaxConcurrentTools) < 2 || len(state.Pending) < 2 {
+	if _, ok := provider.(ConcurrentCapabilityProvider); !ok || concurrentToolLimit(h.runSettings(run).MaxConcurrentTools) < 2 || len(state.Pending) < 2 {
 		return false, nil
 	}
 	policy, err := h.projectPolicy(ctx, run)
 	if err != nil {
 		return false, err
 	}
-	return independentBatch(provider, state.Pending, policy, h.Settings.MaxConcurrentTools), nil
+	return independentBatch(provider, state.Pending, policy, h.runSettings(run).MaxConcurrentTools), nil
 }
 
 func (h *AgentHost) executeParallel(ctx context.Context, run StoredRun, state *RuntimeState, provider CapabilityProvider, runtime *AgentRuntime) (StoredRun, error) {
@@ -121,7 +121,7 @@ func (h *AgentHost) executeParallel(ctx context.Context, run StoredRun, state *R
 		prepared = append(prepared, *call)
 		tasks = append(tasks, parallelInvocation{call: item.Call, inv: call.inv, grants: call.grants})
 	}
-	outcomes := invokeParallel(ctx, provider, tasks, h.Settings.MaxConcurrentTools, time.Duration(h.Settings.InvocationTimeoutSeconds*1e9))
+	outcomes := invokeParallel(ctx, provider, tasks, h.runSettings(run).MaxConcurrentTools, time.Duration(h.runSettings(run).InvocationTimeoutSeconds*1e9))
 	if ctx.Err() != nil {
 		return run, ctx.Err()
 	}
