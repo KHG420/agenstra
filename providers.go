@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -150,6 +151,13 @@ func (c CapabilityDescription) ModelView() JSON {
 	var m JSON
 	_ = json.Unmarshal(b, &m)
 	delete(m, "output_schema")
+	if strings.HasPrefix(c.Name, "ui.") && c.Operation != nil && c.Operation.PollCapability == "ui.command_status" {
+		// The host, rather than the model, applies this browser poll binding.
+		// Keep the prerequisite and result source visible without repeating all
+		// timeouts, paths and state lists for every page action in every round.
+		m["operation"] = JSON{"poll_capability": "ui.command_status"}
+		m["requires_browser_context"] = true
+	}
 	for k, v := range m {
 		if v == nil {
 			delete(m, k)

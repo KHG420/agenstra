@@ -379,8 +379,9 @@ func (r *AgentRuntime) contextCandidate(state *RuntimeState) ContextPacket {
 			omissions = append(omissions, "capability search returned no authorized matches for: "+state.CapabilitySearchQuery)
 		}
 	}
-	start := max(0, len(state.ModelObservations)-12)
-	for _, o := range state.ModelObservations[start:] {
+	modelObservations := currentEvidenceObservations(state, state.ModelObservations)
+	start := max(0, len(modelObservations)-12)
+	for _, o := range modelObservations[start:] {
 		raw, _ := CanonicalJSON(o.Arguments)
 		if utf8.RuneCount(raw) > 2000 {
 			o.Arguments = JSON{}
