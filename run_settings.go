@@ -5,6 +5,7 @@ import "encoding/json"
 // EffectiveRunConfig records execution limits, not credentials or authorizations.
 // Lease renewal and host-wide run slots remain live host operations.
 type EffectiveRunConfig struct {
+	Model    ModelInfo    `json:"model"`
 	Version  int          `json:"version"`
 	Source   string       `json:"source"`
 	Settings HostSettings `json:"settings"`

@@ -63,8 +63,11 @@ type MemoryProposal struct {
 	Quote string `json:"quote"`
 }
 type MemoryExtractionRequest struct {
-	Text     string       `json:"text"`
-	Existing []MemoryView `json:"existing"`
+	ContextWindowTokens   int64        `json:"-"`
+	MaxInputTokens        int64        `json:"-"`
+	ProtocolReserveTokens int64        `json:"-"`
+	Text                  string       `json:"text"`
+	Existing              []MemoryView `json:"existing"`
 	// MaxCharacters includes the extraction system prompt and canonical request.
 	// Hosts populate it; zero uses the default Host budget for direct model calls.
 	MaxCharacters        int   `json:"-"`

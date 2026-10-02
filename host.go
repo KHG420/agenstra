@@ -28,32 +28,39 @@ type ExecutionPolicy struct {
 	Delegations          map[string][]string `json:"delegations,omitempty"`
 }
 type HostSettings struct {
-	LeaseSeconds             float64 `json:"lease_seconds"`
-	MaxModelRounds           int     `json:"max_model_rounds"`
-	MaxToolCalls             int     `json:"max_tool_calls"`
-	MaxPollCalls             int     `json:"max_poll_calls"`
-	MaxRunSeconds            float64 `json:"max_run_seconds"`
-	MaxContextCharacters     int     `json:"max_context_characters"`
-	MaxArtifactBytes         int     `json:"max_artifact_bytes"`
-	MaxActiveArtifactBytes   int     `json:"max_active_artifact_bytes"`
-	MaxStateBytes            int     `json:"max_state_bytes"`
-	ModelTimeoutSeconds      float64 `json:"model_timeout_seconds"`
-	InvocationTimeoutSeconds float64 `json:"invocation_timeout_seconds"`
-	MaxInvocationAttempts    int     `json:"max_invocation_attempts"`
-	RetryIntervalSeconds     float64 `json:"retry_interval_seconds"`
-	ApprovalSeconds          float64 `json:"approval_seconds"`
-	MaxConcurrentRuns        int     `json:"max_concurrent_runs"`
-	MaxModelTokens           int64   `json:"max_model_tokens,omitempty"`
-	MaxModelOutputTokens     int     `json:"max_model_output_tokens,omitempty"`
-	ModelTokenLimitField     string  `json:"model_token_limit_field,omitempty"`
-	MaxStagnantRounds        int     `json:"max_stagnant_rounds,omitempty"`
-	MaxConcurrentTools       int     `json:"max_concurrent_tools,omitempty"`
+	ModelContextWindowTokens   int64   `json:"model_context_window_tokens,omitempty"`
+	MaxModelInputTokens        int64   `json:"max_model_input_tokens,omitempty"`
+	ModelOutputReserveTokens   int     `json:"model_output_reserve_tokens,omitempty"`
+	ModelProtocolReserveTokens int64   `json:"model_protocol_reserve_tokens,omitempty"`
+	LeaseSeconds               float64 `json:"lease_seconds"`
+	MaxModelRounds             int     `json:"max_model_rounds"`
+	MaxToolCalls               int     `json:"max_tool_calls"`
+	MaxPollCalls               int     `json:"max_poll_calls"`
+	MaxRunSeconds              float64 `json:"max_run_seconds"`
+	MaxContextCharacters       int     `json:"max_context_characters"`
+	MaxArtifactBytes           int     `json:"max_artifact_bytes"`
+	MaxActiveArtifactBytes     int     `json:"max_active_artifact_bytes"`
+	MaxStateBytes              int     `json:"max_state_bytes"`
+	ModelTimeoutSeconds        float64 `json:"model_timeout_seconds"`
+	InvocationTimeoutSeconds   float64 `json:"invocation_timeout_seconds"`
+	MaxInvocationAttempts      int     `json:"max_invocation_attempts"`
+	RetryIntervalSeconds       float64 `json:"retry_interval_seconds"`
+	ApprovalSeconds            float64 `json:"approval_seconds"`
+	MaxConcurrentRuns          int     `json:"max_concurrent_runs"`
+	MaxModelTokens             int64   `json:"max_model_tokens,omitempty"`
+	MaxModelOutputTokens       int     `json:"max_model_output_tokens,omitempty"`
+	ModelTokenLimitField       string  `json:"model_token_limit_field,omitempty"`
+	MaxStagnantRounds          int     `json:"max_stagnant_rounds,omitempty"`
+	MaxConcurrentTools         int     `json:"max_concurrent_tools,omitempty"`
 }
 
 func DefaultHostSettings() HostSettings {
-	return HostSettings{60, 30, 80, 720, 86400, 80000, 8000000, 64000000, 8000000, 60, 300, 3, 5, 900, 4, 0, 0, "", 8, 4}
+	return HostSettings{LeaseSeconds: 60, MaxModelRounds: 30, MaxToolCalls: 80, MaxPollCalls: 720, MaxRunSeconds: 86400, MaxContextCharacters: 80000, MaxArtifactBytes: 8000000, MaxActiveArtifactBytes: 64000000, MaxStateBytes: 8000000, ModelTimeoutSeconds: 60, InvocationTimeoutSeconds: 300, MaxInvocationAttempts: 3, RetryIntervalSeconds: 5, ApprovalSeconds: 900, MaxConcurrentRuns: 4, MaxStagnantRounds: 8, MaxConcurrentTools: 4}
 }
 func (s HostSettings) Validate() error {
+	if s.ModelContextWindowTokens < 0 || s.ModelContextWindowTokens > 100000000 || s.MaxModelInputTokens < 0 || s.MaxModelInputTokens > 100000000 || s.ModelOutputReserveTokens < 0 || s.ModelOutputReserveTokens > 1000000 || s.ModelProtocolReserveTokens < 0 || s.ModelProtocolReserveTokens > 1000000 {
+		return errors.New("host_settings_invalid")
+	}
 	if s.MaxConcurrentTools < 0 || s.MaxConcurrentTools > 4 {
 		return errors.New("host_settings_invalid")
 	}
@@ -177,10 +184,20 @@ func (h *AgentHost) prepareRun(ctx context.Context, owner, pack, instruction, id
 	}
 	delete(runtime, "facts")
 	settings := normalizedRunSettings(h.Settings)
+	info := modelInfo(h.Model)
+	if info.ContextWindowTokens != nil && (settings.ModelContextWindowTokens == 0 || *info.ContextWindowTokens < settings.ModelContextWindowTokens) {
+		settings.ModelContextWindowTokens = *info.ContextWindowTokens
+	}
+	if info.MaxInputTokens != nil && (settings.MaxModelInputTokens == 0 || *info.MaxInputTokens < settings.MaxModelInputTokens) {
+		settings.MaxModelInputTokens = *info.MaxInputTokens
+	}
+	if info.MaxOutputTokens != nil && (settings.MaxModelOutputTokens == 0 || *info.MaxOutputTokens < int64(settings.MaxModelOutputTokens)) {
+		settings.MaxModelOutputTokens = int(*info.MaxOutputTokens)
+	}
 	if err := settings.Validate(); err != nil {
 		return nil, err
 	}
-	envelope := map[string]any{"runtime": runtime, "artifact_ids": []string{}, "pack_fingerprint": nil, "pack_release": release, "effective_config": EffectiveRunConfig{Version: 1, Source: "run_snapshot", Settings: settings}}
+	envelope := map[string]any{"runtime": runtime, "artifact_ids": []string{}, "pack_fingerprint": nil, "pack_release": release, "effective_config": EffectiveRunConfig{Version: 1, Source: "run_snapshot", Settings: settings, Model: modelInfo(h.Model)}}
 	setMemoryInput(envelope, id+":instruction", instruction)
 	raw, err := CanonicalJSON(envelope)
 	if err != nil {
@@ -972,6 +989,10 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 	}
 	runtime := &AgentRuntime{Provider: provider, Model: h.Model, Grants: policy.GrantedCapabilities, OriginPackID: run.PackID, ConnectionID: NewID(), Durable: true, MaxModelRounds: h.runSettings(run).MaxModelRounds, MaxToolCalls: h.runSettings(run).MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.runSettings(run).MaxContextCharacters}
 	runtime.CompletionValidator = h.CompletionValidator
+	runtime.ModelContextWindowTokens = h.runSettings(run).ModelContextWindowTokens
+	runtime.MaxModelInputTokens = h.runSettings(run).MaxModelInputTokens
+	runtime.ModelOutputReserveTokens = h.runSettings(run).ModelOutputReserveTokens
+	runtime.ModelProtocolReserveTokens = h.runSettings(run).ModelProtocolReserveTokens
 	runtime.MaxModelTokens = h.runSettings(run).MaxModelTokens
 	runtime.MaxModelOutputTokens = h.runSettings(run).MaxModelOutputTokens
 	runtime.MaxStagnantRounds = h.runSettings(run).MaxStagnantRounds

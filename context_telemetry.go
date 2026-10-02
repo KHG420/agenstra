@@ -8,18 +8,26 @@ import (
 // ContextTelemetry describes the final input projection, outside model context.
 // Tokens are added only by a model measurement; character counts are exact.
 type ContextTelemetry struct {
-	Schema              string                `json:"schema"`
-	ProjectionID        string                `json:"projection_id"`
-	Round               int                   `json:"round"`
-	MeasuredAt          float64               `json:"measured_at"`
-	InputCharacters     int                   `json:"input_characters"`
-	CharacterLimit      int                   `json:"character_limit"`
-	CharactersRemaining int                   `json:"characters_remaining"`
-	Utilization         float64               `json:"character_utilization"`
-	OverLimit           bool                  `json:"over_limit"`
-	CandidateCharacters int                   `json:"candidate_characters"`
-	Components          map[string]int        `json:"components"`
-	Omissions           ContextOmissionCounts `json:"omissions"`
+	InputTokens              *int64                `json:"input_tokens"`
+	ReportedInputTokens      *int64                `json:"reported_input_tokens"`
+	TokenMeasurementSource   string                `json:"token_measurement_source,omitempty"`
+	ModelContextWindowTokens *int64                `json:"model_context_window_tokens"`
+	EffectiveInputTokenLimit *int64                `json:"effective_input_token_limit"`
+	ReservedOutputTokens     *int64                `json:"reserved_output_tokens"`
+	TokensRemaining          *int64                `json:"tokens_remaining"`
+	TokenUtilization         *float64              `json:"token_utilization"`
+	Schema                   string                `json:"schema"`
+	ProjectionID             string                `json:"projection_id"`
+	Round                    int                   `json:"round"`
+	MeasuredAt               float64               `json:"measured_at"`
+	InputCharacters          int                   `json:"input_characters"`
+	CharacterLimit           int                   `json:"character_limit"`
+	CharactersRemaining      int                   `json:"characters_remaining"`
+	Utilization              float64               `json:"character_utilization"`
+	OverLimit                bool                  `json:"over_limit"`
+	CandidateCharacters      int                   `json:"candidate_characters"`
+	Components               map[string]int        `json:"components"`
+	Omissions                ContextOmissionCounts `json:"omissions"`
 }
 
 type ContextOmissionCounts struct {
