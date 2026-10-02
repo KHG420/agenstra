@@ -1,5 +1,5 @@
 import { createAgenstraClient } from "/web/assets/agenstra-client.js";
-import { mountDemoChat } from "./demo-chat.js";
+import { mountAgenstraChat } from "/web/assets/agenstra-chat.js";
 
 const state = { page: "orders", status: "all", selected_order: "" };
 const rows = await fetch("/demo/orders").then(response => response.json()).then(data => data.orders);
@@ -50,7 +50,7 @@ client.on("action", ({ command, status }) => {
   evidence.textContent = "前端动作：" + command.action + (status === "succeeded" ? " · 页面已更新，回执已提交" : status === "unknown" ? " · 结果待确认" : " · 正在执行");
 });
 client.on("error", error => { if (error.name !== "AbortError") document.querySelector("#host-error").textContent = "操作未完成：" + (error.code || error.message); });
-mountDemoChat(document.querySelector("#chat"), { client, title: "订单助手" });
+mountAgenstraChat(document.querySelector("#chat"), { client, title: "订单助手" });
 const conversationList = document.querySelector("#conversation-list");
 async function refreshConversations() {
   const selected = await client.getConversation();
@@ -81,7 +81,7 @@ document.querySelector("#filter").addEventListener("change", async event => {
   try { await client.updatePageObservation(state); } catch (error) { document.querySelector("#host-error").textContent = error.message; }
 });
 for (const button of document.querySelectorAll("[data-prompt]")) button.addEventListener("click", () => {
-  const input = document.querySelector("demo-chat").shadowRoot.querySelector("textarea");
+  const input = document.querySelector("agenstra-chat").shadowRoot.querySelector("textarea");
   input.value = button.dataset.prompt;input.focus();
 });
 render();

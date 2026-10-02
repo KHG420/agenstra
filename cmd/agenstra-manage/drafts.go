@@ -38,7 +38,7 @@ func readJSON(path string, dst any) error {
 	return nil
 }
 func draftCommand(args []string, call managementCall) (any, error) {
-	usage := errors.New("draft commands: list; create ID [--type rest|mcp --name NAME --version VERSION]; show ID; set ID basic|connection FILE; add ID FILE [--conflict error|keep|replace]; update ID NAME FILE; import ID PACK_JSON [--conflict ...]; openapi ID SPEC_JSON --operation ID [--operation ID --conflict ...]; skill ID NAME FILE [--path PATH --description TEXT --conflict ...]; remove ID capability|skill NAME; edit ID; export ID NEW_DIRECTORY; validate ID; publish ID")
+	usage := errors.New("draft commands: list; create ID [--type rest|mcp --name NAME --version VERSION]; show ID; set ID basic|connection FILE; add ID FILE [--conflict error|keep|replace]; update ID NAME FILE; import ID PACK_JSON [--conflict ...]; openapi ID SPEC_JSON --operation ID [--operation ID --conflict ...]; discover MCP_DRAFT_ID [ENVIRONMENT_REFS_JSON]; skill ID NAME FILE [--path PATH --description TEXT --conflict ...]; remove ID capability|skill NAME; edit ID; export ID NEW_DIRECTORY; validate ID; publish ID")
 	if len(args) == 0 {
 		return nil, usage
 	}
@@ -90,6 +90,18 @@ func draftCommand(args []string, call managementCall) (any, error) {
 	body := map[string]any{"expected_revision": d["revision"]}
 	conflict := "error"
 	switch command {
+	case "discover":
+		if len(args) < 2 || len(args) > 3 || m["schema"] != "agenstra.mcp-pack.v1" {
+			return nil, errors.New("draft discover MCP_DRAFT_ID [ENVIRONMENT_REFS_JSON]")
+		}
+		if len(args) == 3 {
+			var environment map[string]string
+			if err := readJSON(args[2], &environment); err != nil {
+				return nil, err
+			}
+			body["environment"] = environment
+		}
+		return call("POST", path+"/discover", body)
 	case "show":
 		if len(args) != 2 {
 			return nil, usage

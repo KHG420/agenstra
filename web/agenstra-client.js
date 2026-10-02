@@ -384,6 +384,7 @@ export class AgenstraClient {
   resumeRun(id) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/resume", { method: "POST", body: {} }); }
   getArtifact(id, artifactId) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/artifacts/" + encodeURIComponent(artifactId)); }
   getRunTelemetry(id) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/telemetry"); }
+  getRunDiagnostics(id) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/diagnostics"); }
   getRunEvents(id, { after = 0, limit = 100 } = {}) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/events?after=" + after + "&limit=" + limit); }
   async steerRun(id, text, revision, { requestId = this.id() } = {}) {
     try { return await this.request("/web/v1/runs/" + encodeURIComponent(id) + "/steer", { method: "POST", body: { request_id: requestId, text, revision } }); }

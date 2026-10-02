@@ -22,6 +22,7 @@
       <a href="#releases">版本目录</a>
       <a href="#publish">草稿编辑</a>
       <a href="#bindings">连接与授权</a>
+      <a href="#diagnostics">试运行与诊断</a>
       <a href="#audit">变更记录</a>
       <div class="sidebar-note">发布版本后，新任务会读取当前启用版本。已有任务继续使用其固定版本。</div>
     </aside>
@@ -98,31 +99,39 @@
             </div>
           </section>
           <section data-panel="capabilities" hidden aria-labelledby="capabilities-title">
-            <h3 id="capabilities-title">逐项添加能力和契约</h3>
+            <h3 id="capabilities-title">选择要开放的业务能力</h3>
+            <div data-rest><label for="openapi-file">导入已有接口文档（OpenAPI 3.0/3.1 JSON）</label><input id="openapi-file" type="file" accept=".json,application/json"><div id="openapi-operations" class="operation-list"><p class="empty">选择文档后，勾选要开放的业务操作。</p></div><button id="generate-draft" type="button" class="button secondary">导入所选接口</button></div>
+            <div data-mcp hidden>
+              <p>读取服务提供的工具，勾选后自动生成契约。导入后请确认每项操作的业务影响。</p>
+              <details class="advanced"><summary>发现工具使用的凭据引用</summary><label for="discovery-environment">变量映射（可选）</label><textarea id="discovery-environment" rows="3" spellcheck="false">{}</textarea><small>默认使用服务连接中的同名变量；只填写变量名或 secret:NAME 引用。</small></details>
+              <button id="discover-mcp" class="button secondary" type="button">连接并发现工具</button>
+              <div id="mcp-tools" class="operation-list"><p class="empty">先填写服务连接，再读取工具列表。</p></div>
+              <button id="import-mcp-tools" class="button secondary" type="button">导入所选工具</button>
+            </div>
             <div class="actions"><label for="capability-list">当前能力</label><select id="capability-list"><option value="">尚无能力</option></select><button id="add-capability" class="button secondary" type="button">添加能力</button><button id="remove-capability" class="button danger" type="button">移除能力</button></div>
             <div id="capability-fields" hidden>
               <div class="form-grid"><div><label for="cap-name">能力名称</label><input id="cap-name" placeholder="records.get"></div><div data-rest><label for="cap-method">HTTP 方法</label><select id="cap-method"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select></div></div>
               <div data-rest><label for="cap-description">什么时候使用</label><input id="cap-description" placeholder="根据用户提供的记录 ID 查询记录"><label for="cap-path">接口路径</label><input id="cap-path" placeholder="/records/{record_id}"><small>路径变量必须在输入契约的 path 中同名声明且必填。</small>
-                <div class="form-grid"><div><label for="cap-input">输入契约（JSON Schema）</label><textarea id="cap-input" rows="8" spellcheck="false"></textarea><small>参数按 path、query、headers、body 分组。</small></div><div><label for="cap-output">输出契约（JSON Schema）</label><textarea id="cap-output" rows="8" spellcheck="false"></textarea><small>声明返回字段、类型和必填项。</small></div></div>
+                <details class="advanced"><summary>查看 / 编辑接口输入输出契约</summary><div class="form-grid"><div><label for="cap-input">输入契约（JSON Schema）</label><textarea id="cap-input" rows="8" spellcheck="false"></textarea><small>参数按 path、query、headers、body 分组。</small></div><div><label for="cap-output">输出契约（JSON Schema）</label><textarea id="cap-output" rows="8" spellcheck="false"></textarea><small>声明返回字段、类型和必填项。</small></div></div></details>
               </div>
-              <div data-mcp hidden><label for="cap-hash">已审查工具的完整契约 SHA-256</label><input id="cap-hash" placeholder="64 位小写十六进制哈希"><small>工具名必须与远端一致；连接时验证完整工具契约。</small></div>
+              <details data-mcp hidden class="advanced"><summary>查看 / 编辑工具契约校验值</summary><label for="cap-hash">已审查工具的完整契约 SHA-256</label><input id="cap-hash" placeholder="64 位小写十六进制哈希"><small>发现工具时自动计算；连接时验证完整工具契约。</small></details>
               <label for="cap-skills">关联使用说明</label><input id="cap-skills" placeholder="record-rules, report-rules"><small>填写第五步中已有的技能名称，多个名称用逗号分隔。</small>
             </div>
             <details class="advanced"><summary>分批导入已有接口或能力包</summary>
               <label for="import-conflict">同名能力或技能如何处理</label><select id="import-conflict"><option value="error">报告冲突，保留草稿</option><option value="keep">保留已有项，只追加新项</option><option value="replace">替换同名项，其余内容保留</option></select>
               <label for="manifest-file">已有能力包清单（同类型）</label><input id="manifest-file" type="file" accept=".json,application/json"><label for="skill-files">该清单引用的技能目录（可选）</label><input id="skill-files" type="file" multiple webkitdirectory directory>
               <button id="import-manifest" type="button" class="button secondary">合并清单中的能力和技能</button>
-              <div data-rest><label for="openapi-file">OpenAPI 3.0/3.1 JSON</label><input id="openapi-file" type="file" accept=".json,application/json"><div id="openapi-operations" class="operation-list"><p class="empty">选择文档后，勾选本次要导入的操作。</p></div><button id="generate-draft" type="button" class="button secondary">追加所选接口</button></div>
+
               <p id="import-preview" class="inline-feedback" role="status"></p>
             </details>
           </section>
           <section data-panel="rules" hidden aria-labelledby="rules-title">
-            <h3 id="rules-title">声明调用影响和恢复方式</h3><label for="rules-capability">配置哪项能力</label><select id="rules-capability"><option value="">先添加能力</option></select>
+            <h3 id="rules-title">确认业务影响和执行规则</h3><label for="rules-capability">配置哪项能力</label><select id="rules-capability"><option value="">先添加能力</option></select>
             <div id="rules-fields" hidden>
               <label for="cap-effect">调用会做什么</label><select id="cap-effect"><option value="read">读取数据</option><option value="compute">计算结果</option><option value="write">创建或修改数据</option><option value="destructive">删除或破坏性操作</option></select>
-              <label class="checkbox"><input id="cap-approval" type="checkbox">每次调用都需要审批</label>
+              <label class="checkbox"><input id="cap-approval" type="checkbox">执行前请用户确认操作和参数</label>
               <div data-rest><div class="form-grid"><div><label for="cap-timeout">请求超时（秒）</label><input id="cap-timeout" type="number" min="1" max="300" value="20"></div><div><label for="cap-idempotency">幂等请求头（可选）</label><input id="cap-idempotency" placeholder="Idempotency-Key"></div></div><small>仅在外部服务实际保证重复提交不产生重复操作时填写幂等请求头。</small></div>
-              <div data-mcp hidden><label for="cap-replay">结果不确定时的重放保证</label><select id="cap-replay"><option value="never">需要人工核对</option><option value="safe">可安全重做</option><option value="idempotent">外部服务支持幂等</option></select><label for="cap-reference">返回引用的有效范围</label><select id="cap-reference"><option value="durable">重新连接后仍可使用</option><option value="connection">仅当前连接有效</option></select></div>
+              <div data-mcp hidden><label for="cap-replay">结果没有收到时，业务系统能否保证重复操作安全</label><select id="cap-replay"><option value="never">需要人工核对</option><option value="safe">可安全重做</option><option value="idempotent">外部服务支持幂等</option></select><label for="cap-reference">返回引用的有效范围</label><select id="cap-reference"><option value="durable">重新连接后仍可使用</option><option value="connection">仅当前连接有效</option></select></div>
               <details class="advanced"><summary>长任务、响应映射及其他规则</summary><label for="cap-extra">补充规则（JSON 对象）</label><textarea id="cap-extra" rows="8" spellcheck="false">{}</textarea><small>REST 可配置 operation、response_path、response_schemas、error_codes、idempotency_argument；MCP 可配置 operation、idempotency_argument、optional、expires_at_path。后台任务的 operation 要声明作业 ID、状态字段、轮询能力及成功/失败状态。</small></details>
             </div>
           </section>
@@ -134,9 +143,18 @@
             <div class="actions"><button id="apply-skill" class="button secondary" type="button">添加 / 更新说明</button><button id="remove-skill" class="button danger" type="button">移除说明</button></div>
           </section>
           <section data-panel="review" hidden aria-labelledby="review-title">
-            <h3 id="review-title">检查完整清单后发布</h3><p>草稿可以暂时不完整。发布会执行完整校验；成功后，请在版本目录启用，再设置用户授权。</p>
+            <h3 id="review-title">检查并启用业务能力</h3><p>草稿可以暂时不完整。发布会执行完整校验；发布后可在这里选择用户、授权范围并检查接入。</p>
             <ul id="draft-issues" class="draft-issues"></ul>
             <div class="actions"><button id="validate" class="button secondary" type="button">保存并检查</button><button id="publish-draft" class="button primary" type="button">发布此草稿版本</button><button id="export-draft" class="button secondary" type="button">导出清单与技能</button></div>
+            <div id="setup-published" hidden class="setup-section">
+              <h3>为用户启用并授权</h3><p id="setup-release" role="status"></p>
+              <label for="setup-owner">使用这些能力的用户</label><select id="setup-owner"><option value="">选择已有用户</option></select>
+              <label for="setup-environment">服务连接的凭据引用</label><textarea id="setup-environment" rows="4" spellcheck="false">{}</textarea><small>这里只保存引用名称，实际地址和密钥从服务端读取。</small>
+              <fieldset><legend>允许此用户使用的能力</legend><div id="setup-grants" class="operation-list"></div></fieldset>
+              <label class="checkbox"><input id="setup-model-data" type="checkbox">允许将该连接的业务数据提供给所选模型</label>
+              <button id="enable-draft" class="button primary" type="button">启用版本、保存授权并检查连接</button>
+              <p id="setup-feedback" class="feedback inline-feedback" role="status"></p>
+            </div>
             <details class="advanced"><summary>查看 / 编辑完整清单 JSON</summary><label for="manifest-editor">完整清单</label><textarea id="manifest-editor" rows="15" spellcheck="false"></textarea><button id="apply-json" class="button secondary" type="button">应用 JSON 到草稿</button><small>应用会替换当前编辑内容；已有技能正文保留，发布前检查引用是否一致。</small></details>
           </section>
           <div class="draft-footer"><button id="save-draft" class="button primary" type="button">保存草稿</button><button id="next-step" class="button secondary" type="button">保存并下一步</button><span id="draft-progress">尚未创建草稿</span></div>
@@ -170,6 +188,18 @@
           </form>
           <div class="binding-list" id="binding-list"><p class="empty">连接后查看现有授权。</p></div>
         </div>
+      </section>
+
+      <section id="diagnostics" class="section" aria-labelledby="diagnostics-title">
+        <div class="section-heading"><div><h2 id="diagnostics-title">试运行与任务诊断</h2><p>使用接入用户的权限验证真实任务；执行操作会遵守能力的审批规则。</p></div></div>
+        <form id="diagnostic-form" class="form-panel">
+          <label for="diagnostic-key">接入用户的 API key</label><input id="diagnostic-key" type="password" autocomplete="off" required><small>仅用于本页请求，不保存到浏览器存储。管理员密钥不会代替用户权限。</small>
+          <div class="form-grid"><div><label for="diagnostic-pack">能力包</label><input id="diagnostic-pack" type="text"></div><div><label for="diagnostic-run">已有任务 ID（可选）</label><input id="diagnostic-run" type="text"></div></div>
+          <label for="diagnostic-instruction">代表性业务任务</label><textarea id="diagnostic-instruction" rows="3" placeholder="例如：查询订单 1001 的当前状态。"></textarea>
+          <div class="actions"><button class="button primary" type="submit">创建试运行任务</button><button id="inspect-run" class="button secondary" type="button">读取任务诊断</button></div>
+          <p id="diagnostic-feedback" class="feedback inline-feedback" role="status"></p>
+          <div id="diagnostic-result" aria-live="polite"></div>
+        </form>
       </section>
 
       <section id="audit" class="section" aria-labelledby="audit-title">

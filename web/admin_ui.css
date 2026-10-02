@@ -175,3 +175,14 @@ textarea, input { caret-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .button { transition: none; } }
 #publish input:not([type]) { width: 100%; min-height: 39px; padding: 9px 11px; border: 1px solid #bdcdc9; border-radius: 7px; background: #fff; color: var(--ink); }
 #publish textarea[spellcheck="false"] { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .85rem; }
+
+.setup-section { margin: 28px 0; padding-top: 24px; border-top: 1px solid var(--line); }
+.setup-section fieldset { margin: 20px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.setup-section legend { padding: 0 8px; font-weight: 650; }
+.setup-section .operation-list { border: 0; margin: 0; padding: 0; }
+.diagnostic-finding { padding: 16px 0; border-bottom: 1px solid var(--line); }
+.diagnostic-finding p { margin: 6px 0; overflow-wrap: anywhere; }
+#diagnostic-result pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+.operation-list { scrollbar-color: var(--line) var(--paper); scrollbar-width: thin; }
+input::placeholder, textarea::placeholder { color: var(--muted); }
+fieldset { min-width: 0; }

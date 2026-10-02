@@ -1,5 +1,7 @@
 # Agenstra
 
+[Quick integration: service, optional chat UI, MCP discovery and acceptance (Chinese)](docs/quick-integration.md)
+
 Language / 语言: [简体中文](README.zh-CN.md) · **English**
 
 **Make it easier to add an agent to the systems you already run.**
@@ -85,7 +87,7 @@ go mod download
 CGO_ENABLED=0 go build -trimpath -o dist/ ./cmd/...
 ```
 
-The build produces four standalone commands in `dist/`. SQLite storage and JSON Schema validation use pure Go libraries; the server embeds the management page and its static assets.
+The build produces five standalone commands in `dist/`. SQLite storage and JSON Schema validation use pure Go libraries; the server embeds the management page and its static assets.
 
 | Command | Purpose |
 | --- | --- |
@@ -93,6 +95,7 @@ The build produces four standalone commands in `dist/`. SQLite storage and JSON 
 | `agenstra-serve` | Serve the HTTP API, durable worker, and optional management interface. |
 | `agenstra-manage` | Validate, publish, and manage capability releases and grants through the management API. |
 | `agenstra-import-openapi` | Create a REST pack draft from selected OpenAPI operations. |
+| `agenstra-evaluate` | Run representative HTTP tasks and verify their status, tool use, and business evidence. |
 
 REST and MCP support are included in the Go binaries. Create your own pack using the integration tutorial and provide the environment variables referenced by its manifest. You can then inspect its catalog without calling an LLM:
 

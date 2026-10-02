@@ -364,125 +364,9 @@ func OpenMCPPack(ctx context.Context, path string, environment map[string]string
 	if err := validateRawManifest(raw, skillContents); err != nil {
 		return nil, err
 	}
-	source := manifest.Source
-	if source.TimeoutSeconds == 0 {
-		source.TimeoutSeconds = 60
-	}
-	if source.TimeoutSeconds <= 0 || source.TimeoutSeconds > 300 {
-		return nil, errors.New("invalid MCP timeout")
-	}
-	var transport mcpTransport
-	if source.Transport == "stdio" {
-		if source.Command == nil || *source.Command == "" || source.URLEnv != nil || source.TokenEnv != nil {
-			return nil, errors.New("stdio requires a command and environment-based credentials")
-		}
-		cmd := exec.CommandContext(ctx, *source.Command, source.Args...)
-		if source.CWDEnv != nil {
-			cwd, e := requiredEnv(env, *source.CWDEnv)
-			if e != nil {
-				return nil, e
-			}
-			cmd.Dir = cwd
-		}
-		cmd.Env = os.Environ()
-		for target, origin := range source.Environment {
-			v, e := requiredEnv(env, origin)
-			if e != nil {
-				return nil, e
-			}
-			cmd.Env = append(cmd.Env, target+"="+v)
-		}
-		stdin, e := cmd.StdinPipe()
-		if e != nil {
-			return nil, e
-		}
-		stdout, e := cmd.StdoutPipe()
-		if e != nil {
-			return nil, e
-		}
-		if e := cmd.Start(); e != nil {
-			return nil, e
-		}
-		transport = &stdioMCP{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}
-	} else if source.Transport == "streamable_http" {
-		if source.URLEnv == nil || source.Command != nil || len(source.Args) > 0 || source.CWDEnv != nil || len(source.Environment) > 0 {
-			return nil, errors.New("streamable_http requires url_env and optional token_env")
-		}
-		target, e := requiredEnv(env, *source.URLEnv)
-		if e != nil {
-			return nil, e
-		}
-		u, e := url.Parse(target)
-		if e != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return nil, errors.New("invalid MCP URL")
-		}
-		token := ""
-		if source.TokenEnv != nil {
-			token, e = requiredEnv(env, *source.TokenEnv)
-			if e != nil {
-				return nil, e
-			}
-		}
-		transport = &httpMCP{url: target, token: token, client: &http.Client{Timeout: time.Duration(source.TimeoutSeconds * float64(time.Second)), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
-	} else {
-		return nil, errors.New("invalid MCP transport")
-	}
-	initParams := JSON{"protocolVersion": "2025-03-26", "capabilities": JSON{}, "clientInfo": JSON{"name": "agenstra", "version": "1.0.0"}}
-	initialized, err := transport.Request(ctx, "initialize", initParams)
+	transport, remote, err := openMCPSource(ctx, manifest.Source, env)
 	if err != nil {
-		_ = transport.Close()
 		return nil, err
-	}
-	if client, ok := transport.(*httpMCP); ok {
-		if version, ok := initialized["protocolVersion"].(string); ok && version != "" {
-			client.protocol = version
-		}
-	}
-	if err := transport.Notify(ctx, "notifications/initialized", JSON{}); err != nil {
-		_ = transport.Close()
-		return nil, err
-	}
-	remote := map[string]JSON{}
-	cursors := map[string]bool{}
-	cursor := ""
-	for {
-		params := JSON{}
-		if cursor != "" {
-			params["cursor"] = cursor
-		}
-		page, e := transport.Request(ctx, "tools/list", params)
-		if e != nil {
-			_ = transport.Close()
-			return nil, e
-		}
-		items, ok := page["tools"].([]any)
-		if !ok {
-			_ = transport.Close()
-			return nil, errors.New("invalid MCP tools list")
-		}
-		for _, x := range items {
-			tool, ok := x.(map[string]any)
-			if !ok {
-				_ = transport.Close()
-				return nil, errors.New("invalid MCP tool")
-			}
-			name, _ := tool["name"].(string)
-			if name == "" || remote[name] != nil {
-				_ = transport.Close()
-				return nil, errors.New("duplicate remote capability")
-			}
-			remote[name] = tool
-		}
-		next, _ := page["nextCursor"].(string)
-		if next == "" {
-			break
-		}
-		if cursors[next] {
-			_ = transport.Close()
-			return nil, errors.New("capability pagination repeated cursor")
-		}
-		cursors[next] = true
-		cursor = next
 	}
 	pack := &MCPPack{Manifest: manifest, transport: transport, capabilities: map[string]CapabilityDescription{}, skills: skills, exposures: map[string]MCPToolExposure{}, inputs: map[string]*jsonschema.Schema{}, outputs: map[string]*jsonschema.Schema{}}
 	seen := map[string]bool{}
@@ -606,4 +490,129 @@ func (p *MCPPack) Invoke(ctx context.Context, name string, args map[string]any, 
 		expiry = &parsed
 	}
 	return CapabilityResult{Data: data, ReferenceScope: ex.ReferenceScope, ExpiresAt: expiry}, nil
+}
+
+// openMCPSource is shared by discovery and execution so discovery pins the same
+// complete contract that execution will subsequently verify.
+func openMCPSource(ctx context.Context, source MCPSource, env map[string]string) (mcpTransport, map[string]JSON, error) {
+	if source.TimeoutSeconds == 0 {
+		source.TimeoutSeconds = 60
+	}
+	if source.TimeoutSeconds <= 0 || source.TimeoutSeconds > 300 {
+		return nil, nil, errors.New("invalid MCP timeout")
+	}
+	var transport mcpTransport
+	if source.Transport == "stdio" {
+		if source.Command == nil || *source.Command == "" || source.URLEnv != nil || source.TokenEnv != nil {
+			return nil, nil, errors.New("stdio requires a command and environment-based credentials")
+		}
+		cmd := exec.CommandContext(ctx, *source.Command, source.Args...)
+		if source.CWDEnv != nil {
+			cwd, e := requiredEnv(env, *source.CWDEnv)
+			if e != nil {
+				return nil, nil, e
+			}
+			cmd.Dir = cwd
+		}
+		cmd.Env = os.Environ()
+		for target, origin := range source.Environment {
+			v, e := requiredEnv(env, origin)
+			if e != nil {
+				return nil, nil, e
+			}
+			cmd.Env = append(cmd.Env, target+"="+v)
+		}
+		stdin, e := cmd.StdinPipe()
+		if e != nil {
+			return nil, nil, e
+		}
+		stdout, e := cmd.StdoutPipe()
+		if e != nil {
+			return nil, nil, e
+		}
+		if e := cmd.Start(); e != nil {
+			return nil, nil, e
+		}
+		transport = &stdioMCP{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}
+	} else if source.Transport == "streamable_http" {
+		if source.URLEnv == nil || source.Command != nil || len(source.Args) > 0 || source.CWDEnv != nil || len(source.Environment) > 0 {
+			return nil, nil, errors.New("streamable_http requires url_env and optional token_env")
+		}
+		target, e := requiredEnv(env, *source.URLEnv)
+		if e != nil {
+			return nil, nil, e
+		}
+		u, e := url.Parse(target)
+		if e != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return nil, nil, errors.New("invalid MCP URL")
+		}
+		token := ""
+		if source.TokenEnv != nil {
+			token, e = requiredEnv(env, *source.TokenEnv)
+			if e != nil {
+				return nil, nil, e
+			}
+		}
+		transport = &httpMCP{url: target, token: token, client: &http.Client{Timeout: time.Duration(source.TimeoutSeconds * float64(time.Second)), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	} else {
+		return nil, nil, errors.New("invalid MCP transport")
+	}
+	initParams := JSON{"protocolVersion": "2025-03-26", "capabilities": JSON{}, "clientInfo": JSON{"name": "agenstra", "version": "1.0.0"}}
+	initialized, err := transport.Request(ctx, "initialize", initParams)
+	if err != nil {
+		_ = transport.Close()
+		return nil, nil, err
+	}
+	if client, ok := transport.(*httpMCP); ok {
+		if version, ok := initialized["protocolVersion"].(string); ok && version != "" {
+			client.protocol = version
+		}
+	}
+	if err := transport.Notify(ctx, "notifications/initialized", JSON{}); err != nil {
+		_ = transport.Close()
+		return nil, nil, err
+	}
+	remote := map[string]JSON{}
+	cursors := map[string]bool{}
+	cursor := ""
+	for {
+		params := JSON{}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		page, e := transport.Request(ctx, "tools/list", params)
+		if e != nil {
+			_ = transport.Close()
+			return nil, nil, e
+		}
+		items, ok := page["tools"].([]any)
+		if !ok {
+			_ = transport.Close()
+			return nil, nil, errors.New("invalid MCP tools list")
+		}
+		for _, x := range items {
+			tool, ok := x.(map[string]any)
+			if !ok {
+				_ = transport.Close()
+				return nil, nil, errors.New("invalid MCP tool")
+			}
+			name, _ := tool["name"].(string)
+			if name == "" || remote[name] != nil {
+				_ = transport.Close()
+				return nil, nil, errors.New("duplicate remote capability")
+			}
+			remote[name] = tool
+		}
+		next, _ := page["nextCursor"].(string)
+		if next == "" {
+			break
+		}
+		if cursors[next] {
+			_ = transport.Close()
+			return nil, nil, errors.New("capability pagination repeated cursor")
+		}
+		cursors[next] = true
+		cursor = next
+	}
+	return transport, remote, nil
 }

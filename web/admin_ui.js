@@ -26,6 +26,8 @@
     revision_conflict: "启用版本已被其他管理员修改。请刷新后重试。",
     release_tampered: "已发布文件的内容发生变化，系统已拒绝使用。",
     openapi_import_failed: "OpenAPI 草稿生成失败。请检查文档和所选操作。",
+    mcp_discovery_source_invalid: "MCP 连接配置不完整，请检查连接方式、地址变量和超时。",
+    mcp_discovery_failed: "读取 MCP 工具失败。请检查服务地址、凭据和工具列表协议。",
   };
 
   function feedback(message, kind = "info", location = "feedback") {
@@ -304,8 +306,82 @@
     if (!owner || !pack) return;
     try {
       const result = await api(`/admin/api/bindings/${encodeURIComponent(owner)}/${encodeURIComponent(pack)}/check`, { method: "POST" });
-      feedback(`连接可用，发现 ${result.capabilities.length} 项能力和 ${result.skills.length} 份技能。`, "success", "binding-feedback");
+      feedback(`契约与连接配置可加载，发现 ${result.capabilities.length} 项能力和 ${result.skills.length} 份使用说明。请用代表性任务验证实际业务接口。`, "success", "binding-feedback");
     } catch (error) { feedback(error.message, "error", "binding-feedback"); }
   });
-  const drafts = window.installDraftEditor({ api, feedback, names, formatDate, onPublish: refresh });
+  const drafts = window.installDraftEditor({ api, feedback, names, formatDate, onPublish: refresh, getOverview: () => state.overview });
+
+  let diagnosticBusy = false;
+  let diagnosticCreate = null;
+  async function userRequest(path, body) {
+    const key = $("diagnostic-key").value.trim();
+    if (!key) throw new Error("请填写接入用户的 API key。");
+    const response = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { Authorization: `Bearer ${key}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store", redirect: "error" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(messages[data.detail?.code || data.code] || `用户请求未完成：${data.detail?.code || data.code || response.status}`);
+    return data;
+  }
+  async function inspectRun() {
+    const id = $("diagnostic-run").value.trim();
+    if (!id) throw new Error("请填写任务 ID，或先创建一条试运行任务。");
+    const path = `/runs/${encodeURIComponent(id)}`;
+    const run = await userRequest(path);
+    const report = await userRequest(path + "/diagnostics");
+    const result = $("diagnostic-result"); result.replaceChildren();
+    const heading = document.createElement("h3"); heading.textContent = `任务 ${report.run_id} · ${report.status}`; result.append(heading);
+    const metrics = document.createElement("p"); metrics.textContent = `耗时 ${(report.elapsed_ms / 1000).toFixed(1)} 秒 · 业务调用 ${report.budget.tool_calls.used} 次 · 模型预算计入 ${report.budget.tokens.charged_tokens} tokens`; result.append(metrics);
+    for (const finding of report.findings) {
+      const item = document.createElement("div"); item.className = "diagnostic-finding";
+      const title = document.createElement("strong"); title.textContent = finding.message;
+      const next = document.createElement("p"); next.textContent = finding.next_action;
+      const code = document.createElement("code"); code.textContent = `${finding.category} · ${finding.code}${finding.capability ? " · " + finding.capability : ""}`;
+      item.append(title, next, code); result.append(item);
+    }
+    const runtime = run.state.runtime;
+    if (runtime.answer_markdown) { const answer = document.createElement("pre"); answer.textContent = runtime.answer_markdown; result.append(answer); }
+    async function perform(path, body) {
+      await diagnosticAction(async () => { await userRequest(path, body); await inspectRun(); });
+    }
+    function button(label, path, body) {
+      const node = document.createElement("button"); node.type = "button"; node.className = "button secondary"; node.textContent = label;
+      node.addEventListener("click", () => perform(path, body)); result.append(node);
+    }
+    if (run.status === "needs_approval") for (const item of runtime.pending || []) if (item.status === "needs_approval") {
+      const args = document.createElement("pre"); args.textContent = item.call.capability + "\n" + JSON.stringify(item.call.arguments, null, 2); result.append(args);
+      const body = { invocation_id: item.invocation_id, arguments_sha256: item.arguments_sha256, revision: run.revision };
+      button("批准此操作", path + "/approval", { ...body, approved: true }); button("拒绝此操作", path + "/approval", { ...body, approved: false });
+    }
+    if (run.status === "needs_input") {
+      const label = document.createElement("label"); label.htmlFor = "diagnostic-supplement"; label.textContent = runtime.input_prompt;
+      const input = document.createElement("input"); input.type = "text"; input.id = "diagnostic-supplement"; result.append(label, input);
+      const send = document.createElement("button"); send.type = "button"; send.className = "button secondary"; send.textContent = "提交补充信息";
+      send.addEventListener("click", () => { if (input.value.trim()) perform(path + "/input", { field: runtime.input_field, text: input.value.trim(), revision: run.revision }); }); result.append(send);
+    }
+    if (run.status === "needs_authorization") button("恢复权限后继续", path + "/resume", {});
+    if (run.status === "needs_reconciliation") for (const item of runtime.pending || []) if (item.status === "unknown" || item.status === "in_flight") button("用服务端业务证据核对", path + "/reconcile", { invocation_id: item.invocation_id, arguments_sha256: item.arguments_sha256, revision: run.revision });
+    if (!["completed", "failed", "cancelled"].includes(run.status)) button("停止此任务", path + "/cancel", {});
+    feedback("已读取任务证据。执行或恢复后，点击“读取任务诊断”查看最新状态。", "success", "diagnostic-feedback");
+  }
+  async function diagnosticAction(fn) {
+    if (diagnosticBusy) return;
+    diagnosticBusy = true;
+    const nodes = [...$("diagnostic-form").querySelectorAll("button")]; nodes.forEach(node => { node.disabled = true; });
+    try { await fn(); } catch (error) { feedback(error.message, "error", "diagnostic-feedback"); }
+    finally { diagnosticBusy = false; nodes.forEach(node => { node.disabled = false; }); }
+  }
+  $("diagnostic-form").addEventListener("submit", event => {
+    event.preventDefault();
+    diagnosticAction(async () => {
+      const pack = $("diagnostic-pack").value.trim(), instruction = $("diagnostic-instruction").value.trim();
+      if (!pack || !instruction) throw new Error("请填写能力包和一条代表性业务任务。");
+      if (!diagnosticCreate || diagnosticCreate.pack_id !== pack || diagnosticCreate.instruction !== instruction) {
+        const requestId = crypto.randomUUID?.() || Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
+        diagnosticCreate = { pack_id: pack, instruction, request_id: requestId };
+      }
+      const run = await userRequest("/runs", diagnosticCreate);
+      if (!run.run_id) throw new Error(`创建结果尚未确认。请保持能力包和任务内容不变后重试，请求 ID：${diagnosticCreate.request_id}`);
+      $("diagnostic-run").value = run.run_id; diagnosticCreate = null; await inspectRun();
+    });
+  });
+  $("inspect-run").addEventListener("click", () => diagnosticAction(inspectRun));
 })();

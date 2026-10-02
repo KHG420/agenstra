@@ -9,3 +9,5 @@
 示例使用演示数据和固定 DecisionModel，无需模型密钥。orders.list 通过 REST Provider 调用本地 /demo/orders，浏览器动作等待实际 handler 回执。默认只监听回环地址，`--addr 127.0.0.1:8093` 可更换端口。退出时删除临时数据库。
 
 演示身份固定为 demo；实际接入必须验证宿主登录身份并保存运行库和扩展库。完整方式见 [Web 接入指南](../../docs/web-integration.md)。
+
+聊天入口现在复用正式的可选 `@agenstra/web/chat` 组件。宿主只负责原登录身份、业务接口和页面 handler；完整服务接入、票据交换、类型生成与验收见[快速接入指南](../../docs/quick-integration.md)。示例数据与固定模型仍仅用于本地演示。

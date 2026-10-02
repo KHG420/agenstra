@@ -25,3 +25,51 @@ AGENSTRA_LIVE_EVAL=1 go test -run TestLiveAgentCompletionEvaluation -v
 ```
 
 环境变量使用 `AGENT_MODEL`、`AGENT_MODEL_BASE_URL` 和 `AGENT_MODEL_API_KEY`。评测打印每个任务的结果、工具调用、模型决策数量和耗时；默认 CI 跳过付费模型调用。测试通过代表这些案例通过，不能替代目标场景的成功率、事实一致性和延迟评测。
+
+## 独立服务的业务成功配置
+
+部署配置可添加 `completion_checks`，按任务来源能力包分组，无需编写 Go 回调：
+
+```json
+{
+  "completion_checks": {
+    "orders": [
+      {"capability": "orders.approve", "path": ["data", "approved"], "value": true}
+    ]
+  }
+}
+```
+
+规则只应用于任务实际使用过的能力，因此查询、问候和解释无需调用审批能力。拟完成回答必须引用该能力最新的成功 Fact，字段满足声明值；最新操作失败时不能用更早证据通过。`path` 从完整 Fact.value 开始；通常业务响应位于 `data` 下，应以实际返回结果确认。值支持 JSON 数值、布尔、字符串、对象和 null，JSON 中必须显式提供 `value`。
+
+配置在 HTTP server 启动前编译，错误会阻止启动；已有的 Go `CompletionValidator` 优先。重启或恢复未完成任务时保留相同业务校验配置。它不会验证自然语言的所有陈述，也不替代接口端的业务权限或事务。
+
+## 不确定操作的只读核对配置
+
+业务系统已有“按原请求 ID 查询回执”的接口时，可配置 `reconciliation_checks`：
+
+```json
+{
+  "reconciliation_checks": {
+    "orders": {
+      "orders.approve": {
+        "verify_capability": "orders.receipt",
+        "arguments": {"/query/request_id": ["idempotency_key"]},
+        "success_path": ["found"],
+        "success_value": true,
+        "result_path": ["result"]
+      }
+    }
+  }
+}
+```
+
+参数映射的键必须符合核对能力输入契约。`/query/request_id` 是 JSON pointer，生成 REST 的 `{query: {request_id: 原幂等键}}`；`request_id` 等普通键生成 MCP 的平坦参数。映射值从 `{arguments, invocation_id, idempotency_key}` 读取，其中 arguments 是原业务调用参数。规则必须至少将原 `idempotency_key` 或 `invocation_id` 传入一个参数，不能以无关联查询结果确认操作。没有合适的查询契约时使用宿主 Go `InvocationReconciler`。
+
+核对能力必须是 `read`、被当前用户授权且无需额外审批。框架使用原运行绑定与契约、检查当前权限，执行只读查询；`success_path` 从查询 CapabilityResult.Data 开始，`result_path` 必须选出原操作完整结果对象。结果还会通过原操作输出契约、作业 ID 和终态检查。查询失败、权限撤销或证据不足时保持暂停，不重放原操作。业务接口须以传入的原请求标识查询权威记录，框架无法替业务系统证明查询实现的正确性。
+
+已有 Go 核验回调优先。浏览器动作仍使用原浏览器回执核对接口。
+
+## 通过服务验收真实接入
+
+[快速接入指南](quick-integration.md)提供 `agenstra-evaluate` 的案例格式和运行命令。它分别验证状态、成功能力、禁止能力与最新被引用的字段值，生成带诊断和预算的 JSON 报告；不自动批准写操作。`run_id` 可用于在用户处理审批或追问后只读复验同一任务。

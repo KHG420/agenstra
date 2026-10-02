@@ -13,6 +13,34 @@ import (
 	agenstra "github.com/KHG420/agenstra"
 )
 
+func TestDraftCLIDiscoveryUsesRevisionAndEnvironmentReferences(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "environment.json")
+	if err := os.WriteFile(path, []byte(`{"MCP_URL":"secret:MCP_URL"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	call := func(method, route string, body any) (any, error) {
+		calls++
+		if calls == 1 {
+			if method != "GET" || route != "/admin/api/drafts/mcp-work" {
+				t.Fatal(method, route)
+			}
+			return map[string]any{"revision": float64(7), "manifest": map[string]any{"schema": "agenstra.mcp-pack.v1"}}, nil
+		}
+		value := body.(map[string]any)
+		if method != "POST" || route != "/admin/api/drafts/mcp-work/discover" || value["expected_revision"] != float64(7) || value["environment"].(map[string]string)["MCP_URL"] != "secret:MCP_URL" {
+			t.Fatal(method, route, value)
+		}
+		return map[string]any{"tools": []any{}}, nil
+	}
+	if _, err := draftCommand([]string{"discover", "mcp-work", path}, call); err != nil || calls != 2 {
+		t.Fatal(err, calls)
+	}
+	if _, err := draftCommand(nil, call); err == nil || !strings.Contains(err.Error(), "discover MCP_DRAFT_ID") {
+		t.Fatal("discovery missing from usage", err)
+	}
+}
+
 func TestDraftCLISharedAPILifecycle(t *testing.T) {
 	dir := t.TempDir()
 	d := &agenstra.Deployment{BaseDir: dir, Config: agenstra.DeploymentConfig{Users: map[string]agenstra.UserConfig{"alice": {APIKeyEnv: "ALICE_KEY"}}, Management: &agenstra.ManagementConfig{DatabasePath: "registry.sqlite3", PackageDir: "packages", AdminAPIKeyEnv: "ADMIN_KEY"}}, Environment: map[string]string{"ALICE_KEY": "alice-test", "ADMIN_KEY": "distinct-admin-key-24-characters"}}

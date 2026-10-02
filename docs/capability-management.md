@@ -115,7 +115,9 @@ Web 页面可完成相同流程：发布版本、启用或回滚、选择用户�
 
 管理入口现在支持可保存的 REST v2 / MCP v1 草稿。草稿存放在管理数据库的 `drafts` 表中，Web 和 CLI 读取同一份内容；草稿可以不完整，保存不需要连接外部服务或模型。正式版本仍经过现有完整校验并按内容哈希固定，编辑草稿不会影响已发布版本或已有运行。
 
-Web 的“草稿编辑”按六步组织：基本信息、服务连接、能力与契约、执行规则、使用说明、检查与发布。可随时保存，重新连接管理服务后从列表继续。每项能力单独编辑，技能正文保存时计算 SHA-256。输入输出 Schema、响应映射和长任务 `operation` 等复杂规则保留 JSON 编辑入口。完整清单也可以在最后一步查看或编辑。
+Web 的“草稿编辑”按六步组织：基本信息、服务连接、能力与契约、执行规则、使用说明、检查与发布。可随时保存，重新连接管理服务后从列表继续。OpenAPI 提供操作选择，MCP 提供“发现工具”与逐项选择；不支持的工具显示原因。每项能力单独编辑，技能正文保存时计算 SHA-256。输入输出 Schema、响应映射和长任务 `operation` 等复杂规则保留高级 JSON 编辑入口。完整清单也可以在最后一步查看或编辑。
+
+发布成功后，同一流程显示启用版本、选择已有用户、逐项能力授权、环境引用与模型数据许可，再运行连接检查。每一步使用已有管理 API；部分成功后明确显示已完成的步骤，不把发布、启用和授权当作一个事务。管理页另提供“试运行与任务诊断”，必须使用用户 API key；接口契约检查不能代替目标业务系统中的任务验收。
 
 分批导入只合并能力和技能，保留草稿的名称、版本、总体原则和连接配置。OpenAPI 导入使用草稿已有的 REST 连接声明，只追加所选 operationId。导入默认 `error`：任一同名项冲突时整批不保存；`keep` 保留已有同名项并追加新项；`replace` 替换同名项并保留其他项。替换会使用导入项的整份契约，请先审查导入预览。Web 导入前会先保存当前表单，导入失败也不会丢掉这些修改。
 
@@ -139,6 +141,9 @@ go run ./cmd/agenstra-manage draft update records-work records.get local/executi
 go run ./cmd/agenstra-manage draft import records-work local/packs/records/pack.json --conflict keep
 go run ./cmd/agenstra-manage draft openapi records-work local/openapi.json --operation records.get --operation records.list --conflict error
 
+# MCP 草稿保存 source 后发现工具；可提供变量到环境/secret 引用的 JSON 映射。
+go run ./cmd/agenstra-manage draft discover mcp-work local/mcp-environment-refs.json
+
 # 添加技能，自动计算哈希；需要在能力的 skills 数组中关联名称。
 go run ./cmd/agenstra-manage draft skill records-work record-rules local/SKILL.md --description '记录状态解释'
 
@@ -158,6 +163,8 @@ go run ./cmd/agenstra-manage draft publish records-work
 
 其中 `basic.json` 可为 `{"guidance":"仅使用真实记录数据，不推测缺失字段。"}`；REST 的 `connection.json` 可为 `{"base_url_env":"RECORDS_API_URL","token_env":"RECORDS_API_TOKEN"}`；`execution-rules.json` 可为 `{"approval_required":true}`。`set` / `update` 中的 `null` 删除相应可选字段。MCP 的连接片段使用 `source` 对象，例如 `{"source":{"transport":"streamable_http","url_env":"MCP_URL"}}`。MCP 工具清单固定远端契约哈希，连接时仍要求输入输出 Schema 和契约匹配。
 
+`discover` 只进行握手与 `tools/list`，返回完整契约 SHA-256、可接入的 exposure 和不支持原因；结束时关闭连接，不执行 `tools/call`，不修改草稿或用户权限。新 exposure 默认按写操作、需要审批、不可重放处理，管理员根据真实业务语义审查。环境映射例如 `{"MCP_URL":"secret:MCP_URL"}`，响应不包含引用对应的凭据。CLI 发现后用 `draft add` 导入审查过的 exposure；Web 可直接勾选并导入。
+
 Web 导出的是包含 `manifest` 与 `skills` 正文的 JSON 文件，可从 Web 的清单合并入口导回；CLI 导出的是标准文件目录，可直接用于文件式部署和原有发布命令。
 
 草稿的每次保存都会增加 `revision`。Web 保存和 CLI 的读取后更新都提交读取时的修订号；若另一处先保存，返回 HTTP 409，不覆盖其修改。CLI `edit` 也使用打开编辑器前的修订号；解析或保存失败时保留编辑后的临时文件并输出路径，便于核对和恢复。Web 会保留发生冲突时的本地编辑，可先导出，再重新读取并合并。CLI 片段文件保留在本地，重新查看后可重试；不要未经核对覆盖其他管理员的内容。
@@ -171,6 +178,7 @@ Web 导出的是包含 `manifest` 与 `skills` 正文的 JSON 文件，可从 We
 | `PUT /admin/api/drafts/{id}` | 创建或保存完整草稿；请求包含 `expected_revision`、`manifest`、`skills`。创建用修订号 `0`。 |
 | `PATCH /admin/api/drafts/{id}` | 修改一个部分或导入一批内容；必须提供 `expected_revision`。 |
 | `POST /admin/api/drafts/{id}/validate` | 校验指定修订的草稿，返回按步骤定位的 `issues`；有问题仍允许保存。 |
+| `POST /admin/api/drafts/{id}/discover` | 用 `expected_revision` 和可选 `environment` 引用发现 MCP 工具；不修改草稿，不执行工具。 |
 | `POST /admin/api/drafts/{id}/publish` | 发布指定修订，完整校验失败返回 422 与 `issues`；发布成功不启用、不授权。 |
 
 `PATCH` 的 `section` 支持 `basic`、`connection`（通过 `value` 对象更新字段），`capabilities`、`skills`（通过 `items` 数组和 `conflict` 合并，技能正文放在 `skills` 对象中），`import`（`value` 为同类型清单），`openapi`（`value` 含 `spec`、`operations` 和可选 `effects`），以及 `remove_capability` / `remove_skill`（通过 `name` 指定）。导入和合并在一次修订更新中完成。备份管理数据库时也会备份草稿；仍需同时备份运行数据库、发布目录和密钥管理配置。

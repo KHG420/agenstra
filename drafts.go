@@ -531,6 +531,10 @@ func (s *HTTPServer) adminDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 	if len(parts) == 2 {
+		if parts[1] == "discover" && r.Method == "POST" {
+			s.discoverDraftMCP(w, r, id)
+			return
+		}
 		if r.Method != "POST" || (parts[1] != "validate" && parts[1] != "publish") {
 			http.NotFound(w, r)
 			return
