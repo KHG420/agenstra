@@ -20,6 +20,37 @@ test("model HTML and code fence content remain text", () => {
   } finally { globalThis.document = previous; }
 });
 
+test("telemetry clock ticks preserve message controls while visible counters still update", () => {
+  const previous = globalThis.document;
+  class Element {
+    constructor() { this.children = []; this.dataset = {}; this.textContent = ""; }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    querySelectorAll() { return []; }
+  }
+  globalThis.document = { createElement: () => new Element() };
+  try {
+    const chat = Object.create(AgenstraChat.prototype);
+    chat.log = Object.assign(new Element(), { scrollHeight: 0, scrollTop: 0, clientHeight: 100 });
+    chat.input = { value: "" };
+    const labels = new Map();
+    chat.shadowRoot = { querySelector: name => { if (!labels.has(name)) labels.set(name, new Element()); return labels.get(name); } };
+    chat.getAttribute = () => "en";
+    chat.text = { statuses: { completed: "Done" }, placeholder: "Message", send: "Send" };
+    chat.button = () => new Element();
+    const snapshot = { conversation: { id: "chat" }, messages: [{ id: "message", text: "Task", status: "completed", run: { run_id: "run", status: "completed", revision: 8, state: { runtime: {} }, telemetry: { observed_at: 100, budget: { seconds_remaining: 30, tool_calls: { used: 2 } } } } }] };
+    chat.render(snapshot);
+    const original = chat.log.children[0];
+    snapshot.messages[0].run.telemetry.observed_at++;
+    snapshot.messages[0].run.telemetry.budget.seconds_remaining--;
+    chat.render(snapshot);
+    assert.equal(chat.log.children[0], original, "a clock-only poll must not replace buttons or selections");
+    snapshot.messages[0].run.telemetry.budget.tool_calls.used++;
+    chat.render(snapshot);
+    assert.notEqual(chat.log.children[0], original, "the displayed tool count must still refresh");
+  } finally { globalThis.document = previous; }
+});
+
 test("diagnostics use owner-bound web routes and encode the run identifier", async () => {
   const client = new AgenstraClient({ integration: "records", getSession: async () => "ticket", storage: null });
   client.request = async path => path;

@@ -28,6 +28,8 @@ type RunDiagnostics struct {
 func ExplainRunError(code, capability string) DiagnosticFinding {
 	f := DiagnosticFinding{Category: "business", Code: code, Capability: capability, Message: "业务操作未完成。", NextAction: "核对业务接口的返回状态与实际数据。"}
 	switch {
+	case code == "browser_context_required" || code == "browser_context_changed":
+		f.Category, f.Message, f.NextAction = "browser", "页面观察数据尚未读取或已发生改变。", "先读取 ui.get_context 获取当前页面状态，再决定是否重新提交页面操作；活动写入还需核对宿主业务版本。"
 	case strings.Contains(code, "authorization") || strings.Contains(code, "unauthorized") || strings.Contains(code, "forbidden") || strings.Contains(code, "not_granted") || strings.Contains(code, "identity") || strings.Contains(code, "access_denied"):
 		f.Category, f.Message, f.NextAction = "authorization", "用户身份或业务权限未满足执行条件。", "检查宿主身份映射、连接凭据和能力授权，恢复权限后继续任务。"
 	case strings.Contains(code, "input_invalid") || strings.Contains(code, "arguments") || strings.Contains(code, "schema") || strings.Contains(code, "contract") || strings.Contains(code, "pack_changed") || strings.Contains(code, "capability_unknown"):

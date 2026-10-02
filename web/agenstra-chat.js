@@ -110,7 +110,14 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
     });return b;
   }
   render(snapshot) {
-    const signature = JSON.stringify([snapshot.conversation?.id, snapshot.messages]);
+    // Server telemetry timestamps/deadlines change on every poll. Only its
+    // visible tool counter belongs in the render identity; replacing the log
+    // for a clock tick invalidates approval buttons and text selections.
+    const signature = JSON.stringify([snapshot.conversation?.id, snapshot.messages?.map(message => {
+      if (!message.run) return message;
+      const { telemetry, ...run } = message.run;
+      return { ...message, run, toolCalls: telemetry?.budget?.tool_calls?.used };
+    })]);
     if (signature === this.signature) return;
     if (this.conversationId && this.conversationId !== snapshot.conversation?.id) {
       this.pendingSend = null;this.input.value = "";if (this.choice) this.choice.value = "";if (this.dateInput) this.dateInput.value = "";this.inputRequestKey = null;

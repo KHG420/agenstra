@@ -152,7 +152,7 @@ await client.send("查询待处理订单", { clientId: client.id() });
 
 handler 在连接前注册，返回符合 output Schema 的结果；实际业务写入须在后端再次校验权限，可用 `commandId` 作为业务幂等键。`getPageObservation` 返回当前页面、筛选、选中项等数据，排除 cookie、token 和无关敏感数据；手动改变页面后调用 `updatePageObservation`。这些接口只能更新页面观察数据，不影响聊天历史、运行检查点或 Agent 上下文选择。
 
-配置 `getPageObservation` 时，SDK 每次心跳检查页面变化，并在 handler 前后同步；内容不变时不增加页面版本。页面观察的外层 `revision` 仅用于浏览器桥。如果业务 API 自己有乐观锁版本，在观察和动作参数中使用不同字段名，例如 `activityRevision` 与 `expectedRevision`，并在能力说明中写清来源。每个批次执行一个宿主浏览器动作，下一宿主动作前读取一次 `ui.get_context`。一次成功的观察已满足下一动作的要求；内置 `ui.get_context`、`ui.command_status` 是服务端观察，本身不要求前置页面观察。这两个动态读取能力可在同一任务再次读取，仍受总轮次与工具预算约束；缺少事实字段时用 `inspect_fact`，不能靠反复读取同一页面推进任务。
+配置 `getPageObservation` 时，SDK 每次心跳检查页面变化，并在 handler 前后同步；内容不变时不增加页面版本。页面观察的外层 `revision` 仅用于浏览器桥。如果业务 API 自己有乐观锁版本，在观察和动作参数中使用不同字段名，例如 `activityRevision` 与 `expectedRevision`，并在能力说明中写清来源。每个批次执行一个宿主浏览器动作，下一宿主动作前读取一次 `ui.get_context`。一次成功的观察已满足下一动作的要求；内置 `ui.get_context`、`ui.command_status` 是服务端观察，本身不要求前置页面观察。这两个动态读取能力，以及声明为 `effect: "read"` 的宿主浏览器动作，可在同一任务再次读取以核对页面或业务变化，仍受总轮次与工具预算约束；业务写保留重复调用保护。缺少事实字段时用 `inspect_fact`，不能靠反复读取同一页面推进任务。
 
 handler 只有在能证明没有提交业务副作用时，才能抛出 SDK 导出的 `AgenstraActionError(code, message)`，例如执行前权限/版本检查失败，或原后端明确拒绝请求。SDK 将它记录为 `failed`；普通异常仍为 `unknown`。不要把网络超时、连接中断或未知服务端错误包装成确定失败。只读查询出错可报告确定失败。业务已保存之后的显示失败应通过原业务查询和回执恢复处理，不能重发写命令。页面更新和装饰动画需要有界等待，后台窗口可能暂停 `requestAnimationFrame`，不能靠它作为业务完成的唯一证据。
 
@@ -274,3 +274,7 @@ stop();
 ## 最小接入套件与验收
 
 独立服务、票据助手、标准组件、页面动作类型生成、任务诊断和验收 CLI 的完整路径见[快速接入指南](quick-integration.md)。`client.getRunDiagnostics(id)` 使用同样的 owner 和 integration 绑定检查。
+
+### 宿主快捷键与 Shadow DOM
+
+标准聊天组件使用 Shadow DOM。宿主在 document/window 注册的全局快捷键不能只通过 `event.target.closest('input, textarea')` 排除输入框：浏览器会将 target 重定向为 `agenstra-chat`。应检查 `event.composedPath()` 中的真实输入元素，防止用户在聊天输入框按空格、Enter 等键时触发原软件业务操作。接入验收应包括这一项，并确认收起面板不会中断已经提交的操作。
