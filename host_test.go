@@ -481,9 +481,9 @@ func TestHostStateBudgetStopsBeforeExternalSend(t *testing.T) {
 	s := testStore(t)
 	p := &hostProvider{}
 	d := callDecision("records.get")
-	d.Calls[0].Arguments = JSON{"large": strings.Repeat("x", 3000)}
+	d.Calls[0].Arguments = JSON{"large": strings.Repeat("x", 8000)}
 	h := testHost(t, s, p, &hostModel{decisions: []Decision{d}})
-	h.Settings.MaxStateBytes = 1024
+	h.Settings.MaxStateBytes = 4096
 	r := createTestHostRun(t, h)
 	r, e := h.Drive(t.Context(), r.RunID, "alice")
 	if e != nil || r.Status != "failed" || p.calls != 0 {
