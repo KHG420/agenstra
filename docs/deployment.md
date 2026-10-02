@@ -30,9 +30,13 @@ go run ./cmd/agenstra-serve \
 
 默认监听 `127.0.0.1:8091`。需要暴露给其他系统时，应放在适当的 TLS、认证和网络访问控制之后。服务提供 `GET /healthz` 进程检查和 `GET /readyz` 数据库及 worker 就绪检查；运行接口需要 `Authorization: Bearer <用户 API key>`。模型适配器要求配置 `AGENT_MODEL`、`AGENT_MODEL_BASE_URL`、`AGENT_MODEL_API_KEY`，并使用兼容 `/chat/completions` 的 JSON 决策协议。
 
-## 3. Docker Compose
+每轮模型用量保存在运行状态 `model_calls` / `model_usage`，并随 `model_decided` 事件返回：包含请求次数、耗时、结束原因、网关请求 ID、错误码及 token 用量。`usage_available=false` 表示网关没有提供完整用量，预算使用明确标注的 UTF-8 长度估计；重试中没有用量的请求也按估计计入。嵌入式模型可配置每百万输入/输出 token 价格，生成已报告用量对应的成本估计；没有价格或用量时不声称成本已知。
+
+部署 `settings.max_model_tokens` 设置运行累计预算，`max_model_output_tokens` 设置每请求输出上限；0 保留原有网关行为。`model_token_limit_field` 默认 `max_tokens`，网关要求时可设 `max_completion_tokens`。CLI 对应 `--max-model-tokens` / `--max-output-tokens`。预算超限不会执行该模型响应中的业务工具。调用前保存未知结果的 token 保留量；开启运行预算时，响应丢失的检查点保守占用剩余预算，恢复后不会按零消耗继续请求。估计与价格不是供应商账单，真实结果质量和费用需在所选网关验证。
 
 模型请求默认最多尝试三次，使用 250ms 起始指数退避、5s 单次等待上限；网络故障、408、429 和暂时性 5xx 可重试。401/403、其他请求错误、拒绝和截断输出不会自动重试。`Retry-After` 超过等待上限时直接报告错误，避免提前重试。调用取消与 Host 模型超时会立即中断退避。嵌入式接入可通过 `HTTPJSONDecisionModel.MaxAttempts`、`RetryBaseDelay`、`MaxRetryDelay` 调整；`MaxAttempts=1` 关闭请求重试。重试仅发生在模型适配器内，不会重新执行已完成的业务工具。
+
+## 3. Docker Compose
 
 Compose 模板只挂载用户自己准备的配置与包。按教程完成本地包后，可将其复制到容器挂载目录，并编辑环境变量文件：
 

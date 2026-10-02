@@ -47,6 +47,8 @@ func run() error {
 		return e
 	}
 	defer model.Close()
+	model.MaxOutputTokens = settings.MaxModelOutputTokens
+	model.TokenLimitField = settings.ModelTokenLimitField
 	host := agenstra.NewAgentHost(store, dep.ProviderFactory, model, dep.PolicyResolver)
 	host.Settings = settings
 	if dep.Registry != nil {

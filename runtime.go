@@ -27,6 +27,8 @@ type AgentRuntime struct {
 	MaxContextCharacters int
 	Memories             []MemoryView
 	CompletionValidator  CompletionValidator
+	MaxModelTokens       int64
+	MaxModelOutputTokens int
 }
 
 func (r *AgentRuntime) defaults() {
@@ -396,6 +398,10 @@ func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
 		features = append(features, "durable_execution")
 	}
 	packet := ContextPacket{OriginPackID: r.OriginPackID, Schema: "agenstra.context.v1", Instruction: state.Instruction, Capabilities: caps, Facts: views, Observations: obs, RoundIndex: state.RoundsUsed, RoundsRemaining: r.MaxModelRounds - state.RoundsUsed, ToolCallsRemaining: r.MaxToolCalls - state.ToolCallsUsed, Skills: skillViews, LoadedSkills: loaded, InspectedCapability: inspected, InspectedFact: state.InspectedFact, Followups: state.Followups, RuntimeFeatures: features, ContextOmissions: omissions, Memories: append([]MemoryView{}, r.Memories...)}
+	if r.MaxModelTokens > 0 {
+		packet.ModelTokensRemaining = max(0, r.MaxModelTokens-state.ModelUsage.BudgetTokens)
+	}
+	packet.MaxModelOutputTokens = r.MaxModelOutputTokens
 	available := r.MaxContextCharacters - utf8.RuneCountInString(r.systemPrompt())
 	return budgetContext(packet, state, available)
 }
@@ -434,6 +440,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 	feedback := ""
 	var decision Decision
 	for attempt := 0; attempt < 2; attempt++ {
+		if r.MaxModelTokens > 0 && state.ModelUsage.BudgetTokens >= r.MaxModelTokens {
+			state.Status = "failed"
+			state.ErrorCode = strptr("model_token_budget_exhausted")
+			return nil
+		}
 		packet := r.Context(state)
 		prompt := r.systemPrompt() + feedback
 		for _, note := range packet.ContextOmissions {
@@ -474,12 +485,37 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			return nil
 		}
 		state.RoundsUsed++
+		reservation := ModelCallMetrics{Round: state.RoundsUsed, Attempts: 1, EstimatedInputTokens: int64(len(raw) + len(prompt) + 128), EstimatedOutputTokens: int64(r.MaxModelOutputTokens), ErrorCode: strptr("model_outcome_unknown")}
+		if r.MaxModelTokens > 0 {
+			reservation.EstimatedInputTokens = r.MaxModelTokens - state.ModelUsage.BudgetTokens
+			reservation.EstimatedOutputTokens = 0
+		}
+		recordModelCall(state, reservation)
+		callIndex := len(state.ModelCalls) - 1
 		if beforeModel != nil {
 			if err := beforeModel(); err != nil {
+				state.ModelCalls[callIndex].Attempts = 0
+				rebuildModelUsage(state)
 				return err
 			}
 		}
+		started := time.Now()
 		d, err := r.Model.Decide(ctx, packet, prompt)
+		metrics := ModelCallMetrics{Attempts: 1, EstimatedInputTokens: int64(len(raw) + len(prompt) + 128), ElapsedMilliseconds: time.Since(started).Milliseconds()}
+		if d.ModelCall != nil {
+			metrics = *d.ModelCall
+		}
+		metrics.Round = state.RoundsUsed
+		if err != nil {
+			metrics.ErrorCode = strptr(ErrorCode(err))
+		}
+		state.ModelCalls[callIndex] = metrics
+		rebuildModelUsage(state)
+		if r.MaxModelTokens > 0 && state.ModelUsage.BudgetTokens > r.MaxModelTokens {
+			state.Status = "failed"
+			state.ErrorCode = strptr("model_token_budget_exhausted")
+			return nil
+		}
 		if d.Schema == "" {
 			d.Schema = "agenstra.decision.v1"
 		}
@@ -703,7 +739,7 @@ func (r *AgentRuntime) Result(state *RuntimeState) RunResult {
 	if status == "queued" || status == "running" {
 		status = "failed"
 	}
-	return RunResult{Status: status, AnswerMarkdown: state.AnswerMarkdown, ErrorCode: state.ErrorCode, InputField: state.InputField, InputPrompt: state.InputPrompt, Facts: state.Facts, Observations: state.Observations, Decisions: state.Decisions}
+	return RunResult{Status: status, AnswerMarkdown: state.AnswerMarkdown, ErrorCode: state.ErrorCode, InputField: state.InputField, InputPrompt: state.InputPrompt, Facts: state.Facts, Observations: state.Observations, Decisions: state.Decisions, ModelCalls: state.ModelCalls, ModelUsage: state.ModelUsage}
 }
 func (r *AgentRuntime) Run(ctx context.Context, instruction string) (RunResult, error) {
 	state, err := r.NewState(instruction, "")

@@ -27,9 +27,14 @@ func run() (int, error) {
 	pack := flag.String("pack", "", "pack.json path")
 	instruction := flag.String("instruction", "", "task instruction")
 	inspect := flag.Bool("inspect", false, "inspect catalog")
+	maxTokens := flag.Int64("max-model-tokens", 0, "run model token budget (0 disables)")
+	maxOutput := flag.Int("max-output-tokens", 0, "maximum model output tokens per request (0 omits)")
 	var g grants
 	flag.Var(&g, "grant-capability", "grant exact capability name (repeatable)")
 	flag.Parse()
+	if *maxTokens < 0 || *maxOutput < 0 {
+		return 2, errors.New("token limits must be nonnegative")
+	}
 	if *pack == "" {
 		return 2, errors.New("--pack is required")
 	}
@@ -57,11 +62,13 @@ func run() (int, error) {
 		return 2, e
 	}
 	defer model.Close()
+	model.MaxOutputTokens = *maxOutput
 	grantMap := map[string]bool{}
 	for _, v := range g {
 		grantMap[v] = true
 	}
 	runtime := &agenstra.AgentRuntime{Provider: provider, Model: model, Grants: grantMap}
+	runtime.MaxModelTokens = *maxTokens
 	result, e := runtime.Run(context.Background(), *instruction)
 	if e != nil {
 		return 2, e

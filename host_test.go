@@ -387,7 +387,9 @@ func TestHostStaleDriverCannotAdoptReplacementLease(t *testing.T) {
 			h := testHost(t, s, p, m)
 			h.Clock = s.Clock
 			if branch == "state-budget" {
-				h.Settings.MaxStateBytes = 1024
+				// Allow the request telemetry checkpoint, then exceed the budget
+				// with the model's 3000-byte decision after the lease is replaced.
+				h.Settings.MaxStateBytes = 2048
 			}
 			r := createTestHostRun(t, h)
 			ctx, cancel := context.WithCancel(t.Context())

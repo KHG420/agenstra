@@ -43,12 +43,18 @@ type HostSettings struct {
 	RetryIntervalSeconds     float64 `json:"retry_interval_seconds"`
 	ApprovalSeconds          float64 `json:"approval_seconds"`
 	MaxConcurrentRuns        int     `json:"max_concurrent_runs"`
+	MaxModelTokens           int64   `json:"max_model_tokens,omitempty"`
+	MaxModelOutputTokens     int     `json:"max_model_output_tokens,omitempty"`
+	ModelTokenLimitField     string  `json:"model_token_limit_field,omitempty"`
 }
 
 func DefaultHostSettings() HostSettings {
-	return HostSettings{60, 30, 80, 720, 86400, 80000, 8000000, 64000000, 8000000, 60, 300, 3, 5, 900, 4}
+	return HostSettings{60, 30, 80, 720, 86400, 80000, 8000000, 64000000, 8000000, 60, 300, 3, 5, 900, 4, 0, 0, ""}
 }
 func (s HostSettings) Validate() error {
+	if s.MaxModelTokens < 0 || s.MaxModelTokens > 100000000 || s.MaxModelOutputTokens < 0 || s.MaxModelOutputTokens > 1000000 || (s.ModelTokenLimitField != "" && s.ModelTokenLimitField != "max_tokens" && s.ModelTokenLimitField != "max_completion_tokens") {
+		return errors.New("host_settings_invalid")
+	}
 	if s.LeaseSeconds < 3 || s.LeaseSeconds > 3600 || s.MaxModelRounds < 1 || s.MaxModelRounds > 1000 || s.MaxToolCalls < 1 || s.MaxToolCalls > 10000 || s.MaxPollCalls < 1 || s.MaxPollCalls > 100000 || s.MaxRunSeconds <= 0 || s.MaxContextCharacters < 1000 || s.MaxArtifactBytes < 1024 || s.MaxActiveArtifactBytes < 1024 || s.MaxStateBytes < 1024 || s.ModelTimeoutSeconds <= 0 || s.InvocationTimeoutSeconds <= 0 || s.MaxInvocationAttempts < 1 || s.MaxInvocationAttempts > 10 || s.RetryIntervalSeconds < 1 || s.ApprovalSeconds < 1 || s.ApprovalSeconds > 86400 || s.MaxConcurrentRuns < 1 || s.MaxConcurrentRuns > 64 {
 		return errors.New("host_settings_invalid")
 	}
@@ -903,6 +909,8 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 	}
 	runtime := &AgentRuntime{Provider: provider, Model: h.Model, Grants: policy.GrantedCapabilities, OriginPackID: run.PackID, ConnectionID: NewID(), Durable: true, MaxModelRounds: h.Settings.MaxModelRounds, MaxToolCalls: h.Settings.MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.Settings.MaxContextCharacters}
 	runtime.CompletionValidator = h.CompletionValidator
+	runtime.MaxModelTokens = h.Settings.MaxModelTokens
+	runtime.MaxModelOutputTokens = h.Settings.MaxModelOutputTokens
 	run, e = h.prepareMemories(ctx, run)
 	if e != nil {
 		return run, e
@@ -1019,7 +1027,11 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 		} else if e != nil {
 			return run, e
 		}
-		run, e = h.save(run, state, "", nil, map[string]any{"kind": "model_decided", "round": state.RoundsUsed})
+		event := map[string]any{"kind": "model_decided", "round": state.RoundsUsed}
+		if len(state.ModelCalls) > 0 {
+			event["metrics"] = state.ModelCalls[len(state.ModelCalls)-1]
+		}
+		run, e = h.save(run, state, "", nil, event)
 		if e != nil {
 			return run, e
 		}

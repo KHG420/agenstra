@@ -307,23 +307,25 @@ type Observation struct {
 	ArgumentsOmitted bool    `json:"arguments_omitted"`
 }
 type ContextPacket struct {
-	OriginPackID        string            `json:"origin_pack_id,omitempty"`
-	Schema              string            `json:"schema"`
-	Instruction         string            `json:"instruction"`
-	Capabilities        []JSON            `json:"capabilities"`
-	Facts               []FactView        `json:"facts"`
-	Observations        []Observation     `json:"observations"`
-	RoundIndex          int               `json:"round_index"`
-	RoundsRemaining     int               `json:"rounds_remaining"`
-	ToolCallsRemaining  int               `json:"tool_calls_remaining"`
-	Skills              []JSON            `json:"skills"`
-	LoadedSkills        map[string]string `json:"loaded_skills"`
-	InspectedCapability JSON              `json:"inspected_capability"`
-	InspectedFact       JSON              `json:"inspected_fact"`
-	Followups           []string          `json:"followups"`
-	RuntimeFeatures     []string          `json:"runtime_features"`
-	ContextOmissions    []string          `json:"context_omissions"`
-	Memories            []MemoryView      `json:"memories,omitempty"`
+	OriginPackID         string            `json:"origin_pack_id,omitempty"`
+	Schema               string            `json:"schema"`
+	Instruction          string            `json:"instruction"`
+	Capabilities         []JSON            `json:"capabilities"`
+	Facts                []FactView        `json:"facts"`
+	Observations         []Observation     `json:"observations"`
+	RoundIndex           int               `json:"round_index"`
+	RoundsRemaining      int               `json:"rounds_remaining"`
+	ToolCallsRemaining   int               `json:"tool_calls_remaining"`
+	Skills               []JSON            `json:"skills"`
+	LoadedSkills         map[string]string `json:"loaded_skills"`
+	InspectedCapability  JSON              `json:"inspected_capability"`
+	InspectedFact        JSON              `json:"inspected_fact"`
+	Followups            []string          `json:"followups"`
+	RuntimeFeatures      []string          `json:"runtime_features"`
+	ContextOmissions     []string          `json:"context_omissions"`
+	Memories             []MemoryView      `json:"memories,omitempty"`
+	ModelTokensRemaining int64             `json:"model_tokens_remaining,omitempty"`
+	MaxModelOutputTokens int               `json:"max_model_output_tokens,omitempty"`
 }
 type ToolCall struct {
 	CallRef    string `json:"call_ref"`
@@ -332,16 +334,17 @@ type ToolCall struct {
 	Reason     string `json:"reason"`
 }
 type Decision struct {
-	Schema         string     `json:"schema"`
-	Kind           string     `json:"kind"`
-	Calls          []ToolCall `json:"calls,omitempty"`
-	AnswerMarkdown string     `json:"answer_markdown,omitempty"`
-	FactIDs        []string   `json:"fact_ids,omitempty"`
-	Field          string     `json:"field,omitempty"`
-	Prompt         string     `json:"prompt,omitempty"`
-	Name           string     `json:"name,omitempty"`
-	FactID         string     `json:"fact_id,omitempty"`
-	Path           []any      `json:"path,omitempty"`
+	Schema         string            `json:"schema"`
+	Kind           string            `json:"kind"`
+	Calls          []ToolCall        `json:"calls,omitempty"`
+	AnswerMarkdown string            `json:"answer_markdown,omitempty"`
+	FactIDs        []string          `json:"fact_ids,omitempty"`
+	Field          string            `json:"field,omitempty"`
+	Prompt         string            `json:"prompt,omitempty"`
+	Name           string            `json:"name,omitempty"`
+	FactID         string            `json:"fact_id,omitempty"`
+	Path           []any             `json:"path,omitempty"`
+	ModelCall      *ModelCallMetrics `json:"-"`
 }
 
 type DecisionTooManyCallsError struct{}
@@ -482,38 +485,42 @@ type Invocation struct {
 	PollInFlight      bool              `json:"poll_in_flight"`
 }
 type RuntimeState struct {
-	SchemaVersion       int            `json:"schema_version"`
-	RunID               string         `json:"run_id"`
-	Instruction         string         `json:"instruction"`
-	Status              string         `json:"status"`
-	Facts               []Fact         `json:"facts"`
-	Observations        []Observation  `json:"observations"`
-	ModelObservations   []Observation  `json:"model_observations"`
-	Decisions           []JSON         `json:"decisions"`
-	UsedRefs            []string       `json:"used_refs"`
-	Repeated            map[string]int `json:"repeated"`
-	LoadedSkills        []string       `json:"loaded_skills"`
-	Followups           []string       `json:"followups"`
-	InspectedCapability *string        `json:"inspected_capability"`
-	InspectedFact       JSON           `json:"inspected_fact"`
-	RoundsUsed          int            `json:"rounds_used"`
-	ToolCallsUsed       int            `json:"tool_calls_used"`
-	PollCallsUsed       int            `json:"poll_calls_used"`
-	Pending             []Invocation   `json:"pending"`
-	AnswerMarkdown      string         `json:"answer_markdown"`
-	ErrorCode           *string        `json:"error_code"`
-	InputField          *string        `json:"input_field"`
-	InputPrompt         *string        `json:"input_prompt"`
+	SchemaVersion       int                `json:"schema_version"`
+	RunID               string             `json:"run_id"`
+	Instruction         string             `json:"instruction"`
+	Status              string             `json:"status"`
+	Facts               []Fact             `json:"facts"`
+	Observations        []Observation      `json:"observations"`
+	ModelObservations   []Observation      `json:"model_observations"`
+	Decisions           []JSON             `json:"decisions"`
+	UsedRefs            []string           `json:"used_refs"`
+	Repeated            map[string]int     `json:"repeated"`
+	LoadedSkills        []string           `json:"loaded_skills"`
+	Followups           []string           `json:"followups"`
+	InspectedCapability *string            `json:"inspected_capability"`
+	InspectedFact       JSON               `json:"inspected_fact"`
+	RoundsUsed          int                `json:"rounds_used"`
+	ToolCallsUsed       int                `json:"tool_calls_used"`
+	PollCallsUsed       int                `json:"poll_calls_used"`
+	Pending             []Invocation       `json:"pending"`
+	AnswerMarkdown      string             `json:"answer_markdown"`
+	ErrorCode           *string            `json:"error_code"`
+	InputField          *string            `json:"input_field"`
+	InputPrompt         *string            `json:"input_prompt"`
+	ModelCalls          []ModelCallMetrics `json:"model_calls,omitempty"`
+	ModelUsage          ModelUsage         `json:"model_usage"`
 }
 type RunResult struct {
-	Status         string        `json:"status"`
-	AnswerMarkdown string        `json:"answer_markdown"`
-	ErrorCode      *string       `json:"error_code"`
-	InputField     *string       `json:"input_field"`
-	InputPrompt    *string       `json:"input_prompt"`
-	Facts          []Fact        `json:"facts"`
-	Observations   []Observation `json:"observations"`
-	Decisions      []JSON        `json:"decisions"`
+	Status         string             `json:"status"`
+	AnswerMarkdown string             `json:"answer_markdown"`
+	ErrorCode      *string            `json:"error_code"`
+	InputField     *string            `json:"input_field"`
+	InputPrompt    *string            `json:"input_prompt"`
+	Facts          []Fact             `json:"facts"`
+	Observations   []Observation      `json:"observations"`
+	Decisions      []JSON             `json:"decisions"`
+	ModelCalls     []ModelCallMetrics `json:"model_calls,omitempty"`
+	ModelUsage     ModelUsage         `json:"model_usage"`
 }
 
 func strptr(s string) *string {
