@@ -175,12 +175,15 @@ func serverError(w http.ResponseWriter, e error) {
 	log.Print("request failed")
 	apiError(w, 500, "internal_error", false)
 }
-func runView(run StoredRun) map[string]any {
+func runView(run StoredRun, host *AgentHost) map[string]any {
 	b, _ := json.Marshal(run)
 	var m map[string]any
 	_ = json.Unmarshal(b, &m)
 	delete(m, "lease_token")
 	delete(m, "lease_until")
+	if telemetry, err := host.telemetry(run); err == nil {
+		m["telemetry"] = telemetry
+	}
 	return m
 }
 func decodeBody(r *http.Request, dst any) error {
@@ -282,7 +285,7 @@ func (s *HTTPServer) runsHTTP(w http.ResponseWriter, r *http.Request, owner stri
 			serverError(w, e)
 			return
 		}
-		writeJSON(w, 200, runView(run))
+		writeJSON(w, 200, runView(run, s.Host))
 	case "GET":
 		limit := 100
 		if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -306,7 +309,7 @@ func (s *HTTPServer) runsHTTP(w http.ResponseWriter, r *http.Request, owner stri
 		for _, run := range runs {
 			visible, e := s.Host.Get(r.Context(), run.RunID, owner)
 			if e == nil {
-				out = append(out, runView(visible))
+				out = append(out, runView(visible, s.Host))
 			} else {
 				var h *HostError
 				if errors.Is(e, ErrRunNotFound) || errors.As(e, &h) && (h.Code == "access_denied" || h.Code == "forbidden" || h.Code == "identity_unverified" || h.Code == "model_data_not_authorized") {
@@ -339,10 +342,21 @@ func (s *HTTPServer) runHTTP(w http.ResponseWriter, r *http.Request, owner strin
 			serverError(w, e)
 			return
 		}
-		writeJSON(w, 200, runView(run))
+		writeJSON(w, 200, runView(run, s.Host))
 		return
 	}
 	switch parts[1] {
+	case "telemetry":
+		if len(parts) != 2 || r.Method != "GET" {
+			w.WriteHeader(405)
+			return
+		}
+		telemetry, err := s.Host.GetTelemetry(ctx, id, owner)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, 200, telemetry)
 	case "reconcile":
 		if len(parts) != 2 || r.Method != "POST" {
 			w.WriteHeader(405)
@@ -362,7 +376,7 @@ func (s *HTTPServer) runHTTP(w http.ResponseWriter, r *http.Request, owner strin
 			serverError(w, err)
 			return
 		}
-		writeJSON(w, 200, runView(run))
+		writeJSON(w, 200, runView(run, s.Host))
 	case "steer":
 		if len(parts) != 2 || r.Method != "POST" {
 			w.WriteHeader(405)
@@ -382,7 +396,7 @@ func (s *HTTPServer) runHTTP(w http.ResponseWriter, r *http.Request, owner strin
 			serverError(w, err)
 			return
 		}
-		writeJSON(w, 202, runView(run))
+		writeJSON(w, 202, runView(run, s.Host))
 	case "input":
 		if len(parts) != 2 || r.Method != "POST" {
 			w.WriteHeader(405)
@@ -402,7 +416,7 @@ func (s *HTTPServer) runHTTP(w http.ResponseWriter, r *http.Request, owner strin
 			serverError(w, e)
 			return
 		}
-		writeJSON(w, 200, runView(run))
+		writeJSON(w, 200, runView(run, s.Host))
 	case "approval":
 		if len(parts) != 2 || r.Method != "POST" {
 			w.WriteHeader(405)
@@ -427,7 +441,7 @@ func (s *HTTPServer) runHTTP(w http.ResponseWriter, r *http.Request, owner strin
 			serverError(w, e)
 			return
 		}
-		writeJSON(w, 200, runView(run))
+		writeJSON(w, 200, runView(run, s.Host))
 	case "resume", "cancel":
 		if len(parts) != 2 || r.Method != "POST" {
 			w.WriteHeader(405)
@@ -444,7 +458,7 @@ func (s *HTTPServer) runHTTP(w http.ResponseWriter, r *http.Request, owner strin
 			serverError(w, e)
 			return
 		}
-		writeJSON(w, 200, runView(run))
+		writeJSON(w, 200, runView(run, s.Host))
 	case "events":
 		if len(parts) != 2 || r.Method != "GET" {
 			w.WriteHeader(405)

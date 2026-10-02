@@ -307,6 +307,16 @@ func (h *AgentHost) save(run StoredRun, state *RuntimeState, fingerprint string,
 			event["progress"] = progress
 		}
 		event["status"] = state.Status
+		if strings.HasPrefix(fmt.Sprint(event["kind"]), "model_") || strings.HasPrefix(fmt.Sprint(event["kind"]), "memory_") {
+			view := run
+			view.State = envelope
+			view.Status = state.Status
+			view.Revision++
+			if telemetry, err := h.telemetry(view); err == nil {
+				event["budget"] = telemetry.Budget
+				event["context"] = telemetry.Context
+			}
+		}
 		events = append(events, event)
 	}
 	saved, err := h.Store.Checkpoint(run.RunID, run.OwnerID, run.LeaseToken, envelope, state.Status, wake, invs, artifacts, events)

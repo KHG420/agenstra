@@ -375,6 +375,7 @@ export class AgenstraClient {
     if (!this.closed && this.chatWatchers) this.chatTimer = setTimeout(() => this.pollChat(), this.options.pollInterval || 1000);
   }
   getRun(id) { return this.request("/web/v1/runs/" + id); }
+  getRunTelemetry(id) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/telemetry"); }
   getRunEvents(id, { after = 0, limit = 100 } = {}) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/events?after=" + after + "&limit=" + limit); }
   async steerRun(id, text, revision, { requestId = this.id() } = {}) {
     try { return await this.request("/web/v1/runs/" + encodeURIComponent(id) + "/steer", { method: "POST", body: { request_id: requestId, text, revision } }); }
@@ -395,7 +396,7 @@ export class AgenstraClient {
         if (stopped || this.closed) return;
         const events = page.filter(item => Number.isSafeInteger(item.sequence) && item.sequence > cursor);
         for (const item of events) cursor = Math.max(cursor, item.sequence);
-        try { callback({ run, events, cursor }); } catch (error) { this.options.onListenerError?.(error); }
+        try { callback({ run, telemetry: run.telemetry ?? null, events, cursor }); } catch (error) { this.options.onListenerError?.(error); }
         if (["completed", "failed", "cancelled"].includes(run.status) && page.length < 100) { stop(); return; }
         timer = setTimeout(poll, page.length === 100 ? 0 : (this.options.pollInterval || 1000));
       } catch (error) {

@@ -318,7 +318,7 @@ func (s *HTTPServer) browserHTTP(w http.ResponseWriter, r *http.Request, owner s
 			webError(w, e)
 			return
 		}
-		writeJSON(w, 200, runView(run))
+		writeJSON(w, 200, runView(run, s.Host))
 		return
 	}
 	if len(parts) == 3 && parts[0] == "sessions" && r.Method == "POST" {
@@ -453,7 +453,7 @@ func (s *HTTPServer) browserHTTP(w http.ResponseWriter, r *http.Request, owner s
 				webError(w, e)
 				return
 			}
-			writeJSON(w, 200, runView(run))
+			writeJSON(w, 200, runView(run, s.Host))
 			return
 		}
 	}

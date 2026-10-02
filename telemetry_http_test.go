@@ -1,0 +1,48 @@
+package agenstra
+
+import (
+	"encoding/json"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestTelemetryHTTPReadAndWebBinding(t *testing.T) {
+	f := newWebFixture(t, &hostModel{}, false)
+	run := f.run(t)
+	s := &HTTPServer{Host: f.h, Web: f.w, Deployment: f.d}
+	token, _ := f.w.MintSession("alice")
+	get := func(id string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", "/web/v1/runs/"+id+"/telemetry", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		out := httptest.NewRecorder()
+		s.webHTTP(out, req)
+		return out
+	}
+	out := get(run.RunID)
+	var telemetry RunTelemetry
+	if out.Code != 200 || json.Unmarshal(out.Body.Bytes(), &telemetry) != nil || telemetry.Context == nil || telemetry.RunRevision != run.Revision {
+		t.Fatal(out.Code, out.Body.String())
+	}
+	if strings.Contains(out.Body.String(), "alice-key") || strings.Contains(out.Body.String(), "lease_token") {
+		t.Fatal("private metadata exposed")
+	}
+	unbound := createTestHostRun(t, f.h)
+	if out = get(unbound.RunID); out.Code != 404 {
+		t.Fatal(out.Code)
+	}
+	before, _ := f.h.Store.GetRun(run.RunID, "alice")
+	_ = get(run.RunID)
+	after, _ := f.h.Store.GetRun(run.RunID, "alice")
+	if before.Revision != after.Revision {
+		t.Fatal("read mutated run")
+	}
+	request := httptest.NewRequest("GET", "/runs/"+run.RunID, nil)
+	out = httptest.NewRecorder()
+	s.runHTTP(out, request, "alice")
+	var view JSON
+	_ = json.Unmarshal(out.Body.Bytes(), &view)
+	if view["telemetry"] == nil {
+		t.Fatal("run snapshot omitted telemetry")
+	}
+}
