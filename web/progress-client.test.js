@@ -17,6 +17,16 @@ test("run events and steering carry the cursor, revision and retry identity", as
   await assert.rejects(c.steerRun("run-1", "Use metric units", 5, { requestId: "request-1" }), error => error.requestId === "request-1");
 });
 
+test("generic reconciliation submits the original invocation binding without client results", async t => {
+  const c = client();
+  t.after(() => c.destroy({ closeSession: false }));
+  const requests = [];
+  c.request = async (path, options) => { requests.push({ path, options }); return { status: "queued" }; };
+  const invocation = { invocation_id: "original-1", arguments_sha256: "digest", data: { invented: true } };
+  await c.reconcileInvocation("run-1", invocation, 9);
+  assert.deepEqual(requests, [{ path: "/web/v1/runs/run-1/reconcile", options: { method: "POST", body: { invocation_id: "original-1", arguments_sha256: "digest", revision: 9 } } }]);
+});
+
 test("watchRun drains event pages before stopping a terminal run and advances the cursor", async t => {
   const c = client();
   t.after(() => c.destroy({ closeSession: false }));

@@ -412,6 +412,7 @@ export class AgenstraClient {
   approve(id, invocation, revision, approved) { return this.request("/web/v1/runs/" + id + "/approval", { method: "POST", body: { invocation_id: invocation.invocation_id, arguments_sha256: invocation.arguments_sha256, revision, approved } }); }
   cancelMessage(id) { return this.request("/chat/v1/messages/" + id + "/cancel", { method: "POST", body: {} }); }
   reconcile(id, revision) { return this.request("/browser/v1/commands/" + id + "/reconcile", { method: "POST", body: { revision } }); }
+  reconcileInvocation(id, invocation, revision) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/reconcile", { method: "POST", body: { invocation_id: invocation.invocation_id, arguments_sha256: invocation.arguments_sha256, revision } }); }
   async run(instruction, { requestId = this.id(), sources = [] } = {}) {
     await this.connectBrowser();
     return this.request("/browser/v1/runs", { method: "POST", browserKey: this.browser.key, body: { integration_id: this.options.integration, session_id: this.browser.id, instruction, ...(sources.length ? { sources } : {}), request_id: requestId } });
