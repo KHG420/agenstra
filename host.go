@@ -46,12 +46,16 @@ type HostSettings struct {
 	MaxModelTokens           int64   `json:"max_model_tokens,omitempty"`
 	MaxModelOutputTokens     int     `json:"max_model_output_tokens,omitempty"`
 	ModelTokenLimitField     string  `json:"model_token_limit_field,omitempty"`
+	MaxStagnantRounds        int     `json:"max_stagnant_rounds,omitempty"`
 }
 
 func DefaultHostSettings() HostSettings {
-	return HostSettings{60, 30, 80, 720, 86400, 80000, 8000000, 64000000, 8000000, 60, 300, 3, 5, 900, 4, 0, 0, ""}
+	return HostSettings{60, 30, 80, 720, 86400, 80000, 8000000, 64000000, 8000000, 60, 300, 3, 5, 900, 4, 0, 0, "", 8}
 }
 func (s HostSettings) Validate() error {
+	if s.MaxStagnantRounds < 0 || s.MaxStagnantRounds > 1000 {
+		return errors.New("host_settings_invalid")
+	}
 	if s.MaxModelTokens < 0 || s.MaxModelTokens > 100000000 || s.MaxModelOutputTokens < 0 || s.MaxModelOutputTokens > 1000000 || (s.ModelTokenLimitField != "" && s.ModelTokenLimitField != "max_tokens" && s.ModelTokenLimitField != "max_completion_tokens") {
 		return errors.New("host_settings_invalid")
 	}
@@ -911,6 +915,7 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 	runtime.CompletionValidator = h.CompletionValidator
 	runtime.MaxModelTokens = h.Settings.MaxModelTokens
 	runtime.MaxModelOutputTokens = h.Settings.MaxModelOutputTokens
+	runtime.MaxStagnantRounds = h.Settings.MaxStagnantRounds
 	run, e = h.prepareMemories(ctx, run)
 	if e != nil {
 		return run, e

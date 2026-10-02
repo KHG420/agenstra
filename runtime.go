@@ -29,6 +29,7 @@ type AgentRuntime struct {
 	CompletionValidator  CompletionValidator
 	MaxModelTokens       int64
 	MaxModelOutputTokens int
+	MaxStagnantRounds    int
 }
 
 func (r *AgentRuntime) defaults() {
@@ -46,6 +47,9 @@ func (r *AgentRuntime) defaults() {
 	}
 	if r.MaxContextCharacters == 0 {
 		r.MaxContextCharacters = 80000
+	}
+	if r.MaxStagnantRounds == 0 {
+		r.MaxStagnantRounds = 8
 	}
 	if r.Grants == nil {
 		r.Grants = map[string]bool{}
@@ -402,6 +406,7 @@ func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
 		packet.ModelTokensRemaining = max(0, r.MaxModelTokens-state.ModelUsage.BudgetTokens)
 	}
 	packet.MaxModelOutputTokens = r.MaxModelOutputTokens
+	packet.Progress = runProgress(state, r.MaxStagnantRounds)
 	available := r.MaxContextCharacters - utf8.RuneCountInString(r.systemPrompt())
 	return budgetContext(packet, state, available)
 }
@@ -437,6 +442,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		state.ErrorCode = strptr("model_round_budget_exhausted")
 		return nil
 	}
+	if updateProgress(state, r.MaxStagnantRounds) {
+		state.Status = "failed"
+		state.ErrorCode = strptr("agent_stagnated")
+		return nil
+	}
 	feedback := ""
 	var decision Decision
 	for attempt := 0; attempt < 2; attempt++ {
@@ -447,6 +457,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		}
 		packet := r.Context(state)
 		prompt := r.systemPrompt() + feedback
+		if packet.Progress != nil {
+			prompt += "\n" + progressUsagePrompt
+		}
 		for _, note := range packet.ContextOmissions {
 			if strings.HasPrefix(note, "fact ") && strings.Contains(note, "array at") {
 				extra := "\nAuthoritative full array lengths from stored Facts follow. A preview may show fewer items; inspect omitted indices before claiming coverage:\n" + note
@@ -562,6 +575,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			break
 		}
 		fact := facts[decision.FactID]
+		recordInspection(state, JSON{"fact": progressKey(fact.Value), "path": decision.Path})
 		fact.Value = JSON{"value": selected}
 		view := factView(fact, 6000)
 		state.InspectedFact = JSON{"fact_id": decision.FactID, "path": decision.Path, "preview": view.Value, "omitted_paths": view.OmittedPaths}
@@ -586,6 +600,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			Reject(state, "inspect", "agent.inspect_capability", "capability_unknown", nil, "")
 		} else {
 			state.InspectedCapability = &decision.Name
+			recordInspection(state, JSON{"capability": decision.Name})
 		}
 	case "read_skill":
 		if _, ok := r.Provider.Skills()[decision.Name]; !ok || !r.skillAllowed(decision.Name) {

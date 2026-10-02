@@ -123,6 +123,22 @@ func budgetContext(packet ContextPacket, state *RuntimeState, available int) Con
 		baseOmissions = append([]string{fmt.Sprintf("observations: %d older entries", count)}, baseOmissions...)
 		packet = withNotes(packet, baseOmissions)
 	}
+	// Progress counters remain available; older summaries can be recovered through
+	// the complete audit trail and Fact catalog when the packet is under pressure.
+	if packet.Progress != nil {
+		view := *packet.Progress
+		view.Completed = slices.Clone(view.Completed)
+		view.Blocked = slices.Clone(view.Blocked)
+		packet.Progress = &view
+		for len(view.Completed) > 0 && !fitsRecent(packet) {
+			view.Completed = view.Completed[:len(view.Completed)-1]
+			view.OmittedItems++
+		}
+		for len(view.Blocked) > 1 && !fitsRecent(packet) {
+			view.Blocked = view.Blocked[:len(view.Blocked)-1]
+			view.OmittedItems++
+		}
+	}
 	// Detailed array-length hints are optional; omitted_paths remain on every Fact.
 	for noteLimit > 0 && contextCharacters(packet) > available {
 		noteLimit--
