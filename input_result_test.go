@@ -98,3 +98,44 @@ func TestFinalResultRefsResolveOnlyCitedFacts(t *testing.T) {
 		t.Fatal("unsupported schema accepted", err)
 	}
 }
+
+func TestFinalReferenceFeedbackAllowsCorrectionWithoutExtraBusinessCalls(t *testing.T) {
+	for _, kind := range []string{"citations", "path"} {
+		t.Run(kind, func(t *testing.T) {
+			fact := Fact{FactID: NewID(), SourceCapability: "ui.open", ReferenceScope: "durable", Value: JSON{"data": JSON{"status": "succeeded", "result": JSON{"id": "OBJECT-1"}}}}
+			rounds := 0
+			model := decisionModelFunc(func(_ context.Context, packet ContextPacket, _ string) (Decision, error) {
+				rounds++
+				final := Decision{Kind: "final", AnswerMarkdown: "Opened", FactIDs: []string{fact.FactID}, ResultRefs: []ResultRefRequest{{FactID: fact.FactID, Path: []any{"data", "result", "id"}}}}
+				if rounds == 1 {
+					if kind == "citations" {
+						final.FactIDs = nil
+					} else {
+						final.ResultRefs[0].Path = []any{"data", "id"}
+					}
+				} else {
+					if len(packet.Observations) == 0 {
+						t.Fatal("missing rejection observation")
+					}
+					raw, _ := json.Marshal(packet.Observations)
+					if !strings.Contains(string(raw), "feedback") {
+						t.Fatal("missing correction guidance", string(raw))
+					}
+				}
+				return final, nil
+			})
+			r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{}}, Model: model}
+			state, _ := r.NewState("Open object", "")
+			state.Facts = []Fact{fact}
+			if err := r.Step(t.Context(), state, nil); err != nil || state.Status == "completed" {
+				t.Fatal("invalid answer accepted", err)
+			}
+			if err := r.Step(t.Context(), state, nil); err != nil || state.Status != "completed" || state.ResultRefs[0].ID != "OBJECT-1" {
+				t.Fatal("correction failed", state.Status, err)
+			}
+			if rounds != 2 {
+				t.Fatal(rounds)
+			}
+		})
+	}
+}

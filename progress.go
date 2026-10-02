@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 )
 
 // Progress is an evidence-derived view, not a model-authored task plan.
@@ -97,15 +98,16 @@ func runProgress(state *RuntimeState, limit int) *RunProgress {
 			view.Pending = append(view.Pending, ProgressItem{Capability: item.Call.Capability, CallRef: item.Call.CallRef, Status: item.Status, ErrorCode: item.ErrorCode})
 		}
 	}
+	observations := currentEvidenceObservations(state, state.Observations)
 	latest := map[string]int{}
-	for i, obs := range state.Observations {
+	for i, obs := range observations {
 		latest[obs.CallRef] = i
 	}
 	// Keep the last successful result of each capability so a busy recent tool
 	// does not crowd earlier work out of the observation window.
 	completed := map[string]ProgressItem{}
 	blocked := map[string]ProgressItem{}
-	for i, obs := range state.Observations {
+	for i, obs := range observations {
 		if latest[obs.CallRef] != i || active[obs.CallRef] {
 			continue
 		}
@@ -131,6 +133,36 @@ func runProgress(state *RuntimeState, limit int) *RunProgress {
 	view.Completed = project(completed)
 	view.Blocked = project(blocked)
 	return view
+}
+
+// Polling replaces the initial receipt Fact in active state. Keep the immutable
+// audit observations, but direct model views to the retained result of that same
+// invocation rather than an unavailable queued receipt.
+func currentEvidenceObservations(state *RuntimeState, observations []Observation) []Observation {
+	facts := map[string]bool{}
+	for _, fact := range state.Facts {
+		facts[fact.FactID] = true
+	}
+	polls := map[string]Observation{}
+	for _, observation := range state.Observations {
+		if observation.FactID == nil || !facts[*observation.FactID] || observation.ErrorCode != nil || !strings.HasPrefix(observation.CallRef, "poll-") {
+			continue
+		}
+		end := strings.LastIndex(observation.CallRef, "-")
+		if end > len("poll-") {
+			polls[observation.CallRef[len("poll-"):end]] = observation
+		}
+	}
+	result := append([]Observation{}, observations...)
+	for i, observation := range result {
+		if observation.FactID == nil || facts[*observation.FactID] || observation.ErrorCode != nil {
+			continue
+		}
+		if poll, ok := polls[deterministicInvocationID(state.RunID, observation.CallRef)]; ok {
+			result[i].FactID = poll.FactID
+		}
+	}
+	return result
 }
 
 const progressUsagePrompt = "progress summarizes observed outcomes; pending is unfinished. Reuse cited Facts. On stagnation_warning, change approach or explain the verified limitation."

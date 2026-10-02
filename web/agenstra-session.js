@@ -13,7 +13,9 @@ export function createAgenstraSessionHandler({ endpoint, authenticateRequest, ve
       if (typeof owner !== "string" || !owner) return reply("unauthorized", 401);
       const key = await resolveAPIKey(owner);
       if (typeof key !== "string" || !key) return reply("agent_session_unavailable", 503);
-      const response = await request(target, { method: "POST", headers: { Authorization: "Bearer " + key }, redirect: "error", signal: AbortSignal.timeout(10000) });
+      // Workers implement manual/follow only. Manual also lets us reject a
+      // redirect without sending the credential to its destination.
+      const response = await request(target, { method: "POST", headers: { Authorization: "Bearer " + key }, redirect: "manual", signal: AbortSignal.timeout(10000) });
       if (!response.ok) return reply("agent_session_unavailable", 503);
       const data = await response.json();
       if (typeof data.token !== "string" || !data.token || !Number.isFinite(data.expires_at) || data.expires_at <= Date.now() / 1000) return reply("agent_session_response_invalid", 502);

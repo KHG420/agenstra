@@ -594,6 +594,62 @@ func TestBrowserRepeatedPageObservationAcrossThreeActions(t *testing.T) {
 	}
 }
 
+func TestBrowserHostReadCanRefreshAfterPageChanges(t *testing.T) {
+	decisions := []Decision{}
+	for i := 1; i <= 3; i++ {
+		decisions = append(decisions,
+			Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []ToolCall{{CallRef: fmt.Sprintf("context-%d", i), Capability: "ui.get_context", Arguments: JSON{}, Reason: "Read latest page revision"}}},
+			Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []ToolCall{{CallRef: fmt.Sprintf("read-%d", i), Capability: "ui.read_activity", Arguments: JSON{}, Reason: "Read business state again after page changes"}}})
+	}
+	f := newWebFixture(t, &hostModel{decisions: decisions}, false)
+	profile := frontendTestProfile(false)
+	profile.Actions[0].Name, profile.Actions[0].Effect = "ui.read_activity", "read"
+	profile.Actions[0].InputSchema = JSON{"type": "object", "additionalProperties": false}
+	compiled, err := compileFrontend(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.w.profiles["records-web"] = compiled
+	user := f.d.Config.Users["alice"]
+	user.BrowserActions["records-web"] = []string{"ui.read_activity"}
+	f.d.Config.Users["alice"] = user
+	f.session, f.key, err = f.w.CreateBrowserSession(t.Context(), "alice", "records-web", "1", []string{"ui.read_activity"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.session, err = f.w.UpdatePageObservation("alice", f.session.ID, f.key, 1, 0, JSON{"page": "before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := f.run(t)
+	for i := 1; i <= 3; i++ {
+		if run.Status != "waiting" {
+			t.Fatalf("read %d was not dispatched: %s", i, run.Status)
+		}
+		command := f.dispatch(t)
+		accepted, _, err := f.w.BeginBrowserCommand(t.Context(), "alice", command.ID, f.key, 1)
+		if err != nil || !accepted {
+			t.Fatal(accepted, err)
+		}
+		page := JSON{"page": fmt.Sprintf("revision-%d", i)}
+		f.session, err = f.w.UpdatePageObservation("alice", f.session.ID, f.key, 1, f.session.ContextRevision, page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = f.w.CompleteBrowserCommand("alice", command.ID, f.key, 1, "succeeded", page, ""); err != nil {
+			t.Fatal(err)
+		}
+		f.now += 2
+		run, err = f.h.Drive(t.Context(), run.RunID, "alice")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if run.Status != "completed" {
+		t.Fatal(run.Status)
+	}
+}
+
 func TestChatTerminalFailureRetainsRunErrorCode(t *testing.T) {
 	f := newWebFixture(t, &hostModel{decisions: browserDecisions()}, false)
 	f.h.Settings.MaxModelRounds = 1

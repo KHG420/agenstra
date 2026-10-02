@@ -1,7 +1,7 @@
 /** Optional UI. Importing the headless client never loads this component. */
 const labels = {
-  "zh-CN": { title: "Agenstra 助手", subtitle: "查询数据、执行操作，并同步当前页面", chatOnly: "通过已授权的系统能力完成任务", empty: "从一个具体任务开始", hint: "例如：查询本月订单，再打开其中一笔的详情。", placeholder: "描述你想完成的操作…", choose: "请选择…", send: "发送", queue: "添加任务", stop: "停止任务", approve: "批准操作", reject: "拒绝操作", approval: "执行前请核对操作和参数", input: "请补充以下信息", invalidInput: "请按提示填写有效信息。", invalidChoice: "请选择列表中的一个选项。", invalidDate: "请输入有效日期。", unknown: "操作结果尚未确认。核对实际页面后再继续；也可以停止此任务。", unknownStopped: "操作结果仍待核对。核对只更新结果，任务仍保持停止。", reconcile: "读取已确认的回执", connected: "已连接", disconnected: "连接中断，正在重试", loading: "正在连接系统…", error: "请求未完成，请检查连接或重试。", retry: "重试发送", statuses: { queued: "等待执行", creating: "准备任务", active: "正在执行", cancelling: "正在停止", completed: "已完成", failed: "未完成", cancelled: "已停止", needs_input: "等待补充信息", needs_approval: "等待确认", waiting: "等待操作结果", needs_reconciliation: "等待核对", needs_authorization: "需要恢复授权" } },
-  en: { title: "Agenstra assistant", subtitle: "Query data, take action, and update this page", chatOnly: "Complete tasks using authorized system capabilities", empty: "Start with a specific task", hint: "For example: find this month's orders and open one for review.", placeholder: "Describe what you want to do…", choose: "Choose…", send: "Send", queue: "Queue task", stop: "Stop task", approve: "Approve action", reject: "Reject action", approval: "Review the action and arguments before proceeding", input: "More information is needed", invalidInput: "Enter a value that matches the request.", invalidChoice: "Choose an option from the list.", invalidDate: "Enter a valid date.", unknown: "The action outcome is unconfirmed. Check the actual page before continuing, or stop this task.", unknownStopped: "The operation result still needs verification. Verification only updates the result; this task stays stopped.", reconcile: "Read the verified receipt", connected: "Connected", disconnected: "Disconnected. Retrying…", loading: "Connecting to your system…", error: "The request did not complete. Check the connection or retry.", retry: "Retry send", statuses: { queued: "Queued", creating: "Preparing", active: "Working", cancelling: "Stopping", completed: "Completed", failed: "Incomplete", cancelled: "Stopped", needs_input: "Waiting for input", needs_approval: "Waiting for approval", waiting: "Waiting for the result", needs_reconciliation: "Needs review", needs_authorization: "Authorization needed" } }
+  "zh-CN": { title: "Agenstra 助手", subtitle: "查询数据、执行操作，并同步当前页面", chatOnly: "通过已授权的系统能力完成任务", empty: "从一个具体任务开始", hint: "描述要查询的信息或要执行的操作。", placeholder: "描述你想完成的操作…", choose: "请选择…", send: "发送", queue: "添加任务", stop: "停止任务", approve: "批准操作", reject: "拒绝操作", approval: "执行前请核对操作和参数", input: "请补充以下信息", invalidInput: "请按提示填写有效信息。", invalidChoice: "请选择列表中的一个选项。", invalidDate: "请输入有效日期。", unknown: "操作结果尚未确认。核对实际页面后再继续；也可以停止此任务。", unknownStopped: "操作结果仍待核对。核对只更新结果，任务仍保持停止。", reconcile: "读取已确认的回执", connected: "已连接", disconnected: "连接中断，正在重试", loading: "正在连接系统…", error: "请求未完成，请检查连接或重试。", retry: "重试发送", statuses: { queued: "等待执行", creating: "准备任务", active: "正在执行", cancelling: "正在停止", completed: "已完成", failed: "未完成", cancelled: "已停止", needs_input: "等待补充信息", needs_approval: "等待确认", waiting: "等待操作结果", needs_reconciliation: "等待核对", needs_authorization: "需要恢复授权" } },
+  en: { title: "Agenstra assistant", subtitle: "Query data, take action, and update this page", chatOnly: "Complete tasks using authorized system capabilities", empty: "Start with a specific task", hint: "Describe the information you need or the action you want to take.", placeholder: "Describe what you want to do…", choose: "Choose…", send: "Send", queue: "Queue task", stop: "Stop task", approve: "Approve action", reject: "Reject action", approval: "Review the action and arguments before proceeding", input: "More information is needed", invalidInput: "Enter a value that matches the request.", invalidChoice: "Choose an option from the list.", invalidDate: "Enter a valid date.", unknown: "The action outcome is unconfirmed. Check the actual page before continuing, or stop this task.", unknownStopped: "The operation result still needs verification. Verification only updates the result; this task stays stopped.", reconcile: "Read the verified receipt", connected: "Connected", disconnected: "Disconnected. Retrying…", loading: "Connecting to your system…", error: "The request did not complete. Check the connection or retry.", retry: "Retry send", statuses: { queued: "Queued", creating: "Preparing", active: "Working", cancelling: "Stopping", completed: "Completed", failed: "Incomplete", cancelled: "Stopped", needs_input: "Waiting for input", needs_approval: "Waiting for approval", waiting: "Waiting for the result", needs_reconciliation: "Needs review", needs_authorization: "Authorization needed" } }
 };
 const style = `
 :host{--agenstra-accent:#116b64;--agenstra-text:#18313b;--agenstra-muted:#51636a;--agenstra-surface:#fff;--agenstra-ground:#f4f6f3;--agenstra-line:#d8e0dc;--agenstra-danger:#a5352c;display:block;height:var(--agenstra-height,560px);min-height:320px;color:var(--agenstra-text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;color-scheme:light}
@@ -9,22 +9,70 @@ const style = `
 .panel{display:flex;flex-direction:column;height:100%;min-width:0;border:1px solid var(--agenstra-line);border-radius:14px;background:var(--agenstra-surface);overflow:hidden}
 header{padding:20px 22px 17px;border-bottom:1px solid var(--agenstra-line)}h2{margin:0;font-size:1.08rem;font-weight:650;letter-spacing:-.02em}header p{margin:5px 0 0;color:var(--agenstra-muted);font-size:.82rem}.connection{margin-top:10px;color:var(--agenstra-muted);font-size:.76rem}
 .log{flex:1;min-height:0;overflow:auto;padding:22px;scrollbar-color:var(--agenstra-line) transparent;scrollbar-width:thin}.empty{padding:34px 0}.empty h3{margin:0 0 8px;font-size:1.18rem;font-weight:600}.empty p{max-width:34ch;margin:0;color:var(--agenstra-muted);font-size:.9rem}.turn+.turn{margin-top:25px;padding-top:24px;border-top:1px solid var(--agenstra-line)}
-.user{margin:0 0 13px 26px;padding:11px 14px;border-radius:10px;background:var(--agenstra-ground);white-space:pre-wrap;overflow-wrap:anywhere}.answer{white-space:pre-wrap;overflow-wrap:anywhere;max-width:70ch}.answer pre{white-space:pre;overflow:auto;padding:12px;background:var(--agenstra-ground);border-radius:8px;font: .82rem/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}.status{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:9px 0;color:var(--agenstra-muted);font-size:.78rem}.status[data-state=failed]{color:var(--agenstra-danger)}
+.user{margin:0 0 13px 26px;padding:11px 14px;border-radius:10px;background:var(--agenstra-ground);white-space:pre-wrap;overflow-wrap:anywhere}.answer{white-space:pre-wrap;overflow-wrap:anywhere;max-width:70ch}.answer p{margin:0 0 10px}.answer ul,.answer ol{margin:8px 0 12px;padding-inline-start:24px}.answer li{white-space:normal}.answer code{font:.86em ui-monospace,SFMono-Regular,Menlo,monospace}.answer-table{max-width:100%;overflow:auto;margin:12px 0;white-space:normal}.answer table{border-collapse:collapse;font-size:.9rem;font-variant-numeric:tabular-nums}.answer th,.answer td{padding:8px 12px;border:1px solid var(--agenstra-line);text-align:start;min-width:8ch}.answer th{background:var(--agenstra-ground);font-weight:600}.answer-table:focus-visible{outline:3px solid var(--agenstra-accent);outline-offset:3px}.answer pre{white-space:pre;overflow:auto;padding:12px;background:var(--agenstra-ground);border-radius:8px;font: .82rem/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}.status{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:9px 0;color:var(--agenstra-muted);font-size:.78rem}.status[data-state=failed]{color:var(--agenstra-danger)}
 button{border:1px solid var(--agenstra-line);border-radius:7px;background:var(--agenstra-surface);color:var(--agenstra-text);padding:6px 11px;font-size:.82rem;transition:background 140ms ease-out}button:hover{background:var(--agenstra-ground)}.primary{background:var(--agenstra-accent);border-color:var(--agenstra-accent);color:var(--agenstra-surface)}.primary:hover{filter:brightness(.94)}.text-button{padding:2px 0;border:0;color:var(--agenstra-accent);background:transparent;font-size:.78rem}.text-button:hover{text-decoration:underline;text-underline-offset:3px;background:transparent}
 .request{padding-top:8px;margin-top:12px}.request p{margin:0 0 10px}.request details{margin:12px 0}.request summary{cursor:pointer;overflow-wrap:anywhere;font-weight:600;font-size:.86rem}.request pre{max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;background:var(--agenstra-ground);font:.78rem/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;border-radius:8px}.actions{display:flex;gap:8px;flex-wrap:wrap}.notice{color:var(--agenstra-muted);font-size:.86rem}
 form{padding:15px 18px 17px;border-top:1px solid var(--agenstra-line)}label{display:block;margin-bottom:7px;color:var(--agenstra-muted);font-size:.78rem}.composer{display:flex;gap:10px;align-items:flex-end}textarea,.composer select,.composer input[type=date]{flex:1;min-width:0;min-height:40px;border:1px solid var(--agenstra-line);border-radius:8px;padding:10px 12px;background:var(--agenstra-surface);color:var(--agenstra-text)}textarea{min-height:60px;max-height:160px;resize:vertical;caret-color:var(--agenstra-accent)}textarea::placeholder{color:var(--agenstra-muted)}.send{min-height:40px}.feedback{margin:0;padding:0 18px;color:var(--agenstra-danger);font-size:.82rem;overflow-wrap:anywhere}.feedback:not(:empty){padding-top:10px}
 @media(prefers-reduced-motion:reduce){button{transition:none}}
 `;
+// A small Markdown subset built entirely from DOM nodes. HTML, links and images
+// remain literal text; model output never enters an HTML parser.
+function appendInline(element, text) {
+  const pattern = /\*\*([^*\n]+)\*\*|`([^`\n]+)`/g;
+  let offset = 0;
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > offset) element.append(document.createTextNode(text.slice(offset, match.index)));
+    const node = document.createElement(match[1] === undefined ? "code" : "strong");
+    node.textContent = match[1] ?? match[2];element.append(node);
+    offset = match.index + match[0].length;
+  }
+  if (offset < text.length) element.append(document.createTextNode(text.slice(offset)));
+}
+function tableCells(line) {
+  return line.trim().replace(/^\|/, "").replace(/(?<!\\)\|$/, "").split(/(?<!\\)\|/).map(cell => cell.trim().replace(/\\\|/g, "|"));
+}
 export function appendAnswer(element, value) {
-  // Content is always inserted as text, including model-generated markup.
-  // Code fences get readable code blocks without executing HTML.
-  const parts = String(value).split(/\x60\x60\x60[^\n]*\n/);
-  if (parts.length === 1) { element.textContent = value; return; }
-  const chunks = String(value).split("\x60\x60\x60");
-  chunks.forEach((chunk, i) => {
-    if (i % 2) { const pre = document.createElement("pre"); const code = document.createElement("code"); code.textContent = chunk.replace(/^[^\n]*\n/, "");pre.append(code);element.append(pre); }
-    else element.append(document.createTextNode(chunk));
-  });
+  const text = String(value ?? "");
+  if (!/```|\*\*|`|^\s*(?:[-*] |\d+\. )|\|/m.test(text)) { element.textContent = text;return; }
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    if (!lines[i].trim()) { i++;continue; }
+    if (/^\s*```/.test(lines[i])) {
+      const content = [];i++;
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) content.push(lines[i++]);
+      const pre = document.createElement("pre"), code = document.createElement("code");
+      code.textContent = content.join("\n") + (i < lines.length ? "\n" : "");
+      pre.append(code);element.append(pre);i++;continue;
+    }
+    const header = tableCells(lines[i]);
+    const separator = i + 1 < lines.length ? tableCells(lines[i + 1]) : [];
+    if (lines[i].includes("|") && separator.length === header.length && separator.every(cell => /^:?-{3,}:?$/.test(cell))) {
+      const wrap = document.createElement("div"), table = document.createElement("table"), head = document.createElement("thead"), row = document.createElement("tr"), body = document.createElement("tbody");
+      wrap.className = "answer-table";wrap.tabIndex = 0;
+      header.forEach(cell => { const th = document.createElement("th");th.scope = "col";appendInline(th, cell);row.append(th); });
+      head.append(row);table.append(head, body);i += 2;
+      while (i < lines.length && lines[i].includes("|")) {
+        const cells = tableCells(lines[i]);if (cells.length !== header.length) break;
+        const tr = document.createElement("tr");
+        cells.forEach(cell => { const td = document.createElement("td");appendInline(td, cell);tr.append(td); });
+        body.append(tr);i++;
+      }
+      wrap.append(table);element.append(wrap);continue;
+    }
+    const list = /^\s*([-*]|\d+\.)\s+(.+)$/.exec(lines[i]);
+    if (list) {
+      const ordered = /\d/.test(list[1]), node = document.createElement(ordered ? "ol" : "ul");
+      if (ordered) node.start = parseInt(list[1], 10);
+      while (i < lines.length) {
+        const item = /^\s*([-*]|\d+\.)\s+(.+)$/.exec(lines[i]);
+        if (!item || /\d/.test(item[1]) !== ordered) break;
+        const li = document.createElement("li");appendInline(li, item[2]);node.append(li);i++;
+      }
+      element.append(node);continue;
+    }
+    const paragraph = document.createElement("p");appendInline(paragraph, lines[i++]);element.append(paragraph);
+  }
 }
 export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
   constructor() {
@@ -51,10 +99,10 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
     this.text = labels[this.getAttribute("lang")] || labels["zh-CN"];
     const t = this.text;
     this.shadowRoot.querySelector("h2").textContent = this.getAttribute("title") || t.title;
-    this.shadowRoot.querySelector(".subtitle").textContent = this.client.options.browser ? t.subtitle : t.chatOnly;
+    this.shadowRoot.querySelector(".subtitle").textContent = this.getAttribute("subtitle") ?? (this.client.options.browser ? t.subtitle : t.chatOnly);
     this.shadowRoot.querySelector(".connection").textContent = t.loading;
-    this.shadowRoot.querySelector("label").textContent = t.placeholder;
-    this.input.placeholder = t.placeholder;
+    this.shadowRoot.querySelector("label").textContent = this.getAttribute("placeholder") ?? t.placeholder;
+    this.input.placeholder = this.getAttribute("placeholder") ?? t.placeholder;
     this.shadowRoot.querySelector(".send").textContent = t.send;
     this.render({ messages: [] });
     const epoch = this.epoch;
@@ -110,7 +158,14 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
     });return b;
   }
   render(snapshot) {
-    const signature = JSON.stringify([snapshot.conversation?.id, snapshot.messages]);
+    // Server telemetry timestamps/deadlines change on every poll. Only its
+    // visible tool counter belongs in the render identity; replacing the log
+    // for a clock tick invalidates approval buttons and text selections.
+    const signature = JSON.stringify([snapshot.conversation?.id, snapshot.messages?.map(message => {
+      if (!message.run) return message;
+      const { telemetry, ...run } = message.run;
+      return { ...message, run, toolCalls: telemetry?.budget?.tool_calls?.used };
+    })]);
     if (signature === this.signature) return;
     if (this.conversationId && this.conversationId !== snapshot.conversation?.id) {
       this.pendingSend = null;this.input.value = "";if (this.choice) this.choice.value = "";if (this.dateInput) this.dateInput.value = "";this.inputRequestKey = null;
@@ -124,7 +179,7 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
     const t = this.text;const messages = snapshot.messages || [];
     if (!messages.length) {
       const empty = document.createElement("div");empty.className = "empty";
-      const h = document.createElement("h3");h.textContent = t.empty;const p = document.createElement("p");p.textContent = t.hint;empty.append(h, p);this.log.append(empty);
+      const h = document.createElement("h3");h.textContent = this.getAttribute("empty-title") ?? t.empty;const p = document.createElement("p");p.textContent = this.getAttribute("empty-hint") ?? t.hint;empty.append(h, p);this.log.append(empty);
     }
     for (const message of messages) {
       const turn = document.createElement("article");turn.className = "turn";
@@ -164,7 +219,7 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
           turn.append(summary);
           for (const finding of report.findings || []) {
             const p = document.createElement("p"); p.className = "notice";
-            p.textContent = finding.message + " " + finding.next_action + " (" + finding.code + ")"; turn.append(p);
+            p.textContent = (finding.recovered ? (this.getAttribute("lang") === "en" ? "Recovered: " : "已恢复：") : "") + finding.message + (finding.actionable === false ? "" : " " + finding.next_action) + " (" + finding.code + ")"; turn.append(p);
           }
         }
       }
@@ -215,7 +270,7 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
       this.inputRequestKey = requestKey;
     }
     const label = this.shadowRoot.querySelector("label");
-    label.textContent = this.awaitingInput ? t.input : t.placeholder;
+    label.textContent = this.awaitingInput ? t.input : (this.getAttribute("placeholder") ?? t.placeholder);
     const schema = this.awaitingInput?.runtime?.input_schema;
     if (this.choice && this.dateInput) {
       this.choice.hidden = schema?.type !== "enum";
@@ -241,10 +296,13 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
   }
 }
 if (globalThis.customElements && !customElements.get("agenstra-chat")) customElements.define("agenstra-chat", AgenstraChat);
-export function mountAgenstraChat(container, { client, title, locale = "zh-CN" }) {
+export function mountAgenstraChat(container, { client, title, locale = "zh-CN", subtitle, emptyTitle, emptyHint, placeholder }) {
   const element = document.createElement("agenstra-chat");
   element.setAttribute("lang", locale);
   if (title) element.setAttribute("title", title);
+  for (const [name, value] of Object.entries({ subtitle, "empty-title": emptyTitle, "empty-hint": emptyHint, placeholder })) {
+    if (value !== undefined) element.setAttribute(name, value);
+  }
   element.client = client;container.append(element);
   return { element, unmount: () => element.remove() };
 }

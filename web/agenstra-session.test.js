@@ -17,7 +17,37 @@ test("ticket exchange uses verified host identity and returns only a short-lived
   assert.deepEqual(await response.json(), { token: "short-ticket", expires_at: expires });
   assert.equal(requests[0].url, "https://agent.example/agent/web/v1/token");
   assert.equal(requests[0].options.headers.Authorization, "Bearer long-lived-private-key");
-  assert.equal(requests[0].options.redirect, "error");
+  assert.equal(requests[0].options.redirect, "manual");
+});
+
+test("Workers-compatible exchange rejects redirects without following credentials", async () => {
+  let calls = 0;
+  const handler = createAgenstraSessionHandler({
+    endpoint: "https://agent.example", verifyRequest: () => true,
+    authenticateRequest: () => "alice", resolveAPIKey: () => "private-key",
+    fetch: async (_url, options) => {
+      calls++;
+      if (!["manual", "follow"].includes(options.redirect)) throw new TypeError("Workers does not support redirect:error");
+      assert.equal(options.redirect, "manual");
+      return new Response(null, { status: 307, headers: { Location: "https://other.example/token" } });
+    }
+  });
+  const response = await handler(new Request("https://host.example/session", { method: "POST" }));
+  assert.equal(response.status, 503); assert.equal(calls, 1);
+  assert.equal((await response.text()).includes("private-key"), false);
+});
+
+test("ticket exchange succeeds with the Workers fetch redirect contract", async () => {
+  const handler = createAgenstraSessionHandler({
+    endpoint: "http://127.0.0.1:8093", verifyRequest: () => true,
+    authenticateRequest: () => "local_seedy", resolveAPIKey: () => "private-key",
+    fetch: async (_url, options) => {
+      if (!["manual", "follow"].includes(options.redirect)) throw new TypeError("Invalid redirect value");
+      return Response.json({ token: "worker-ticket", expires_at: Math.floor(Date.now() / 1000) + 900 });
+    }
+  });
+  const response = await handler(new Request("http://127.0.0.1:3137/api/agent-session", { method: "POST" }));
+  assert.equal(response.status, 200); assert.equal((await response.json()).token, "worker-ticket");
 });
 
 test("rejected CSRF, missing login and invalid upstream data never expose credentials", async () => {

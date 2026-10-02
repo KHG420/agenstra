@@ -1,6 +1,6 @@
 # 让现有软件接入 Agent
 
-默认采用独立服务：原软件保留登录、业务权限与业务数据库；Agenstra 负责模型决策、上下文、任务执行、审批和恢复。宿主通过 HTTP 提交任务，Agenstra 通过 REST 或 MCP 调用已经授权的业务接口。Go 软件也可将运行库嵌入原进程。
+默认采用独立服务：原软件保留登录、业务权限与业务数据库；Agenstra 负责模型决策、上下文、任务执行、审批和恢复。宿主通过 HTTP 提交任务，Agenstra 通过 REST 或 MCP 调用已经授权的业务接口。只有页面函数需要接入的 Web 软件可以使用纯浏览器模式，无需额外提供占位 REST/MCP 能力包。Go 软件也可将运行库嵌入原进程。
 
 ## 1. 启动服务
 
@@ -20,6 +20,8 @@
 发布后，继续在向导中选择已有用户、逐项勾选授权、确认模型数据使用范围，填写凭据引用，点击“启用版本、保存授权并检查连接”。发布、启用、授权沿用现有 API 和审计记录。步骤失败时会明确显示已经完成的部分；启用版本会影响该包的新任务。
 
 “检查连接”验证契约和连接配置能够加载；REST 尚未执行实际接口。使用下一步的代表性任务完成业务验收。能力升级时导入新版契约、检查差异并发布新版本；旧任务继续遵守原有版本固定规则。
+
+纯浏览器接入跳过后端能力包创建，准备第 5 步的 frontend profile。在 `web_integration.integrations.<integration>` 只设置 `frontend_profile_path`，省略 `pack_id`，并开启 `browser_bridge`。同一 integration 名下的 `users.<owner>.packs.<integration>` 配置 `allow_model_data`、`granted_capabilities` 和可选 `approval_capabilities`；不需要再填写 `browser_actions`。用户身份、模型数据使用和动作授权仍须明确配置，见[纯浏览器部署示例](web-integration.md#纯浏览器宿主)。
 
 ## 3. 接入宿主登录
 
@@ -67,11 +69,15 @@ const client = createAgenstraClient({
   }
 });
 const chat = mountAgenstraChat(document.querySelector("#agent"), {
-  client, title: "订单助手", locale: "zh-CN"
+  client, title: "订单助手", locale: "zh-CN",
+  subtitle: "查询和处理已授权的订单",
+  emptyTitle: "需要处理什么订单？",
+  emptyHint: "例如：查询本月待处理订单，说明哪些需要我确认。",
+  placeholder: "输入订单问题或操作要求"
 });
 ```
 
-组件提供发送、进度、确认、补充输入、取消、核对、恢复权限和读取诊断。内容以文本呈现，模型 HTML 不会执行；代码块会显示为代码。CSS 变量 `--agenstra-accent`、`--agenstra-height` 等可匹配宿主主题。组件使用 Shadow DOM；严格限制内联样式的宿主应配置合适的样式策略。
+组件提供发送、进度、确认、补充输入、取消、核对、恢复权限和读取诊断。回答支持表格、有序/无序列表、加粗、行内代码和围栏代码块；这是安全的 Markdown 子集，HTML、链接、图片及其他语法保留为文本。所有内容通过 DOM 文本节点构建，模型 HTML 不会执行。文案也可通过 custom element 的 `subtitle`、`empty-title`、`empty-hint`、`placeholder` 属性设置。CSS 变量 `--agenstra-accent`、`--agenstra-height` 等可匹配宿主主题。组件使用 Shadow DOM；严格限制内联样式的宿主应配置合适的样式策略。
 
 组件不拥有传入的 client。卸载时调用 `chat.unmount()` 解除观察；宿主结束该 client 的生命周期时调用 `client.destroy()`。组件未导入时，headless client 不加载 DOM、CSS 或 UI 依赖。
 
@@ -86,7 +92,7 @@ node web/export-client.mjs /path/to/host/vendor/agenstra
 node web/export-actions.mjs frontend-profile.json /path/to/host/vendor/agenstra
 ```
 
-生成 `agenstra-actions.d.ts`、`agenstra-profile.js` 和首次创建的 `agenstra-handlers.js`。修改 handlers，把函数绑定到原系统；重复生成会更新类型和版本，保留业务 handler 文件。未绑定的模板明确返回 `handler_not_implemented`。
+生成器先检查版本、动作名称/重复/保留名、影响类型、超时、字段和受支持的 Schema 引用位置，发现接线错误时在写文件前报错。检查通过后生成 `agenstra-actions.d.ts`、`agenstra-profile.js` 和首次创建的 `agenstra-handlers.js`。修改 handlers，把函数绑定到原系统；重复生成会更新类型和版本，保留业务 handler 文件。未绑定的模板明确返回 `handler_not_implemented`。
 
 ```js
 import { actions } from "./vendor/agenstra/agenstra-handlers.js";
@@ -95,11 +101,13 @@ import { handlerVersion } from "./vendor/agenstra/agenstra-profile.js";
 client.registerActions(actions);
 ```
 
-生成的类型是开发辅助；复杂 JSON Schema 中无法精确表达的类型保留 `unknown`，服务端契约校验仍是运行依据。契约与 handler 语义变更时更新 profile 版本并重新发布。
+生成的类型和接线检查是开发辅助，不是完整 JSON Schema 编译或业务验收；复杂 Schema 中无法精确表达的类型保留 `unknown`，服务端完整契约校验仍是运行依据。权限、业务版本、幂等保证和确定失败/不确定结果的区分由原业务函数提供。契约与 handler 语义变更时更新 profile 版本并重新发布。
 
 ## 6. 验收与诊断
 
 管理页的“试运行与任务诊断”使用接入用户的 API key 创建真实任务、查看调用和模型预算、处理确认与补充输入。管理员密钥不代替用户权限。诊断也可通过 `GET /runs/{id}/diagnostics` 和 `client.getRunDiagnostics(id)` 读取；它不调用业务接口或模型。
+
+诊断保留历史错误，同时用 `recovered` 和 `actionable` 区分已恢复记录与待处理问题。标准组件将明确恢复的错误标为“已恢复”，不再提示当前恢复操作。相同调用或相同参数的后续明确成功可以证明恢复；不确定写入仍须核对原命令，不能用另一条相似命令的成功掩盖。
 
 重复验收使用 `agenstra-evaluate`。先准备以下 JSON 数组，替换能力名、任务和业务证据路径：
 
@@ -141,7 +149,7 @@ go run ./cmd/agenstra-evaluate --server http://127.0.0.1:8091 \
 | 普通 REST JSON API | REST 能力包 | 支持的输入输出契约、认证映射 |
 | MCP HTTP / stdio | 发现、选择并固定工具契约 | 可用服务、结构化输入输出、实际业务保证 |
 | Go 内部 SDK | 嵌入式 CapabilityProvider | 原函数到能力接口的绑定 |
-| Web 页面已有函数 | 浏览器 SDK + profile | 原页面函数、当前页面观察数据 |
+| Web 页面已有函数 | 纯浏览器 SDK + profile，或与后端能力组合 | 原页面函数、当前页面观察数据、明确用户授权；纯浏览器无需占位后端包 |
 | 只有桌面 GUI、没有 API 或绑定点 | 需专门适配 | 可调用的自动化或业务接口 |
 
 OpenAPI 当前支持 JSON 文档、本地引用、path/query 参数和规定的序列化方式、JSON object 输出，以及受支持的 bearer 认证；复杂文档会报告导入失败，需对照[能力管理指南](capability-management.md)和导入器限制适配。框架尚未内置通用桌面 GUI 驱动或完整 OAuth 登录流程。

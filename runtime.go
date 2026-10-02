@@ -379,8 +379,9 @@ func (r *AgentRuntime) contextCandidate(state *RuntimeState) ContextPacket {
 			omissions = append(omissions, "capability search returned no authorized matches for: "+state.CapabilitySearchQuery)
 		}
 	}
-	start := max(0, len(state.ModelObservations)-12)
-	for _, o := range state.ModelObservations[start:] {
+	modelObservations := currentEvidenceObservations(state, state.ModelObservations)
+	start := max(0, len(modelObservations)-12)
+	for _, o := range modelObservations[start:] {
 		raw, _ := CanonicalJSON(o.Arguments)
 		if utf8.RuneCount(raw) > 2000 {
 			o.Arguments = JSON{}
@@ -716,9 +717,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		}
 		refs, refsErr := resolveResultRefs(decision.ResultRefs, decision.FactIDs, facts, r.ConnectionID)
 		if !valid {
-			Reject(state, "final", "agent.final", "final_fact_citations_invalid", nil, "")
+			Reject(state, "final", "agent.final", "final_fact_citations_invalid", JSON{"feedback": "Cite at least one observed Fact when Facts exist. Every fact_ids entry must be an existing Fact ID from this run; use inspect_fact to read evidence before correcting the answer."}, "")
 		} else if refsErr != nil {
-			Reject(state, "final", "agent.final", "final_result_refs_invalid", nil, "")
+			Reject(state, "final", "agent.final", "final_result_refs_invalid", JSON{"feedback": "Each result_refs entry must name an available Fact included in fact_ids and a path to a nonempty scalar business ID (string or integer). Inspect the Fact and use its actual path, including data and, for browser receipts, result. Omit result_refs when the answer needs no object reference; never invent an ID."}, "")
 		} else if r.CompletionValidator != nil {
 			err := r.CompletionValidator(ctx, CompletionContext{RunID: state.RunID, OriginPackID: r.OriginPackID, Instruction: state.Instruction, AnswerMarkdown: decision.AnswerMarkdown, FactIDs: decision.FactIDs, Facts: state.Facts, Observations: state.Observations, Followups: state.Followups})
 			if ctx.Err() != nil {
@@ -824,10 +825,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			if state.Repeated == nil {
 				state.Repeated = map[string]int{}
 			}
-			// These reserved browser observations change as handlers update the page
-			// or a command progresses. Re-reading them is necessary for a later
-			// action in the same run; the normal round/tool budgets still apply.
-			refreshableBrowserRead := call.Capability == "ui.get_context" || call.Capability == "ui.command_status"
+			// Browser observations and host reads can change after a page/business
+			// write. Let declared read actions fetch current state again; writes
+			// retain duplicate protection and all round/tool budgets still apply.
+			refreshableBrowserRead := call.Capability == "ui.get_context" || call.Capability == "ui.command_status" ||
+				(exists && cap.Effect == "read" && strings.HasPrefix(call.Capability, "ui.") && cap.Operation != nil && cap.Operation.PollCapability == "ui.command_status")
 			if !refreshableBrowserRead && state.Repeated[digest] >= r.MaxRepeatedCall {
 				Reject(state, call.CallRef, call.Capability, "repeated_equivalent_call", call.Arguments, "")
 				continue

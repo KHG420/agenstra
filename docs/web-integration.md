@@ -51,9 +51,44 @@
 
 扩展库必须与运行库、管理库分开。备份和恢复时停止写入，同时保存各数据库和能力包，避免恢复到不一致的时间点。模块没有自动保留期清理。
 
-对应用户增加 `"browser_actions": {"records-web": ["ui.navigate"]}`。用户仍须拥有 `users.<owner>.packs.records` 的有效连接及 `allow_model_data: true`。后端授权沿用现有配置。浏览器注册 handler 仅声明能执行的动作，服务端决定权限。Go 嵌入式服务可设置 `server.Web.ResolveBrowserActions`，实时读取宿主授权；先以 `workerEnabled=false` 构造服务器、设置 hook，再运行自己的 `Web.Tick` / `Host.WakeDue` 调度。不要在运行期间并发修改配置 map 或 hook。
+上述组合接入对应用户增加 `"browser_actions": {"records-web": ["ui.navigate"]}`。用户仍须拥有 `users.<owner>.packs.records` 的有效连接及 `allow_model_data: true`。后端授权沿用现有配置。浏览器注册 handler 仅声明能执行的动作，服务端决定权限。组合接入的 Go 嵌入式服务可设置 `server.Web.ResolveBrowserActions`，实时读取宿主授权；先以 `workerEnabled=false` 构造服务器、设置 hook，再运行自己的 `Web.Tick` / `Host.WakeDue` 调度。不要在运行期间并发修改配置 map 或 hook。
 
 仅聊天可配置 `"integrations": {"records": {"pack_id":"records"}}`，无需 profile。包含前端 profile 的 integration 必须使用独立别名，避免改变原包的能力目录。业务包不能使用保留的 `ui.*` 命名空间。
+
+### 纯浏览器宿主
+
+若所有动作都绑定原页面函数，省略 `pack_id`，只提供 frontend profile。无需创建 REST/MCP 包，也无需额外提供静态信息接口。例如以下完整部署结构复用下一节的 `frontend-profile.json`：
+
+```json
+{
+  "database_path": "runs.sqlite3",
+  "users": {
+    "alice": {
+      "api_key_env": "AGENT_ALICE_API_KEY",
+      "packs": {
+        "app": {
+          "allow_model_data": true,
+          "granted_capabilities": ["ui.navigate"],
+          "approval_capabilities": []
+        }
+      }
+    }
+  },
+  "web_integration": {
+    "database_path": "web.sqlite3",
+    "chat": true,
+    "browser_bridge": true,
+    "session_key_env": "AGENT_WEB_SESSION_KEY",
+    "integrations": {
+      "app": {"frontend_profile_path": "frontend-profile.json"}
+    }
+  }
+}
+```
+
+在服务端配置模型变量、`AGENT_ALICE_API_KEY` 和会话密钥，再启动 `agenstra-serve --config deployment.json`。SDK 使用 `integration: "app"`、`browser: true`，按后面的示例注册 handler 和页面观察数据。用户换票据继续沿用可信宿主登录映射。
+
+纯浏览器模式把 integration ID 作为原 `PolicyResolver` 的连接 ID；静态配置的 consent、动作授权和策略要求的审批统一来自 `users.<owner>.packs.app`，不使用 `browser_actions` / `ResolveBrowserActions`。内置页面观察和命令状态可读取，但宿主动作必须明确授权。profile 自己要求的审批同样生效。没有用户授权或 `allow_model_data: true` 仍会拒绝运行。Go 嵌入式宿主可通过原 `PolicyResolver` 返回实时策略。纯浏览器必须开启控制桥并提供 profile；带 profile 的 ID 不能与业务包 ID 冲突。
 
 ## 前端动作契约
 
@@ -89,7 +124,7 @@
 
 动作使用 `ui.*` 名称，输入输出须为 object Schema；effect 为 `read`、`write` 或 `destructive`，超时 1–300 秒，默认 60。审批由 profile 或实时 policy 的 `ApprovalCapabilities` 要求。`ui.get_context`、`ui.command_status` 保留给框架。页面观察数据最多 16 KiB，结果最多 64 KiB。profile 的 `context_schema`、浏览器对象的 `context` / `context_revision` 及模型能力 `ui.get_context` 保留现有契约名称，仅指当前页面观察数据，不是 Agent 会话上下文。
 
-profile 由服务端发布，在线浏览器不能新增模型可用能力。组合 release 固定前端 profile 和后端 fingerprint。托管后端恢复不可变 release；静态后端契约或绑定发生变更时，旧组合 run 在执行前以 `web_base_contract_changed` 拒绝，不能静默接受新契约。新任务使用新版本。别名不能改绑到其他业务包，改绑时使用新别名。
+profile 由服务端发布，在线浏览器不能新增模型可用能力。纯浏览器 release 固定前端 profile；组合 release 还固定后端 fingerprint。托管后端恢复不可变 release；静态后端契约或绑定发生变更时，旧组合 run 在执行前以 `web_base_contract_changed` 拒绝，不能静默接受新契约。新任务使用新版本。别名不能改绑到其他业务包，也不能在组合与纯浏览器之间切换；改变接入模式时使用新别名。
 
 handler 语义变化时更新 `handler_version` 和 profile 版本。注册版本必须匹配当前 profile；旧 run 保留原契约。页面重载不会将未确认的旧动作迁移到新 generation。恢复连接时若当前 profile digest 与旧会话不同，服务端在改变 generation 前返回 `browser_profile_changed`。SDK 发出 `connection: {status: "profile_changed"}`，并尝试按当前 handler 注册替代旧连接；仍有未结束任务或不确定动作时保留旧绑定并返回相应错误。
 
@@ -152,7 +187,7 @@ await client.send("查询待处理订单", { clientId: client.id() });
 
 handler 在连接前注册，返回符合 output Schema 的结果；实际业务写入须在后端再次校验权限，可用 `commandId` 作为业务幂等键。`getPageObservation` 返回当前页面、筛选、选中项等数据，排除 cookie、token 和无关敏感数据；手动改变页面后调用 `updatePageObservation`。这些接口只能更新页面观察数据，不影响聊天历史、运行检查点或 Agent 上下文选择。
 
-配置 `getPageObservation` 时，SDK 每次心跳检查页面变化，并在 handler 前后同步；内容不变时不增加页面版本。页面观察的外层 `revision` 仅用于浏览器桥。如果业务 API 自己有乐观锁版本，在观察和动作参数中使用不同字段名，例如 `activityRevision` 与 `expectedRevision`，并在能力说明中写清来源。每个批次执行一个宿主浏览器动作，下一宿主动作前读取一次 `ui.get_context`。一次成功的观察已满足下一动作的要求；内置 `ui.get_context`、`ui.command_status` 是服务端观察，本身不要求前置页面观察。这两个动态读取能力可在同一任务再次读取，仍受总轮次与工具预算约束；缺少事实字段时用 `inspect_fact`，不能靠反复读取同一页面推进任务。
+配置 `getPageObservation` 时，SDK 每次心跳检查页面变化，并在 handler 前后同步；内容不变时不增加页面版本。页面观察的外层 `revision` 仅用于浏览器桥。如果业务 API 自己有乐观锁版本，在观察和动作参数中使用不同字段名，例如 `activityRevision` 与 `expectedRevision`，并在能力说明中写清来源。每个批次执行一个宿主浏览器动作，下一宿主动作前读取一次 `ui.get_context`。一次成功的观察已满足下一动作的要求；内置 `ui.get_context`、`ui.command_status` 是服务端观察，本身不要求前置页面观察。这两个动态读取能力，以及声明为 `effect: "read"` 的宿主浏览器动作，可在同一任务再次读取以核对页面或业务变化，仍受总轮次与工具预算约束；业务写保留重复调用保护。缺少事实字段时用 `inspect_fact`，不能靠反复读取同一页面推进任务。
 
 handler 只有在能证明没有提交业务副作用时，才能抛出 SDK 导出的 `AgenstraActionError(code, message)`，例如执行前权限/版本检查失败，或原后端明确拒绝请求。SDK 将它记录为 `failed`；普通异常仍为 `unknown`。不要把网络超时、连接中断或未知服务端错误包装成确定失败。只读查询出错可报告确定失败。业务已保存之后的显示失败应通过原业务查询和回执恢复处理，不能重发写命令。页面更新和装饰动画需要有界等待，后台窗口可能暂停 `requestAnimationFrame`，不能靠它作为业务完成的唯一证据。
 
@@ -180,7 +215,7 @@ SDK 的 `id()` 在没有 `crypto.randomUUID` 的 HTTP 页面使用 `crypto.getRa
 
 每条消息以稳定 ID 创建独立 run，有限历史作为数据提供给模型；业务数据应重新查询，不复用旧 Fact 引用。同一会话只执行一个任务，其余 FIFO 排队。绑定在 run 可被 worker 读取前持久化，模型不能选其他 tab。
 
-模型先读取 `ui.get_context`；SDK 在执行前刷新页面观察数据。服务端 begin 检查 generation、revision、当前授权、取消状态和审批参数，只有一次认领允许执行。动作初始 receipt 只表示已接收；现有 Host 异步轮询得到实际结果，字段在 `result` 中。
+模型先读取 `ui.get_context`；SDK 在执行前刷新页面观察数据。服务端 begin 检查 generation、revision、当前授权、取消状态和审批参数，只有一次认领允许执行。动作初始 receipt 只表示已接收；现有 Host 异步轮询得到实际结果。完成回执的 Fact 来源为 `ui.command_status`，回执位于 `data`，业务输出位于 `data.result`；例如对象 ID 引用使用路径 `["data", "result", "id"]`。成功断言应同时核对完成回执的 `data.status` 和实际业务字段，不能要求初始动作 Fact 含完成结果。参数 `$fact_value` 和最终 `result_refs` 都从完整 Fact 的真实路径解析；最终引用只接受已引用 Fact 中实际存在的标量业务 ID。无需对象引用时可以省略 `result_refs`。引用不合法会给模型纠正反馈，校验要求保持不变。
 
 ```mermaid
 stateDiagram-v2
@@ -274,3 +309,9 @@ stop();
 ## 最小接入套件与验收
 
 独立服务、票据助手、标准组件、页面动作类型生成、任务诊断和验收 CLI 的完整路径见[快速接入指南](quick-integration.md)。`client.getRunDiagnostics(id)` 使用同样的 owner 和 integration 绑定检查。
+
+`findings[].recovered` 表示该错误有明确的后续恢复证据，`actionable` 表示仍需处理。诊断保留恢复前的错误记录；同一错误类别存在未恢复记录时优先显示待处理状态。不确定写不能因另一条同参数命令成功就标记恢复，仍需原命令的权威回执。标准组件显示“已恢复”并省略已恢复记录的当前操作建议；可通过 `subtitle`、`emptyTitle`、`emptyHint`、`placeholder` 配置业务文案，回答支持安全的表格、列表、加粗及代码语法。
+
+### 宿主快捷键与 Shadow DOM
+
+标准聊天组件使用 Shadow DOM。宿主在 document/window 注册的全局快捷键不能只通过 `event.target.closest('input, textarea')` 排除输入框：浏览器会将 target 重定向为 `agenstra-chat`。应检查 `event.composedPath()` 中的真实输入元素，防止用户在聊天输入框按空格、Enter 等键时触发原软件业务操作。接入验收应包括这一项，并确认收起面板不会中断已经提交的操作。
