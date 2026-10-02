@@ -63,6 +63,7 @@ type AgentHost struct {
 	Store                  *SQLiteStore
 	ProviderFactory        ProviderFactory
 	Model                  DecisionModel
+	CompletionValidator    CompletionValidator
 	PolicyResolver         PolicyResolver
 	ReleaseResolver        ReleaseResolver
 	ReleaseProviderFactory ReleaseProviderFactory
@@ -901,6 +902,7 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 		return run, hostError("pack_changed")
 	}
 	runtime := &AgentRuntime{Provider: provider, Model: h.Model, Grants: policy.GrantedCapabilities, OriginPackID: run.PackID, ConnectionID: NewID(), Durable: true, MaxModelRounds: h.Settings.MaxModelRounds, MaxToolCalls: h.Settings.MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.Settings.MaxContextCharacters}
+	runtime.CompletionValidator = h.CompletionValidator
 	run, e = h.prepareMemories(ctx, run)
 	if e != nil {
 		return run, e

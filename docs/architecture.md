@@ -52,6 +52,8 @@ flowchart TB
 
 ## 3. 持久执行语义
 
+最终回答除引用身份检查外，可由宿主设置 `CompletionValidator` 校验业务结果状态、必需证据或回答内容。失败反馈回到同一决策循环，并消耗原有预算；详情及真实模型评测入口见[完成校验与模型评测](completion-evaluation.md)。
+
 HTTP 入口通过 `AgentHost` 使用同一 ReAct 状态机。Host 把运行、轮次、观察、待调用、调用参数哈希、Fact、事件和审批状态写入 SQLite WAL；外部请求不在数据库写事务中执行。每次 claim 使用带有效期的租约和 fencing token，旧 worker 不能在租约丢失后写回本地状态。
 
 ```mermaid
