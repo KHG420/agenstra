@@ -193,6 +193,12 @@ type CapabilityProvider interface {
 	Invoke(context.Context, string, map[string]any, *InvocationContext) (CapabilityResult, error)
 	Close() error
 }
+
+// ConcurrentCapabilityProvider explicitly opts into simultaneous Invoke calls.
+// Catalogs and request validation must be safe for concurrent reads.
+type ConcurrentCapabilityProvider interface {
+	ConcurrentInvocation(capability string) bool
+}
 type DecisionModel interface {
 	Decide(context.Context, ContextPacket, string) (Decision, error)
 }

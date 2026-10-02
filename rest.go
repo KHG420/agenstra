@@ -237,6 +237,7 @@ func (p *RestPack) Capabilities() map[string]CapabilityDescription { return p.ca
 func (p *RestPack) Skills() map[string]Skill                       { return p.skills }
 func (p *RestPack) SystemPrompt() string                           { return AgentPrompt(p.Manifest.Guidance) }
 func (p *RestPack) Close() error                                   { return nil }
+func (p *RestPack) ConcurrentInvocation(string) bool               { return true }
 func validateRestEndpoint(e RestEndpoint, headers map[string]string) error {
 	if !capNamePattern.MatchString(e.Name) || e.Description == "" || len(e.Description) > 500 {
 		return errors.New("invalid REST capability")
