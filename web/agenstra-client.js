@@ -29,6 +29,7 @@ export class AgenstraClient {
     this.receipts = this.load("receipts") || {};
     this.browserRecovery = this.load("browser_recovery");
     this.chatWatchers = 0;
+  this.runWatchers = new Set();
     this.aborters = new Set();
     this.browserEpoch = 0;
     this.pagehide = () => { this.destroy({ closeSession: false }); };
@@ -374,6 +375,39 @@ export class AgenstraClient {
     if (!this.closed && this.chatWatchers) this.chatTimer = setTimeout(() => this.pollChat(), this.options.pollInterval || 1000);
   }
   getRun(id) { return this.request("/web/v1/runs/" + id); }
+  getRunEvents(id, { after = 0, limit = 100 } = {}) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/events?after=" + after + "&limit=" + limit); }
+  async steerRun(id, text, revision, { requestId = this.id() } = {}) {
+    try { return await this.request("/web/v1/runs/" + encodeURIComponent(id) + "/steer", { method: "POST", body: { request_id: requestId, text, revision } }); }
+    catch (error) { error.requestId = requestId; throw error; }
+  }
+  watchRun(id, callback, { after = 0 } = {}) {
+    if (this.closed) throw new AgenstraError("client_closed");
+    let stopped = false, timer, cursor = after;
+    const stop = () => { stopped = true; clearTimeout(timer); this.runWatchers.delete(stop); };
+    const poll = async () => {
+      if (stopped || this.closed) return;
+      try {
+        // Read status before events so a terminal snapshot cannot hide its
+        // final event. Drain full pages before stopping.
+        const run = await this.getRun(id);
+        if (stopped || this.closed) return;
+        const page = await this.getRunEvents(id, { after: cursor });
+        if (stopped || this.closed) return;
+        const events = page.filter(item => Number.isSafeInteger(item.sequence) && item.sequence > cursor);
+        for (const item of events) cursor = Math.max(cursor, item.sequence);
+        try { callback({ run, events, cursor }); } catch (error) { this.options.onListenerError?.(error); }
+        if (["completed", "failed", "cancelled"].includes(run.status) && page.length < 100) { stop(); return; }
+        timer = setTimeout(poll, page.length === 100 ? 0 : (this.options.pollInterval || 1000));
+      } catch (error) {
+        if (stopped || this.closed) return;
+        this.emit("error", error);
+        timer = setTimeout(poll, this.options.pollInterval || 1000);
+      }
+    };
+    this.runWatchers.add(stop);
+    void poll();
+    return stop;
+  }
   supplyInput(id, field, text, revision) { return this.request("/web/v1/runs/" + id + "/input", { method: "POST", body: { field, text, revision } }); }
   approve(id, invocation, revision, approved) { return this.request("/web/v1/runs/" + id + "/approval", { method: "POST", body: { invocation_id: invocation.invocation_id, arguments_sha256: invocation.arguments_sha256, revision, approved } }); }
   cancelMessage(id) { return this.request("/chat/v1/messages/" + id + "/cancel", { method: "POST", body: {} }); }
@@ -386,6 +420,7 @@ export class AgenstraClient {
     if (this.closed) return;
     this.closed = true;
     clearTimeout(this.browserTimer);clearTimeout(this.chatTimer);
+  for (const stop of this.runWatchers) stop();
     globalThis.removeEventListener?.("pagehide", this.pagehide);
     for (const aborter of this.aborters) aborter.abort();
     this.listeners.clear();

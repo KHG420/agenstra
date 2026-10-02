@@ -3,6 +3,8 @@ export interface BrowserCommand { id: string; run_id: string; session_id: string
 export interface RunSource { pack_id: string; capabilities: string[] }
 export interface ProjectBinding extends RunSource { release: string; subject: string }
 export interface Run { run_id: string; status: string; revision: number; state: JSONObject & { runtime: JSONObject; project_sources?: ProjectBinding[] } }
+export interface RunEvent { sequence: number; created_at: number; event: JSONObject & { kind: string } }
+export interface RunProgressSnapshot { run: Run; events: RunEvent[]; cursor: number }
 export interface ChatConversation { id: string; integration_id: string; created_at: number }
 export interface ChatInput { field?: string; prompt?: string; text: string }
 export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; sources?: RunSource[]; run_id: string; status: string; answer_markdown?: string; input_history?: ChatInput[]; run?: Run }
@@ -28,7 +30,7 @@ export interface ClientOptions {
   fetch?: typeof fetch; storage?: Storage | null; pollInterval?: number;
   onListenerError?(error: unknown): void;
 }
-export class AgenstraError extends Error { code: string; status: number; clientId?: string }
+export class AgenstraError extends Error { code: string; status: number; clientId?: string; requestId?: string }
 /** Only for a failure whose lack of committed side effects the host can prove. */
 export class AgenstraActionError extends Error { constructor(code: string, message?: string); code: string }
 export class AgenstraClient {
@@ -56,6 +58,10 @@ export class AgenstraClient {
   send(text: string, options?: { clientId?: string; sources?: RunSource[] }): Promise<ChatMessage>;
   watchConversation(callback: (snapshot: ConversationSnapshot) => void): () => void;
   getRun(id: string): Promise<Run>;
+  getRunEvents(id: string, options?: { after?: number; limit?: number }): Promise<RunEvent[]>;
+  /** Applied at a safe boundary; reuse requestId when retrying a lost response. */
+  steerRun(id: string, text: string, revision: number, options?: { requestId?: string }): Promise<Run>;
+  watchRun(id: string, callback: (snapshot: RunProgressSnapshot) => void, options?: { after?: number }): () => void;
   supplyInput(id: string, field: string, text: string, revision: number): Promise<Run>;
   approve(id: string, invocation: JSONObject, revision: number, approved: boolean): Promise<Run>;
   cancelMessage(id: string): Promise<ChatMessage>;

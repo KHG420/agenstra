@@ -284,9 +284,17 @@ func (h *AgentHost) save(run StoredRun, state *RuntimeState, fingerprint string,
 	}
 	events := []map[string]any{}
 	if event != nil {
+		if progress := runProgress(state, h.Settings.MaxStagnantRounds); progress != nil {
+			event["progress"] = progress
+		}
+		event["status"] = state.Status
 		events = append(events, event)
 	}
-	return h.Store.Checkpoint(run.RunID, run.OwnerID, run.LeaseToken, envelope, state.Status, wake, invs, artifacts, events)
+	saved, err := h.Store.Checkpoint(run.RunID, run.OwnerID, run.LeaseToken, envelope, state.Status, wake, invs, artifacts, events)
+	if err != nil {
+		return run, err
+	}
+	return saved, nil
 }
 func (h *AgentHost) SupplyInput(ctx context.Context, id, owner, field, text string, revision int) (StoredRun, error) {
 	current, e := h.Get(ctx, id, owner)
@@ -951,7 +959,12 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 			}
 			break
 		}
+		run, _, e = h.applySteering(run, state)
+		if e != nil {
+			return run, e
+		}
 		if len(state.Pending) > 0 {
+			steered := false
 			for i := range state.Pending {
 				item := &state.Pending[i]
 				if item.Status == "succeeded" || item.Status == "failed" {
@@ -968,6 +981,16 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 				if state.Status != "running" {
 					return run, nil
 				}
+				run, steered, e = h.applySteering(run, state)
+				if e != nil {
+					return run, e
+				}
+				if steered {
+					break
+				}
+			}
+			if steered {
+				continue
 			}
 			var wake *float64
 			for _, item := range state.Pending {
@@ -1036,7 +1059,21 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 		if len(state.ModelCalls) > 0 {
 			event["metrics"] = state.ModelCalls[len(state.ModelCalls)-1]
 		}
-		run, e = h.save(run, state, "", nil, event)
+		if len(state.Decisions) > 0 {
+			event["decision_kind"] = state.Decisions[len(state.Decisions)-1]["kind"]
+		}
+		// Enqueue and completion are serialized by the store. A steering request
+		// accepted while the model finishes must reach the next decision.
+		for {
+			run, _, e = h.applySteering(run, state)
+			if e != nil {
+				return run, e
+			}
+			run, e = h.save(run, state, "", nil, event)
+			if !errors.Is(e, errSteeringPending) {
+				break
+			}
+		}
 		if e != nil {
 			return run, e
 		}
