@@ -6,7 +6,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -68,7 +67,9 @@ type MemoryExtractionRequest struct {
 	Existing []MemoryView `json:"existing"`
 	// MaxCharacters includes the extraction system prompt and canonical request.
 	// Hosts populate it; zero uses the default Host budget for direct model calls.
-	MaxCharacters int `json:"-"`
+	MaxCharacters        int   `json:"-"`
+	ModelTokensRemaining int64 `json:"-"`
+	MaxOutputTokens      int   `json:"-"`
 }
 
 // MemoryExtractor is optional for custom models. HTTPJSONDecisionModel implements
@@ -188,7 +189,7 @@ func (h *AgentHost) prepareMemories(ctx context.Context, run StoredRun) (StoredR
 			return run, hostError("run_state_invalid")
 		}
 	}
-	extractor, enabled := h.Model.(MemoryExtractor)
+	_, enabled := h.Model.(MemoryExtractor)
 	for _, input := range inputs {
 		done, err := h.Store.memoryInputDone(run.OwnerID, input)
 		if err != nil {
@@ -209,9 +210,7 @@ func (h *AgentHost) prepareMemories(ctx context.Context, run StoredRun) (StoredR
 		_, extractErr := memoryExtractionInput(&request)
 		var proposals []MemoryProposal
 		if extractErr == nil {
-			extractCtx, cancel := context.WithTimeout(ctx, time.Duration(h.runSettings(run).ModelTimeoutSeconds*1e9))
-			proposals, extractErr = extractor.ExtractMemories(extractCtx, request)
-			cancel()
+			run, proposals, extractErr = h.extractRunMemories(ctx, run, request, input.ID)
 		}
 		if ctx.Err() != nil {
 			return run, ctx.Err()

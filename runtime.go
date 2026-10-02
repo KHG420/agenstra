@@ -509,7 +509,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			return nil
 		}
 		state.RoundsUsed++
-		reservation := ModelCallMetrics{Round: state.RoundsUsed, Attempts: 1, EstimatedInputTokens: int64(len(raw) + len(prompt) + 128), EstimatedOutputTokens: int64(r.MaxModelOutputTokens), ErrorCode: strptr("model_outcome_unknown")}
+		reservation := ModelCallMetrics{Purpose: "decision", Reservation: true, Round: state.RoundsUsed, Attempts: 1, EstimatedInputTokens: int64(len(raw) + len(prompt) + 128), EstimatedOutputTokens: int64(r.MaxModelOutputTokens), ErrorCode: strptr("model_outcome_unknown")}
 		if r.MaxModelTokens > 0 {
 			reservation.EstimatedInputTokens = r.MaxModelTokens - state.ModelUsage.BudgetTokens
 			reservation.EstimatedOutputTokens = 0
@@ -530,6 +530,8 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			metrics = *d.ModelCall
 		}
 		metrics.Round = state.RoundsUsed
+		metrics.Purpose = "decision"
+		metrics.Reservation = false
 		if err != nil {
 			metrics.ErrorCode = strptr(ErrorCode(err))
 		}

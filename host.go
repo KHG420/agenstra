@@ -970,6 +970,10 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 	if e != nil {
 		return run, e
 	}
+	state, e = h.restore(run)
+	if e != nil {
+		return run, e
+	}
 	state.Status = "running"
 	state.ErrorCode = nil
 	run, e = h.save(run, state, fp, nil, map[string]any{"kind": "run_resumed"})

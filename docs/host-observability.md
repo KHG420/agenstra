@@ -7,3 +7,5 @@
 字符、模型 token、累计 run 预算与持久状态字节分别计量。未知容量使用 null；保留量和结果未知的请求不可显示为供应商确认消耗。上下文观测来自最终投影，不在查询时重建或调用模型。
 
 `runtime.context_telemetry` 在最终提示和投影组装后测量。字符组成（含 JSON 框架开销）可相加；候选大小是默认事实预览/观察窗口之后、压力裁剪之前的投影。省略数量包含默认裁剪。必须内容超限也记录测量，不执行模型 IO；完整事实不受影响。投影 ID、轮次和采样时间标识最近一次输入，工具期间不表示预测的下一次输入。
+
+`AgentHost.GetTelemetry` 只读取持久快照并执行 owner/policy 检查。`budget.tokens` 分开供应商报告、估计、活动请求保留和未知结果保留；未配置总预算时 limit/remaining 为 null。保留量继续占用预算。`usage_by_purpose` 区分 decision 与 memory_extraction；辅助调用也计入累计预算，响应丢失保留检查点。

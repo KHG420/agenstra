@@ -3,6 +3,7 @@ package agenstra
 import (
 	"context"
 	"encoding/json"
+	"time"
 	"unicode/utf8"
 )
 
@@ -36,25 +37,43 @@ func memoryExtractionInput(request *MemoryExtractionRequest) ([]byte, error) {
 }
 
 func (m *HTTPJSONDecisionModel) ExtractMemories(ctx context.Context, request MemoryExtractionRequest) ([]MemoryProposal, error) {
+	proposals, _, err := m.ExtractMemoriesMeasured(ctx, request)
+	return proposals, err
+}
+
+func (m *HTTPJSONDecisionModel) ExtractMemoriesMeasured(ctx context.Context, request MemoryExtractionRequest) (proposals []MemoryProposal, metrics ModelCallMetrics, resultErr error) {
+	started := time.Now()
+	ctx = context.WithValue(ctx, modelMetricsKey{}, &metrics)
+	ctx = context.WithValue(ctx, modelTokenBudgetKey{}, request.ModelTokensRemaining)
+	defer func() {
+		metrics.ElapsedMilliseconds = time.Since(started).Milliseconds()
+		if resultErr != nil {
+			metrics.ErrorCode = strptr(ErrorCode(resultErr))
+		}
+	}()
 	input, err := memoryExtractionInput(&request)
 	if err != nil {
-		return nil, err
+		return nil, metrics, err
 	}
-	raw, err := m.requestJSON(ctx, input, memoryExtractionPrompt)
+	model := *m
+	if request.MaxOutputTokens > 0 && (model.MaxOutputTokens <= 0 || request.MaxOutputTokens < model.MaxOutputTokens) {
+		model.MaxOutputTokens = request.MaxOutputTokens
+	}
+	raw, err := model.requestJSON(ctx, input, memoryExtractionPrompt)
 	if err != nil {
-		return nil, err
+		return nil, metrics, err
 	}
 	var response struct {
 		Proposals []MemoryProposal `json:"proposals"`
 	}
 	if !json.Valid(raw) {
-		return nil, hostError("memory_extraction_invalid")
+		return nil, metrics, hostError("memory_extraction_invalid")
 	}
 	if err = strictUnmarshal(raw, &response); err != nil || response.Proposals == nil {
-		return nil, hostError("memory_extraction_invalid")
+		return nil, metrics, hostError("memory_extraction_invalid")
 	}
 	if err = validateProposals(request.Text, response.Proposals); err != nil {
-		return nil, err
+		return nil, metrics, err
 	}
-	return response.Proposals, nil
+	return response.Proposals, metrics, nil
 }
