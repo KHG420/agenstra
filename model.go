@@ -168,6 +168,11 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		if attempt > 0 {
+			if err := observeModelRequest(ctx, ModelRequestProgress{Kind: "model_retry_started", Attempt: attempt + 1}); err != nil {
+				return nil, err
+			}
+		}
 		request := req.Clone(ctx)
 		if metrics := modelMetrics(ctx); metrics != nil {
 			metrics.Attempts++
@@ -210,6 +215,9 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		// Do not retry earlier than the server requested or exceed our wait bound.
 		if !retry || attempt+1 >= attempts || wait > maxDelay {
 			return nil, ModelDecisionError{code}
+		}
+		if err := observeModelRequest(ctx, ModelRequestProgress{Kind: "model_retry_wait", Attempt: attempt + 1, ErrorCode: code, RetryAt: float64(time.Now().Add(wait).UnixNano()) / 1e9}); err != nil {
+			return nil, err
 		}
 		timer := time.NewTimer(wait)
 		select {

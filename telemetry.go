@@ -30,14 +30,16 @@ type RunBudget struct {
 	SecondsRemaining float64               `json:"seconds_remaining"`
 }
 type RunTelemetry struct {
-	ContextPolicy   ContextPolicy      `json:"context_policy"`
-	Schema          string             `json:"schema"`
-	RunID           string             `json:"run_id"`
-	RunRevision     int                `json:"run_revision"`
-	ObservedAt      float64            `json:"observed_at"`
-	Context         *ContextTelemetry  `json:"context"`
-	EffectiveConfig EffectiveRunConfig `json:"effective_config"`
-	Budget          RunBudget          `json:"budget"`
+	Execution       ExecutionTelemetry  `json:"execution"`
+	HostOperations  HostOperationLimits `json:"host_operations"`
+	ContextPolicy   ContextPolicy       `json:"context_policy"`
+	Schema          string              `json:"schema"`
+	RunID           string              `json:"run_id"`
+	RunRevision     int                 `json:"run_revision"`
+	ObservedAt      float64             `json:"observed_at"`
+	Context         *ContextTelemetry   `json:"context"`
+	EffectiveConfig EffectiveRunConfig  `json:"effective_config"`
+	Budget          RunBudget           `json:"budget"`
 }
 
 func countBudget(used, limit int) CounterBudget {
@@ -97,7 +99,7 @@ func (h *AgentHost) telemetry(run StoredRun) (RunTelemetry, error) {
 	if state.ContextPolicy != nil {
 		policy = *state.ContextPolicy
 	}
-	return RunTelemetry{ContextPolicy: policy, Schema: "agenstra.run-telemetry.v1", RunID: run.RunID, RunRevision: run.Revision, ObservedAt: now, Context: state.ContextTelemetry, EffectiveConfig: c, Budget: b}, nil
+	return RunTelemetry{Execution: executionTelemetry(state, run), HostOperations: HostOperationLimits{LeaseSeconds: normalizedRunSettings(h.Settings).LeaseSeconds, MaxConcurrentRuns: normalizedRunSettings(h.Settings).MaxConcurrentRuns}, ContextPolicy: policy, Schema: "agenstra.run-telemetry.v1", RunID: run.RunID, RunRevision: run.Revision, ObservedAt: now, Context: state.ContextTelemetry, EffectiveConfig: c, Budget: b}, nil
 }
 
 // GetTelemetry reads persisted measurements. It does not construct a Provider,

@@ -146,20 +146,21 @@ type ChatInput struct {
 }
 
 type ChatMessage struct {
-	Sources        []RunSource    `json:"sources,omitempty"`
-	ID             string         `json:"id"`
-	ClientID       string         `json:"client_id"`
-	Text           string         `json:"text"`
-	ConversationID string         `json:"conversation_id"`
-	SessionID      string         `json:"session_id,omitempty"`
-	RunID          string         `json:"run_id"`
-	Status         string         `json:"status"`
-	Instruction    string         `json:"instruction,omitempty"`
-	ErrorCode      string         `json:"error_code,omitempty"`
-	AnswerMarkdown string         `json:"answer_markdown,omitempty"`
-	InputHistory   []ChatInput    `json:"input_history,omitempty"`
-	CreatedAt      float64        `json:"created_at"`
-	Run            map[string]any `json:"run,omitempty"`
+	ContextSelection *ConversationContextSelection `json:"context_selection,omitempty"`
+	Sources          []RunSource                   `json:"sources,omitempty"`
+	ID               string                        `json:"id"`
+	ClientID         string                        `json:"client_id"`
+	Text             string                        `json:"text"`
+	ConversationID   string                        `json:"conversation_id"`
+	SessionID        string                        `json:"session_id,omitempty"`
+	RunID            string                        `json:"run_id"`
+	Status           string                        `json:"status"`
+	Instruction      string                        `json:"instruction,omitempty"`
+	ErrorCode        string                        `json:"error_code,omitempty"`
+	AnswerMarkdown   string                        `json:"answer_markdown,omitempty"`
+	InputHistory     []ChatInput                   `json:"input_history,omitempty"`
+	CreatedAt        float64                       `json:"created_at"`
+	Run              map[string]any                `json:"run,omitempty"`
 }
 
 func (w *WebStore) binding(owner, run string) (WebRunBinding, error) {

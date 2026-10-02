@@ -28,37 +28,43 @@ type ExecutionPolicy struct {
 	Delegations          map[string][]string `json:"delegations,omitempty"`
 }
 type HostSettings struct {
-	ContextPolicy              ContextPolicy `json:"context_policy"`
-	ModelContextWindowTokens   int64         `json:"model_context_window_tokens,omitempty"`
-	MaxModelInputTokens        int64         `json:"max_model_input_tokens,omitempty"`
-	ModelOutputReserveTokens   int           `json:"model_output_reserve_tokens,omitempty"`
-	ModelProtocolReserveTokens int64         `json:"model_protocol_reserve_tokens,omitempty"`
-	LeaseSeconds               float64       `json:"lease_seconds"`
-	MaxModelRounds             int           `json:"max_model_rounds"`
-	MaxToolCalls               int           `json:"max_tool_calls"`
-	MaxPollCalls               int           `json:"max_poll_calls"`
-	MaxRunSeconds              float64       `json:"max_run_seconds"`
-	MaxContextCharacters       int           `json:"max_context_characters"`
-	MaxArtifactBytes           int           `json:"max_artifact_bytes"`
-	MaxActiveArtifactBytes     int           `json:"max_active_artifact_bytes"`
-	MaxStateBytes              int           `json:"max_state_bytes"`
-	ModelTimeoutSeconds        float64       `json:"model_timeout_seconds"`
-	InvocationTimeoutSeconds   float64       `json:"invocation_timeout_seconds"`
-	MaxInvocationAttempts      int           `json:"max_invocation_attempts"`
-	RetryIntervalSeconds       float64       `json:"retry_interval_seconds"`
-	ApprovalSeconds            float64       `json:"approval_seconds"`
-	MaxConcurrentRuns          int           `json:"max_concurrent_runs"`
-	MaxModelTokens             int64         `json:"max_model_tokens,omitempty"`
-	MaxModelOutputTokens       int           `json:"max_model_output_tokens,omitempty"`
-	ModelTokenLimitField       string        `json:"model_token_limit_field,omitempty"`
-	MaxStagnantRounds          int           `json:"max_stagnant_rounds,omitempty"`
-	MaxConcurrentTools         int           `json:"max_concurrent_tools,omitempty"`
+	MaxConversationHistoryMessages   int           `json:"max_conversation_history_messages,omitempty"`
+	MaxConversationHistoryCharacters int           `json:"max_conversation_history_characters,omitempty"`
+	MaxConversationMessages          int           `json:"max_conversation_messages,omitempty"`
+	ContextPolicy                    ContextPolicy `json:"context_policy"`
+	ModelContextWindowTokens         int64         `json:"model_context_window_tokens,omitempty"`
+	MaxModelInputTokens              int64         `json:"max_model_input_tokens,omitempty"`
+	ModelOutputReserveTokens         int           `json:"model_output_reserve_tokens,omitempty"`
+	ModelProtocolReserveTokens       int64         `json:"model_protocol_reserve_tokens,omitempty"`
+	LeaseSeconds                     float64       `json:"lease_seconds"`
+	MaxModelRounds                   int           `json:"max_model_rounds"`
+	MaxToolCalls                     int           `json:"max_tool_calls"`
+	MaxPollCalls                     int           `json:"max_poll_calls"`
+	MaxRunSeconds                    float64       `json:"max_run_seconds"`
+	MaxContextCharacters             int           `json:"max_context_characters"`
+	MaxArtifactBytes                 int           `json:"max_artifact_bytes"`
+	MaxActiveArtifactBytes           int           `json:"max_active_artifact_bytes"`
+	MaxStateBytes                    int           `json:"max_state_bytes"`
+	ModelTimeoutSeconds              float64       `json:"model_timeout_seconds"`
+	InvocationTimeoutSeconds         float64       `json:"invocation_timeout_seconds"`
+	MaxInvocationAttempts            int           `json:"max_invocation_attempts"`
+	RetryIntervalSeconds             float64       `json:"retry_interval_seconds"`
+	ApprovalSeconds                  float64       `json:"approval_seconds"`
+	MaxConcurrentRuns                int           `json:"max_concurrent_runs"`
+	MaxModelTokens                   int64         `json:"max_model_tokens,omitempty"`
+	MaxModelOutputTokens             int           `json:"max_model_output_tokens,omitempty"`
+	ModelTokenLimitField             string        `json:"model_token_limit_field,omitempty"`
+	MaxStagnantRounds                int           `json:"max_stagnant_rounds,omitempty"`
+	MaxConcurrentTools               int           `json:"max_concurrent_tools,omitempty"`
 }
 
 func DefaultHostSettings() HostSettings {
-	return HostSettings{LeaseSeconds: 60, MaxModelRounds: 30, MaxToolCalls: 80, MaxPollCalls: 720, MaxRunSeconds: 86400, MaxContextCharacters: 80000, MaxArtifactBytes: 8000000, MaxActiveArtifactBytes: 64000000, MaxStateBytes: 8000000, ModelTimeoutSeconds: 60, InvocationTimeoutSeconds: 300, MaxInvocationAttempts: 3, RetryIntervalSeconds: 5, ApprovalSeconds: 900, MaxConcurrentRuns: 4, MaxStagnantRounds: 8, MaxConcurrentTools: 4}
+	return HostSettings{MaxConversationHistoryMessages: 6, MaxConversationHistoryCharacters: 1500, MaxConversationMessages: 500, LeaseSeconds: 60, MaxModelRounds: 30, MaxToolCalls: 80, MaxPollCalls: 720, MaxRunSeconds: 86400, MaxContextCharacters: 80000, MaxArtifactBytes: 8000000, MaxActiveArtifactBytes: 64000000, MaxStateBytes: 8000000, ModelTimeoutSeconds: 60, InvocationTimeoutSeconds: 300, MaxInvocationAttempts: 3, RetryIntervalSeconds: 5, ApprovalSeconds: 900, MaxConcurrentRuns: 4, MaxStagnantRounds: 8, MaxConcurrentTools: 4}
 }
 func (s HostSettings) Validate() error {
+	if s.MaxConversationHistoryMessages < 0 || s.MaxConversationHistoryMessages > 100 || s.MaxConversationHistoryCharacters < 0 || s.MaxConversationHistoryCharacters > 12000 || s.MaxConversationMessages < 0 || s.MaxConversationMessages > 500 {
+		return errors.New("host_settings_invalid")
+	}
 	if err := s.ContextPolicy.Validate(); err != nil {
 		return err
 	}
@@ -189,6 +195,7 @@ func (h *AgentHost) prepareRun(ctx context.Context, owner, pack, instruction, id
 	delete(runtime, "facts")
 	settings := normalizedRunSettings(h.Settings)
 	info := modelInfo(h.Model)
+	settings.ModelProtocolReserveTokens = max(settings.ModelProtocolReserveTokens, info.ProtocolReserveTokens)
 	if info.ContextWindowTokens != nil && (settings.ModelContextWindowTokens == 0 || *info.ContextWindowTokens < settings.ModelContextWindowTokens) {
 		settings.ModelContextWindowTokens = *info.ContextWindowTokens
 	}
@@ -269,6 +276,7 @@ func (h *AgentHost) restore(run StoredRun) (*RuntimeState, error) {
 	return &state, nil
 }
 func (h *AgentHost) save(run StoredRun, state *RuntimeState, fingerprint string, wake *float64, event map[string]any) (StoredRun, error) {
+	h.recordExecution(state, event)
 	runtime, e := objectOf(state)
 	if e != nil {
 		return run, e
@@ -982,6 +990,14 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 	if e != nil {
 		return run, e
 	}
+	config, configErr := h.effectiveRunConfig(run)
+	if configErr != nil {
+		return run, configErr
+	}
+	currentModel := modelInfo(h.Model)
+	if config.Source == "run_snapshot" && config.Model.Name != "" && config.Model.Name != currentModel.Name {
+		return run, hostError("model_changed")
+	}
 	provider, e := h.openRunProvider(ctx, run)
 	if e != nil {
 		return run, e
@@ -1139,6 +1155,11 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 			return e
 		}
 		modelCtx, cancel := context.WithTimeout(ctx, time.Duration(h.runSettings(run).ModelTimeoutSeconds*1e9))
+		modelCtx = WithModelRequestObserver(modelCtx, func(progress ModelRequestProgress) error {
+			var err error
+			run, err = h.save(run, state, "", nil, JSON{"kind": progress.Kind, "attempt": progress.Attempt, "error_code": progress.ErrorCode, "retry_at": progress.RetryAt})
+			return err
+		})
 		e = runtime.Step(modelCtx, state, before)
 		expired := errors.Is(modelCtx.Err(), context.DeadlineExceeded)
 		cancel()

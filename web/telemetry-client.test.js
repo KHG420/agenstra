@@ -24,3 +24,13 @@ test("context policy requests retain their identity on a lost response", async t
  };
  await assert.rejects(c.setContextPolicy("run-1", policy, 9, { requestId: "request-1" }), error => error.requestId === "request-1");
 });
+
+test("runtime discovery and lifecycle methods use authorized integration/run routes", async t => {
+ const c = new AgenstraClient({ integration: "records", storage: null, getSession: async () => "ticket" });
+ t.after(() => c.destroy({ closeSession: false }));
+ const calls = [];
+ c.request = async (path, options) => { calls.push({ path, options }); return {}; };
+ await c.getRuntimeInfo(); await c.cancelRun("run-1"); await c.resumeRun("run-1"); await c.getArtifact("run-1", "fact-1");
+ assert.deepEqual(calls.map(x => x.path), ["/web/v1/integrations/records/runtime-info", "/web/v1/runs/run-1/cancel", "/web/v1/runs/run-1/resume", "/web/v1/runs/run-1/artifacts/fact-1"]);
+ assert.equal(calls[1].options.method, "POST"); assert.equal(calls[2].options.method, "POST");
+});

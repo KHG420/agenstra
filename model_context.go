@@ -7,10 +7,11 @@ import (
 // ModelInfoProvider is optional. Unknown capacities stay nil; no model-name guesses.
 type ModelInfoProvider interface{ ModelInfo() ModelInfo }
 type ModelInfo struct {
-	Name                string `json:"name,omitempty"`
-	ContextWindowTokens *int64 `json:"context_window_tokens"`
-	MaxInputTokens      *int64 `json:"max_input_tokens"`
-	MaxOutputTokens     *int64 `json:"max_output_tokens"`
+	ProtocolReserveTokens int64  `json:"protocol_reserve_tokens"`
+	Name                  string `json:"name,omitempty"`
+	ContextWindowTokens   *int64 `json:"context_window_tokens"`
+	MaxInputTokens        *int64 `json:"max_input_tokens"`
+	MaxOutputTokens       *int64 `json:"max_output_tokens"`
 }
 type InputMeasurement struct {
 	Tokens           int64
@@ -35,7 +36,7 @@ func modelInfo(model DecisionModel) ModelInfo {
 	return ModelInfo{}
 }
 func (m *HTTPJSONDecisionModel) ModelInfo() ModelInfo {
-	return ModelInfo{Name: m.Model, ContextWindowTokens: knownTokens(m.ContextWindowTokens), MaxInputTokens: knownTokens(m.MaxInputTokens), MaxOutputTokens: knownTokens(int64(m.MaxOutputTokens))}
+	return ModelInfo{ProtocolReserveTokens: m.ProtocolReserveTokens, Name: m.Model, ContextWindowTokens: knownTokens(m.ContextWindowTokens), MaxInputTokens: knownTokens(m.MaxInputTokens), MaxOutputTokens: knownTokens(int64(m.MaxOutputTokens))}
 }
 
 func (m *HTTPJSONDecisionModel) MeasureInput(packet ContextPacket, prompt string) (InputMeasurement, error) {
@@ -103,7 +104,7 @@ func (r *AgentRuntime) tokenProjection(state *RuntimeState, packet ContextPacket
 		if reserve <= 0 {
 			return packet, knownTokens(window), nil, nil, InputMeasurement{}, errors.New("model_output_reserve_required")
 		}
-		available := window - reserve - r.ModelProtocolReserveTokens
+		available := window - reserve - max(r.ModelProtocolReserveTokens, info.ProtocolReserveTokens)
 		if available <= 0 {
 			return packet, knownTokens(window), nil, knownTokens(reserve), InputMeasurement{}, errors.New("context_too_large")
 		}

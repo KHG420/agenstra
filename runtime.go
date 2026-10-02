@@ -822,7 +822,7 @@ func (r *AgentRuntime) Result(state *RuntimeState) RunResult {
 	if status == "queued" || status == "running" {
 		status = "failed"
 	}
-	return RunResult{Status: status, AnswerMarkdown: state.AnswerMarkdown, ErrorCode: state.ErrorCode, InputField: state.InputField, InputPrompt: state.InputPrompt, Facts: state.Facts, Observations: state.Observations, Decisions: state.Decisions, ModelCalls: state.ModelCalls, ModelUsage: state.ModelUsage}
+	return RunResult{ContextTelemetry: state.ContextTelemetry, Progress: runProgress(state, r.MaxStagnantRounds), Status: status, AnswerMarkdown: state.AnswerMarkdown, ErrorCode: state.ErrorCode, InputField: state.InputField, InputPrompt: state.InputPrompt, Facts: state.Facts, Observations: state.Observations, Decisions: state.Decisions, ModelCalls: state.ModelCalls, ModelUsage: state.ModelUsage}
 }
 func (r *AgentRuntime) Run(ctx context.Context, instruction string) (RunResult, error) {
 	state, err := r.NewState(instruction, "")

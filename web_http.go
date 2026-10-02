@@ -127,6 +127,25 @@ func (s *HTTPServer) webHTTP(w http.ResponseWriter, r *http.Request) {
 		s.memoriesHTTP(w, copy, owner, pack)
 		return
 	}
+	if strings.HasPrefix(p, "/web/v1/integrations/") && strings.HasSuffix(p, "/runtime-info") {
+		if r.Method != "GET" {
+			w.WriteHeader(405)
+			return
+		}
+		id := strings.TrimSuffix(strings.TrimPrefix(p, "/web/v1/integrations/"), "/runtime-info")
+		pack, err := integration.integrationPack(id)
+		if err != nil {
+			webError(w, err)
+			return
+		}
+		info, err := s.Host.GetRuntimeInfo(r.Context(), owner, pack)
+		if err != nil {
+			webError(w, err)
+			return
+		}
+		writeJSON(w, 200, info)
+		return
+	}
 	if strings.HasPrefix(p, "/web/v1/runs/") {
 		path := strings.TrimPrefix(p, "/web/v1")
 		id := strings.Split(strings.TrimPrefix(path, "/runs/"), "/")[0]

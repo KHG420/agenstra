@@ -379,6 +379,10 @@ export class AgenstraClient {
     try { return await this.request("/web/v1/runs/" + encodeURIComponent(id) + "/context-policy", { method: "POST", body: { request_id: requestId, revision, policy } }); }
     catch (error) { error.requestId = requestId; throw error; }
   }
+  getRuntimeInfo() { return this.request("/web/v1/integrations/" + encodeURIComponent(this.options.integration) + "/runtime-info"); }
+  cancelRun(id) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/cancel", { method: "POST", body: {} }); }
+  resumeRun(id) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/resume", { method: "POST", body: {} }); }
+  getArtifact(id, artifactId) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/artifacts/" + encodeURIComponent(artifactId)); }
   getRunTelemetry(id) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/telemetry"); }
   getRunEvents(id, { after = 0, limit = 100 } = {}) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/events?after=" + after + "&limit=" + limit); }
   async steerRun(id, text, revision, { requestId = this.id() } = {}) {
