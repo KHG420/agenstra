@@ -2,25 +2,54 @@
 
 Language / 语言: [简体中文](README.zh-CN.md) · **English**
 
-Agenstra is a general-purpose agent framework written in Go that you can deploy independently. Bring existing REST APIs, selected OpenAPI operations, MCP tools, or custom SDK integrations into the agent as **reviewed capability packs**. The framework handles ReAct decisions, tool-call boundaries, per-user authorization, approvals, result provenance, and resumable long-running tasks. The connected services remain responsible for their own data and computations.
+**Make it easier to add an agent to the systems you already run.**
 
-An optional management interface lets administrators validate, publish, activate, and roll back capability packs through a CLI or web page, then configure user connections and grants. Managed releases are fixed by content hash: new runs use the active release, while existing managed runs keep the release they started with. Authorization and connection identity are still checked at execution time.
+Agenstra is an agent framework written in Go for integration with existing applications. It provides decisions, tool calls, conversation context, authorization, approvals, and task recovery so your application can offer a natural-language task interface. Your existing APIs, SDKs, and page actions perform the actual work, connected through REST, OpenAPI, MCP, or a custom adapter.
 
-Optional web integration adds headless chat and conversation APIs, a framework-independent JavaScript SDK, a conversation queue, and a browser control bridge. The framework owns agent context and checkpoint recovery; hosts select a conversation by ID and supply their own chat UI, authenticated identity, business APIs, page observations, and UI handlers. Authorization, approvals and receipts reuse the existing runtime. See the [Web integration guide (Chinese)](docs/web-integration.md), or run `go run ./examples/web-integration` for a local demo without a model key.
+**You mainly add capability declarations, usage guidance, connection and grant configuration, and small adapters where needed; the framework supplies the agent runtime.** Business rules continue to use your application's existing implementation, and the chat interface can follow its existing design.
 
-Built-in scheduled tasks support one-time timestamps, fixed intervals, and five-field Cron with IANA timezones. Hosts manage schedules through public Go methods or authenticated `/schedules` HTTP APIs, and follow each execution through the existing run APIs. Definitions and history survive restarts; triggering rechecks authorization and preserves approvals. See the [scheduled task integration guide (Chinese)](docs/scheduled-tasks.md).
+Start with the [minimal REST integration tutorial (Chinese)](docs/tutorial.md), or follow the [existing application integration checklist (Chinese)](docs/host-integration.md) to connect a frontend/backend application.
 
-Host-managed memory retains user preferences, lasting constraints, and pack conventions across runs. Explicit defaults take effect immediately; habits demonstrated in three independent inputs automatically become defaults. Hosts can list, edit, forget, and inspect provenance through Go, authenticated HTTP APIs, and the Web SDK. See the [memory design and management guide (Chinese)](docs/memory-management.md).
+## What you need to add
 
-For an existing frontend/backend application, follow the [host integration checklist and lottery reference (Chinese)](docs/host-integration.md). Export the headless client with `node web/export-client.mjs /path/to/host/vendor/agenstra`; the export includes TypeScript declarations and SHA-256 provenance, with no UI or npm runtime dependency.
+| Integration area | What you add | What the framework provides |
+| --- | --- | --- |
+| Existing business APIs | Declare selected APIs in a capability pack with inputs, outputs, effects, and approval requirements; import a draft from OpenAPI when available. | Capability catalogs, ReAct decisions, tool calls, argument validation, and result provenance. |
+| Domain knowledge | Add guidance or skill files as needed to explain prerequisites, units, and result meaning. | Skill reading, context assembly, and references to observed results. |
+| Users and deployment | Configure the model, persistent storage, user connections, and capability grants; integrate the host's verified login identity. | User-scoped runs, authorization checks before calls, approvals, background-job polling, and recovery. |
+| Chat and page actions (optional) | Connect your own chat UI; for page control, also declare frontend actions, supply page observations, and write handlers that call existing functions or APIs. | A headless JavaScript SDK, conversation history and context, message queues, action delivery, and receipt recovery. |
 
-Agenstra can serve a personal tool, a team application, or a larger system. This repository contains the framework, generic tests, deployment templates, guides, and a clearly labeled local demo. **It does not include production business packs, an external model, or credentials.** `deploy/deployment.example.json` is a template; starting it unchanged will not create an agent with working capabilities.
+For REST or MCP interfaces supported by the built-in connectors, integration is mostly declarations and configuration. Add a handler or `CapabilityProvider` adapter when you need to operate an existing page or call a specialized SDK. For backend capabilities alone, use the HTTP API directly without enabling the browser control bridge.
 
-## Scope and architecture
+For example, an order application already has an order-query API and a function that opens an order detail page. Declare the API as a capability and the page operation as a frontend action whose handler calls the existing function. When a user asks to "find pending orders and open order 1001," Agenstra selects capabilities, passes arguments, requests approval as configured, and waits for results. Queries, business permission checks, and navigation still use the application's existing implementation.
 
-Suppose an application already has search, data-transformation, and notification APIs. Once these are declared as capabilities, the agent can search, read actual fields from the returned Fact, call the transformation API, and send a notification if the task calls for one. Agenstra does not hard-code that workflow. The integrator chooses capability boundaries, usage guidance, and authorization policy.
+## Start with an existing operation
+
+1. **Choose one operation.** Connect a well-defined query or action using its existing API and business rules, then add capabilities incrementally.
+2. **Describe how to use it.** Write an `agenstra.rest-pack.v2` manifest or import selected `operationId` values from OpenAPI 3.0/3.1 JSON; for MCP, pin selected tool contracts by hash. Review inputs, outputs, effects, credential bindings, idempotency, approvals, and long-running operation states. Add skill files as needed and record their SHA-256 hashes.
+3. **Bind runtime configuration.** Set pack paths, the model connection, a persistent database, per-user grants, and credential references. Explicitly decide whether external data may be sent to the model.
+4. **Connect the task interface.** Start the framework service and submit tasks through the HTTP API. For chat, connect the JS SDK and your UI; for page control, also register frontend actions and handlers. The framework manages conversation context and run checkpoints; the host selects conversations by ID.
+5. **Validate real tasks.** Check capability selection, permissions, approvals, error paths, and result quality against the real model and APIs. Add further business capabilities through the same packs and adapter interfaces.
+
+See the [REST tutorial (Chinese)](docs/tutorial.md) and [Web integration guide (Chinese)](docs/web-integration.md) for complete examples. Export the SDK with `node web/export-client.mjs /path/to/host/vendor/agenstra` to pin JavaScript, TypeScript declarations, and SHA-256 records in the host, with no npm runtime dependency.
+
+## Try the integration locally
+
+With Go 1.26+, run this from the repository root:
+
+```sh
+go run ./examples/web-integration
+```
+
+Open `http://127.0.0.1:8092` and send "查询待处理订单并显示列表" or "打开订单 1001". The example connects a backend API and page actions using demo data and a fixed `DecisionModel`, so no model key is required. Its chat UI belongs to the demo application; use your own UI, identities, business APIs, and model for an actual integration. See the [example README (Chinese)](examples/web-integration/README.md).
+
+## Architecture and operating scope
+
+Agenstra can run as an independent service accessed through HTTP APIs; Go applications can also integrate through its public interfaces. The integrator chooses capability boundaries, usage guidance, and authorization policy. The runtime selects each next action from the task and observed results.
 
 The current durable host targets **one node with persistent local storage and SQLite WAL**. A deployment can serve multiple users with separate connections and capability grants. One project owns one pack; a durable task can explicitly compose authorized capabilities from other projects using verified per-user connections and restricted task scopes. See [cross-project tasks](docs/cross-project-tasks.md). All capabilities, including reads, require explicit grants. Distributed high availability, automatic retention cleanup, model quality, and the correctness of external computations require separate design or validation.
+
+This repository contains the framework, generic tests, deployment templates, guides, and a local demo. Production use requires your own business packs, model connection, and credentials; `deploy/deployment.example.json` is a configuration template.
 
 ```mermaid
 flowchart LR
@@ -44,16 +73,6 @@ flowchart LR
 | `CapabilityRegistry` | Optionally stores validated immutable releases, the active release, user connections, and a management audit trail. |
 
 See the [architecture guide (Chinese)](docs/architecture.md) for the execution and security boundaries.
-
-## Connect existing capabilities
-
-1. Select the APIs you already operate. Write an `agenstra.rest-pack.v2` manifest for REST, import only named `operationId` values from an OpenAPI 3.0/3.1 JSON document, or pin reviewed MCP tool contracts by hash.
-2. Review each capability's `effect` (`read`, `compute`, `write`, or `destructive`), JSON Schema, credential binding, idempotency, approval requirement, and long-running operation states. Importers produce drafts; they do not infer access rights.
-3. Optionally add skill files explaining units, prerequisites, exceptional cases, and how to interpret results. The manifest records each file's SHA-256. A skill provides guidance, never permission.
-4. Configure pack paths, per-user capability grants, credential environment-variable references, and whether external data may be sent to the model. Run the same framework code with your configuration.
-5. Validate representative tasks against the real model and services, including authorization, error paths, API contracts, and answer quality.
-
-For a complete REST example, see the [integration tutorial (Chinese)](docs/tutorial.md). The [deployment guide (Chinese)](docs/deployment.md) covers production configuration, Docker Compose, HTTP status handling, and operations. To manage releases and grants without restarting the service, follow the [capability management guide (Chinese)](docs/capability-management.md).
 
 ## Quick start
 
@@ -108,6 +127,20 @@ curl -sS http://127.0.0.1:8091/runs \
 ```
 
 For one user, the same `request_id` and request content return the same run; reusing the ID with different content conflicts. The response includes `run_id`, `status`, and `revision`. Follow progress with `GET /runs/{run_id}` and retrieve a complete result with `GET /runs/{run_id}/artifacts/{fact_id}`. See the [deployment guide (Chinese)](docs/deployment.md) for status and approval examples.
+
+## Use built-in capabilities as needed
+
+Start with capability packs and the run API, then enable modules to match your application's needs.
+
+| Capability | What it provides | Integration guide |
+| --- | --- | --- |
+| Web integration | Headless chat and conversation APIs, framework-managed context, message queues, a JS SDK, and optional browser control. | [Web integration (Chinese)](docs/web-integration.md) |
+| Scheduled tasks | One-time timestamps, fixed intervals, and five-field Cron with IANA timezones; persistent definitions and history, with authorization rechecked at trigger time. | [Scheduled tasks (Chinese)](docs/scheduled-tasks.md) |
+| Memory | Preferences, lasting constraints, and pack conventions across runs. Explicit defaults take effect immediately; habits from three independent inputs can become defaults. Hosts can inspect, edit, forget, and trace their origins. | [Memory management (Chinese)](docs/memory-management.md) |
+| Capability management (optional) | Shared CLI/Web drafts, validation, publishing, activation, rollback, user connections, and grants. | [Capability management (Chinese)](docs/capability-management.md) |
+| Cross-project tasks | Explicit selection of other projects' capabilities, executed with verified target identities, intersected grants, and restricted task scopes. | [Cross-project tasks (Chinese)](docs/cross-project-tasks.md) |
+
+See the [deployment guide (Chinese)](docs/deployment.md) for production configuration, containers, HTTP status handling, and operations.
 
 ## Manage capabilities while running (optional)
 
