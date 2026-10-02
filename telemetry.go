@@ -30,6 +30,7 @@ type RunBudget struct {
 	SecondsRemaining float64               `json:"seconds_remaining"`
 }
 type RunTelemetry struct {
+	ContextPolicy   ContextPolicy      `json:"context_policy"`
 	Schema          string             `json:"schema"`
 	RunID           string             `json:"run_id"`
 	RunRevision     int                `json:"run_revision"`
@@ -92,7 +93,11 @@ func (h *AgentHost) telemetry(run StoredRun) (RunTelemetry, error) {
 		b.Tokens.Limit = &limit
 		b.Tokens.Remaining = &remaining
 	}
-	return RunTelemetry{Schema: "agenstra.run-telemetry.v1", RunID: run.RunID, RunRevision: run.Revision, ObservedAt: now, Context: state.ContextTelemetry, EffectiveConfig: c, Budget: b}, nil
+	policy := c.Settings.ContextPolicy
+	if state.ContextPolicy != nil {
+		policy = *state.ContextPolicy
+	}
+	return RunTelemetry{ContextPolicy: policy, Schema: "agenstra.run-telemetry.v1", RunID: run.RunID, RunRevision: run.Revision, ObservedAt: now, Context: state.ContextTelemetry, EffectiveConfig: c, Budget: b}, nil
 }
 
 // GetTelemetry reads persisted measurements. It does not construct a Provider,

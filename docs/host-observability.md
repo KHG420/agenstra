@@ -25,3 +25,9 @@ const stop = client.watchRun(runId, ({ run, telemetry, events }) => {
 `model_context_window_tokens`、`max_model_input_tokens`、`model_output_reserve_tokens` 和 `model_protocol_reserve_tokens` 可显式配置。容量未知为 null。窗口已知时必须提供输出预留或已知输出上限；有效输入上限取宿主/模型输入限制与窗口扣除输出和协议预留的较小值。超限投影继续裁剪，必需内容仍超限则禁止模型 IO。
 
 自定义模型可实现可选 `ModelInfoProvider` 与 `ModelInputMeasurer`，现有 `DecisionModel` 不变。HTTP 模型支持 `CountInputTokens` 回调，接收实际序列化协议正文；未提供时以 UTF-8 字节加 framing 估计并明确标注，不能等同供应商账单。响应报告值另存 `reported_input_tokens`。
+
+## 投影策略控制
+
+`settings.context_policy` 支持 `trigger_ratio` 和 `target_ratio`；默认 0/0 延续硬上限行为，启用时要求 0 < target <= trigger <= 1。token 上限已知时按 token 比例触发，否则按字符比例。目标是软目标，必要信息放不进目标但能放进硬上限时继续执行，并返回 target_met=false。strategy=projection，原始状态保持完整。
+
+`POST /runs/{id}/context-policy`（Web 同路径前缀）接受 `{request_id, revision, policy}`；SDK `setContextPolicy(id, policy, revision, {requestId})`。请求写入现有事件日志，下一次决策前应用；复用 requestId 可恢复丢失响应。只改变投影软策略，硬上限与实时授权不受影响。指标返回实际策略、单位、原因和目标达成状态。

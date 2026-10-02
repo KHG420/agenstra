@@ -158,7 +158,7 @@ func serverError(w http.ResponseWriter, e error) {
 			status = 403
 		case "authorization_unavailable", "connection_unavailable", "reconciliation_unavailable":
 			status = 503
-		case "source_scope_invalid", "schedule_invalid", "invalid_limit", "invalid_page", "memory_invalid", "steering_invalid", "reconciliation_invalid":
+		case "source_scope_invalid", "schedule_invalid", "invalid_limit", "invalid_page", "memory_invalid", "steering_invalid", "reconciliation_invalid", "context_policy_invalid":
 			status = 422
 		}
 		apiError(w, status, host.Code, false)
@@ -346,6 +346,26 @@ func (s *HTTPServer) runHTTP(w http.ResponseWriter, r *http.Request, owner strin
 		return
 	}
 	switch parts[1] {
+	case "context-policy":
+		if len(parts) != 2 || r.Method != "POST" {
+			w.WriteHeader(405)
+			return
+		}
+		var body struct {
+			RequestID string        `json:"request_id"`
+			Revision  *int          `json:"revision"`
+			Policy    ContextPolicy `json:"policy"`
+		}
+		if decodeBody(r, &body) != nil || body.Revision == nil {
+			apiError(w, 422, "context_policy_invalid", false)
+			return
+		}
+		run, err := s.Host.SetContextPolicy(ctx, id, owner, body.RequestID, *body.Revision, body.Policy)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, 202, runView(run, s.Host))
 	case "telemetry":
 		if len(parts) != 2 || r.Method != "GET" {
 			w.WriteHeader(405)

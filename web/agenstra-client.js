@@ -375,6 +375,10 @@ export class AgenstraClient {
     if (!this.closed && this.chatWatchers) this.chatTimer = setTimeout(() => this.pollChat(), this.options.pollInterval || 1000);
   }
   getRun(id) { return this.request("/web/v1/runs/" + id); }
+  async setContextPolicy(id, policy, revision, { requestId = this.id() } = {}) {
+    try { return await this.request("/web/v1/runs/" + encodeURIComponent(id) + "/context-policy", { method: "POST", body: { request_id: requestId, revision, policy } }); }
+    catch (error) { error.requestId = requestId; throw error; }
+  }
   getRunTelemetry(id) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/telemetry"); }
   getRunEvents(id, { after = 0, limit = 100 } = {}) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/events?after=" + after + "&limit=" + limit); }
   async steerRun(id, text, revision, { requestId = this.id() } = {}) {

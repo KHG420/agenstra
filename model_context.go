@@ -13,8 +13,10 @@ type ModelInfo struct {
 	MaxOutputTokens     *int64 `json:"max_output_tokens"`
 }
 type InputMeasurement struct {
-	Tokens int64
-	Source string
+	Tokens           int64
+	Source           string
+	ProjectionReason string
+	TargetMet        bool
 }
 type ModelInputMeasurer interface {
 	MeasureInput(ContextPacket, string) (InputMeasurement, error)
@@ -61,9 +63,9 @@ func (m *HTTPJSONDecisionModel) measurePayload(raw []byte) (InputMeasurement, er
 		if err != nil || n < 0 {
 			return InputMeasurement{}, errors.New("model_context_measurement_failed")
 		}
-		return InputMeasurement{n, "tokenizer"}, nil
+		return InputMeasurement{Tokens: n, Source: "tokenizer"}, nil
 	}
-	return InputMeasurement{int64(len(raw) + 128), "utf8_bytes_estimate"}, nil
+	return InputMeasurement{Tokens: int64(len(raw) + 128), Source: "utf8_bytes_estimate"}, nil
 }
 func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (JSON, error) {
 	payload := JSON{"model": m.Model, "response_format": JSON{"type": "json_object"}, "messages": []any{JSON{"role": "system", "content": prompt}, JSON{"role": "user", "content": string(input)}}}
@@ -117,15 +119,27 @@ func (r *AgentRuntime) tokenProjection(state *RuntimeState, packet ContextPacket
 			return model.MeasureInput(p, prompt)
 		}
 		raw, _ := CanonicalJSON(p)
-		return InputMeasurement{int64(len(raw) + len(prompt) + 128), "utf8_bytes_estimate"}, nil
+		return InputMeasurement{Tokens: int64(len(raw) + len(prompt) + 128), Source: "utf8_bytes_estimate"}, nil
 	}
 	if limit > 0 {
 		packet.MaxModelInputTokens = limit
 	}
 	m, err := measure(packet)
-	for i := 0; err == nil && limit > 0 && m.Tokens > limit && i < 24; i++ {
+	goal := limit
+	reason := "none"
+	if limit > 0 && m.Tokens > limit {
+		reason = "hard_limit"
+	}
+	policy := r.contextPolicy(state)
+	if limit > 0 && policy.TriggerRatio > 0 && float64(m.Tokens) >= float64(limit)*policy.TriggerRatio {
+		goal = max(int64(1), int64(float64(limit)*policy.TargetRatio))
+		if reason == "none" {
+			reason = "soft_threshold"
+		}
+	}
+	for i := 0; err == nil && limit > 0 && m.Tokens > goal && i < 24; i++ {
 		before := contextCharacters(packet)
-		allowance := int(float64(before)*float64(limit)/float64(m.Tokens)) - 16
+		allowance := int(float64(before)*float64(goal)/float64(m.Tokens)) - 16
 		next := budgetContext(packet, state, max(0, allowance))
 		packet = next
 		m, err = measure(packet)
@@ -133,5 +147,7 @@ func (r *AgentRuntime) tokenProjection(state *RuntimeState, packet ContextPacket
 			break
 		}
 	}
+	m.ProjectionReason = reason
+	m.TargetMet = limit == 0 || m.Tokens <= goal
 	return packet, knownTokens(window), knownTokens(limit), knownTokens(reserve), m, err
 }
