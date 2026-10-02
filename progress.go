@@ -1,0 +1,136 @@
+package agenstra
+
+import (
+	"crypto/sha256"
+	"fmt"
+	"slices"
+	"sort"
+)
+
+// Progress is an evidence-derived view, not a model-authored task plan.
+type ProgressItem struct {
+	Capability string  `json:"capability"`
+	CallRef    string  `json:"call_ref,omitempty"`
+	Status     string  `json:"status"`
+	FactID     *string `json:"fact_id,omitempty"`
+	ErrorCode  *string `json:"error_code,omitempty"`
+}
+
+type RunProgress struct {
+	Completed         []ProgressItem `json:"completed,omitempty"`
+	Pending           []ProgressItem `json:"pending,omitempty"`
+	Blocked           []ProgressItem `json:"blocked,omitempty"`
+	CompletedCount    int            `json:"completed_count"`
+	BlockedCount      int            `json:"blocked_count"`
+	OmittedItems      int            `json:"omitted_items"`
+	NoProgressRounds  int            `json:"no_progress_rounds"`
+	StagnationWarning bool           `json:"stagnation_warning,omitempty"`
+}
+
+type ProgressTracker struct {
+	Fingerprint      string   `json:"fingerprint"`
+	NoProgressRounds int      `json:"no_progress_rounds"`
+	Inspections      []string `json:"inspections,omitempty"`
+}
+
+func progressKey(value any) string {
+	raw, _ := CanonicalJSON(value)
+	return fmt.Sprintf("%x", sha256.Sum256(raw))
+}
+
+func recordInspection(state *RuntimeState, value any) {
+	if state.Progress == nil {
+		state.Progress = &ProgressTracker{}
+	}
+	key := progressKey(value)
+	if !slices.Contains(state.Progress.Inspections, key) {
+		state.Progress.Inspections = append(state.Progress.Inspections, key)
+	}
+}
+
+func updateProgress(state *RuntimeState, limit int) bool {
+	if state.Progress == nil {
+		state.Progress = &ProgressTracker{}
+	}
+	// Deduplicate content: new call refs or Fact IDs alone are not progress.
+	keys := map[string]bool{}
+	for _, fact := range state.Facts {
+		keys[progressKey(JSON{"capability": fact.SourceCapability, "value": fact.Value})] = true
+	}
+	for _, skill := range state.LoadedSkills {
+		keys["skill:"+skill] = true
+	}
+	for _, inspection := range state.Progress.Inspections {
+		keys["inspection:"+inspection] = true
+	}
+	for _, followup := range state.Followups {
+		keys["input:"+progressKey(followup)] = true
+	}
+	ordered := make([]string, 0, len(keys))
+	for key := range keys {
+		ordered = append(ordered, key)
+	}
+	sort.Strings(ordered)
+	fingerprint := progressKey(ordered)
+	if state.Progress.Fingerprint == fingerprint {
+		state.Progress.NoProgressRounds++
+	} else {
+		state.Progress.Fingerprint = fingerprint
+		state.Progress.NoProgressRounds = 0
+	}
+	return state.Progress.NoProgressRounds >= limit
+}
+
+func runProgress(state *RuntimeState, limit int) *RunProgress {
+	if len(state.Observations) == 0 && len(state.Pending) == 0 && len(state.Decisions) == 0 && (state.Progress == nil || state.Progress.NoProgressRounds == 0) {
+		return nil
+	}
+	view := &RunProgress{}
+	if state.Progress != nil {
+		view.NoProgressRounds = state.Progress.NoProgressRounds
+		view.StagnationWarning = view.NoProgressRounds >= max(2, limit-2)
+	}
+	active := map[string]bool{}
+	for _, item := range state.Pending {
+		if item.Status != "succeeded" && item.Status != "failed" {
+			active[item.Call.CallRef] = true
+			view.Pending = append(view.Pending, ProgressItem{Capability: item.Call.Capability, CallRef: item.Call.CallRef, Status: item.Status, ErrorCode: item.ErrorCode})
+		}
+	}
+	latest := map[string]int{}
+	for i, obs := range state.Observations {
+		latest[obs.CallRef] = i
+	}
+	// Keep the last successful result of each capability so a busy recent tool
+	// does not crowd earlier work out of the observation window.
+	completed := map[string]ProgressItem{}
+	blocked := map[string]ProgressItem{}
+	for i, obs := range state.Observations {
+		if latest[obs.CallRef] != i || active[obs.CallRef] {
+			continue
+		}
+		item := ProgressItem{Capability: obs.Capability, CallRef: obs.CallRef, Status: obs.Status, FactID: obs.FactID, ErrorCode: obs.ErrorCode}
+		if obs.Status == "succeeded" {
+			view.CompletedCount++
+			completed[obs.Capability] = item
+			delete(blocked, obs.Capability)
+		} else {
+			view.BlockedCount++
+			blocked[obs.Capability] = item
+		}
+	}
+	project := func(items map[string]ProgressItem) []ProgressItem {
+		out := make([]ProgressItem, 0, len(items))
+		for _, item := range items {
+			out = append(out, item)
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Capability < out[j].Capability })
+		view.OmittedItems += max(0, len(out)-8)
+		return out[:min(8, len(out))]
+	}
+	view.Completed = project(completed)
+	view.Blocked = project(blocked)
+	return view
+}
+
+const progressUsagePrompt = "progress summarizes observed outcomes; pending is unfinished. Reuse cited Facts. On stagnation_warning, change approach or explain the verified limitation."

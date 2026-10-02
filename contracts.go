@@ -326,6 +326,7 @@ type ContextPacket struct {
 	Memories             []MemoryView      `json:"memories,omitempty"`
 	ModelTokensRemaining int64             `json:"model_tokens_remaining,omitempty"`
 	MaxModelOutputTokens int               `json:"max_model_output_tokens,omitempty"`
+	Progress             *RunProgress      `json:"progress,omitempty"`
 }
 type ToolCall struct {
 	CallRef    string `json:"call_ref"`
@@ -509,6 +510,7 @@ type RuntimeState struct {
 	InputPrompt         *string            `json:"input_prompt"`
 	ModelCalls          []ModelCallMetrics `json:"model_calls,omitempty"`
 	ModelUsage          ModelUsage         `json:"model_usage"`
+	Progress            *ProgressTracker   `json:"progress_tracker,omitempty"`
 }
 type RunResult struct {
 	Status         string             `json:"status"`
