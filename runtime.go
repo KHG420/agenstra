@@ -30,6 +30,7 @@ type AgentRuntime struct {
 	MaxToolCalls               int
 	MaxRepeatedCall            int
 	MaxContextCharacters       int
+	MaxContextCapabilities     int
 	Memories                   []MemoryView
 	CompletionValidator        CompletionValidator
 	MaxModelTokens             int64
@@ -144,7 +145,7 @@ func ResolveArgument(value any, facts map[string]Fact, connectionID string, chec
 		if idRef {
 			return id, nil
 		}
-		selected, err := valueAt(fact.Value, path)
+		selected, err := valueAt(modelFactValue(fact), path)
 		if err != nil {
 			return nil, errors.New("fact_reference_path_invalid")
 		}
@@ -199,6 +200,7 @@ func pathIndex(v any) (int, bool) {
 	return 0, false
 }
 func factView(f Fact, budget int) FactView {
+	f.Value = modelFactValue(f)
 	omitted := [][]any{}
 	var visit func(any, []any, int) any
 	visit = func(value any, path []any, n int) any {
@@ -302,7 +304,7 @@ func arrayOmissions(facts []Fact, views []FactView) []string {
 	for i := len(facts) - 1; i >= 0; i-- {
 		hasOmissions = hasOmissions || len(views[i].OmittedPaths) > 0
 		for _, path := range views[i].OmittedPaths {
-			selected, err := valueAt(facts[i].Value, path)
+			selected, err := valueAt(modelFactValue(facts[i]), path)
 			if err != nil {
 				continue
 			}
@@ -344,11 +346,7 @@ func arrayOmissions(facts []Fact, views []FactView) []string {
 func (r *AgentRuntime) contextCandidate(state *RuntimeState) ContextPacket {
 	r.defaults()
 	caps := []JSON{}
-	names := make([]string, 0, len(r.Provider.Capabilities()))
-	for name := range r.Provider.Capabilities() {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names, catalogTotal, searchResults := selectedCapabilityNames(r.Provider.Capabilities(), r.Grants, state.Instruction+" "+strings.Join(state.Followups, " "), state, r.MaxContextCapabilities)
 	for _, name := range names {
 		cap := r.Provider.Capabilities()[name]
 		if !r.Grants[cap.Name] {
@@ -373,6 +371,14 @@ func (r *AgentRuntime) contextCandidate(state *RuntimeState) ContextPacket {
 	}
 	obs := []Observation{}
 	omissions := []string{}
+	if r.MaxContextCapabilities > 0 {
+		if catalogTotal > len(caps) {
+			omissions = append(omissions, fmt.Sprintf("capability catalog: showing %d of %d authorized capabilities; use search_capabilities to find omitted capabilities", len(caps), catalogTotal))
+		}
+		if state.CapabilitySearchQuery != "" && len(searchResults) == 0 {
+			omissions = append(omissions, "capability search returned no authorized matches for: "+state.CapabilitySearchQuery)
+		}
+	}
 	start := max(0, len(state.ModelObservations)-12)
 	for _, o := range state.ModelObservations[start:] {
 		raw, _ := CanonicalJSON(o.Arguments)
@@ -410,7 +416,15 @@ func (r *AgentRuntime) contextCandidate(state *RuntimeState) ContextPacket {
 	if r.Durable {
 		features = append(features, "durable_execution")
 	}
+	if r.MaxContextCapabilities > 0 {
+		features = append(features, "capability_search")
+	}
 	packet := ContextPacket{OriginPackID: r.OriginPackID, Schema: "agenstra.context.v1", Instruction: state.Instruction, Capabilities: caps, Facts: views, Observations: obs, RoundIndex: state.RoundsUsed, RoundsRemaining: r.MaxModelRounds - state.RoundsUsed, ToolCallsRemaining: r.MaxToolCalls - state.ToolCallsUsed, Skills: skillViews, LoadedSkills: loaded, InspectedCapability: inspected, InspectedFact: state.InspectedFact, Followups: state.Followups, RuntimeFeatures: features, ContextOmissions: omissions, Memories: append([]MemoryView{}, r.Memories...)}
+	if r.MaxContextCapabilities > 0 {
+		packet.CapabilityCatalogTotal = catalogTotal
+		packet.CapabilitySearchQuery = state.CapabilitySearchQuery
+		packet.CapabilitySearchResults = searchResults
+	}
 	if r.MaxModelTokens > 0 {
 		packet.ModelTokensRemaining = max(0, r.MaxModelTokens-state.ModelUsage.BudgetTokens)
 	}
@@ -636,6 +650,13 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		facts[f.FactID] = f
 	}
 	switch decision.Kind {
+	case "search_capabilities":
+		if r.MaxContextCapabilities <= 0 {
+			Reject(state, "search", "agent.search_capabilities", "capability_search_disabled", nil, "")
+			break
+		}
+		state.CapabilitySearchQuery = decision.Query
+		state.CapabilitySearchResults = searchAuthorizedCapabilities(r.Provider.Capabilities(), r.Grants, decision.Query, r.MaxContextCapabilities)
 	case "inspect_fact":
 		selected, err := ResolveArgument(JSON{"$fact_value": JSON{"fact_id": decision.FactID, "path": decision.Path}}, facts, r.ConnectionID, false)
 		if err != nil {
@@ -645,6 +666,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		fact := facts[decision.FactID]
 		recordInspection(state, JSON{"fact": progressKey(fact.Value), "path": decision.Path})
 		fact.Value = JSON{"value": selected}
+		fact.ModelOutput = nil
 		view := factView(fact, 6000)
 		state.InspectedFact = JSON{"fact_id": decision.FactID, "path": decision.Path, "preview": view.Value, "omitted_paths": view.OmittedPaths}
 		if a, ok := selected.([]any); ok {
@@ -692,8 +714,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 				valid = false
 			}
 		}
+		refs, refsErr := resolveResultRefs(decision.ResultRefs, decision.FactIDs, facts, r.ConnectionID)
 		if !valid {
 			Reject(state, "final", "agent.final", "final_fact_citations_invalid", nil, "")
+		} else if refsErr != nil {
+			Reject(state, "final", "agent.final", "final_result_refs_invalid", nil, "")
 		} else if r.CompletionValidator != nil {
 			err := r.CompletionValidator(ctx, CompletionContext{RunID: state.RunID, OriginPackID: r.OriginPackID, Instruction: state.Instruction, AnswerMarkdown: decision.AnswerMarkdown, FactIDs: decision.FactIDs, Facts: state.Facts, Observations: state.Observations, Followups: state.Followups})
 			if ctx.Err() != nil {
@@ -714,15 +739,18 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			} else {
 				state.Status = "completed"
 				state.AnswerMarkdown = decision.AnswerMarkdown
+				state.ResultRefs = refs
 			}
 		} else {
 			state.Status = "completed"
 			state.AnswerMarkdown = decision.AnswerMarkdown
+			state.ResultRefs = refs
 		}
 	case "request_input":
 		state.Status = "needs_input"
 		state.InputField = &decision.Field
 		state.InputPrompt = &decision.Prompt
+		state.InputSchema = decision.InputSchema
 	case "tool_batch":
 		for _, call := range decision.Calls {
 			kind := strings.TrimPrefix(call.Capability, "agent.")
@@ -822,7 +850,7 @@ func (r *AgentRuntime) Result(state *RuntimeState) RunResult {
 	if status == "queued" || status == "running" {
 		status = "failed"
 	}
-	return RunResult{ContextTelemetry: state.ContextTelemetry, Progress: runProgress(state, r.MaxStagnantRounds), Status: status, AnswerMarkdown: state.AnswerMarkdown, ErrorCode: state.ErrorCode, InputField: state.InputField, InputPrompt: state.InputPrompt, Facts: state.Facts, Observations: state.Observations, Decisions: state.Decisions, ModelCalls: state.ModelCalls, ModelUsage: state.ModelUsage}
+	return RunResult{ContextTelemetry: state.ContextTelemetry, Progress: runProgress(state, r.MaxStagnantRounds), Status: status, AnswerMarkdown: state.AnswerMarkdown, ResultRefs: state.ResultRefs, ErrorCode: state.ErrorCode, InputField: state.InputField, InputPrompt: state.InputPrompt, InputSchema: state.InputSchema, Facts: state.Facts, Observations: state.Observations, Decisions: state.Decisions, ModelCalls: state.ModelCalls, ModelUsage: state.ModelUsage}
 }
 func (r *AgentRuntime) Run(ctx context.Context, instruction string) (RunResult, error) {
 	state, err := r.NewState(instruction, "")
@@ -886,7 +914,10 @@ func NewState(instruction, runID string) (*RuntimeState, error) {
 }
 
 func (r *AgentRuntime) systemPrompt() string {
-	prompt := r.Provider.SystemPrompt() + "\n" + conversationGuidance
+	prompt := r.Provider.SystemPrompt() + "\n" + conversationGuidance + "\n" + decisionProtocolPrompt
+	if r.MaxContextCapabilities > 0 {
+		prompt += "\n" + capabilitySearchPrompt
+	}
 	if len(r.Memories) > 0 {
 		prompt += memoryUsagePrompt
 	}

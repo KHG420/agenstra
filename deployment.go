@@ -3,7 +3,6 @@ package agenstra
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -60,6 +59,7 @@ type DeploymentConfig struct {
 	DatabasePath         string                                   `json:"database_path"`
 	Packs                map[string]PackConfig                    `json:"packs"`
 	Users                map[string]UserConfig                    `json:"users"`
+	HostAuth             *HostAuthConfig                          `json:"host_auth,omitempty"`
 	Management           *ManagementConfig                        `json:"management"`
 	Settings             HostSettings                             `json:"settings"`
 	WebIntegration       *WebIntegrationConfig                    `json:"web_integration,omitempty"`
@@ -88,8 +88,16 @@ func LoadDeployment(path string) (*Deployment, error) {
 	if e = d.Decode(&c); e != nil {
 		return nil, e
 	}
-	if c.Users == nil {
+	if c.Users == nil && (c.HostAuth == nil || c.Management == nil) {
 		return nil, fmt.Errorf("users required")
+	}
+	if c.HostAuth != nil {
+		if c.Management == nil {
+			return nil, fmt.Errorf("host_auth requires management")
+		}
+		if err := c.HostAuth.Validate(); err != nil {
+			return nil, err
+		}
 	}
 	if e := c.Settings.Validate(); e != nil {
 		return nil, e
@@ -123,26 +131,11 @@ func (d *Deployment) resolve(p string) string {
 }
 func (d *Deployment) DatabasePath() string { return d.resolve(d.Config.DatabasePath) }
 func (d *Deployment) Authenticate(token string) (string, error) {
-	if token == "" {
-		return "", deploymentError("unauthorized")
-	}
-	matched := ""
-	n := 0
-	for id, user := range d.Config.Users {
-		secret := d.Environment[user.APIKeyEnv]
-		if secret != "" && subtle.ConstantTimeCompare([]byte(token), []byte(secret)) == 1 {
-			matched = id
-			n++
-		}
-	}
-	if n != 1 {
-		return "", deploymentError("unauthorized")
-	}
-	return matched, nil
+	return d.AuthenticateContext(context.Background(), token)
 }
 func (d *Deployment) connection(ownerID, packID string) (ConnectionConfig, error) {
 	user, ok := d.Config.Users[ownerID]
-	if !ok {
+	if !ok && d.Config.HostAuth == nil {
 		return ConnectionConfig{}, deploymentError("access_denied")
 	}
 	if d.Registry != nil {
@@ -161,6 +154,9 @@ func (d *Deployment) connection(ownerID, packID string) (ConnectionConfig, error
 			}
 			return normalizeConnection(c), nil
 		}
+		if !ok {
+			return ConnectionConfig{}, deploymentError("access_denied")
+		}
 		active, e := d.Registry.ActiveRelease(packID)
 		if e != nil {
 			return ConnectionConfig{}, deploymentError("access_denied")
@@ -168,6 +164,9 @@ func (d *Deployment) connection(ownerID, packID string) (ConnectionConfig, error
 		if active != "" {
 			return ConnectionConfig{}, deploymentError("access_denied")
 		}
+	}
+	if !ok {
+		return ConnectionConfig{}, deploymentError("access_denied")
 	}
 	if _, ok := d.Config.Packs[packID]; !ok {
 		return ConnectionConfig{}, deploymentError("access_denied")

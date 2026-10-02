@@ -120,6 +120,48 @@ func TestConcurrencyCancellationJoinsWorkersAndRecoversJournal(t *testing.T) {
 	}
 }
 
+func TestConcurrencyCancellationRetainsKnownResponses(t *testing.T) {
+	started := make(chan struct{}, 4)
+	p := &parallelTestProvider{&hostProvider{caps: map[string]CapabilityDescription{"records.get": {Name: "records.get", Version: "1", InputSchema: JSON{"type": "object"}, Effect: "compute", Replay: "safe", ReferenceScope: "durable"}}, hook: func(ctx context.Context, _ string, args JSON, _ *InvocationContext) (CapabilityResult, error) {
+		started <- struct{}{}
+		<-ctx.Done()
+		return CapabilityResult{Data: args}, nil
+	}}}
+	h := concurrentHost(t, p)
+	run := createTestHostRun(t, h)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { _, err := h.Drive(ctx, run.RunID, "alice"); done <- err }()
+	<-started
+	<-started
+	cancel()
+	if err := <-done; err != context.Canceled {
+		t.Fatal(err)
+	}
+	run, err := h.Get(t.Context(), run.RunID, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := h.restore(run)
+	if err != nil || len(state.Facts) != 2 {
+		t.Fatal("known parallel results lost on cancellation", state, err)
+	}
+	settled := 0
+	for _, receipt := range state.InvocationReceipts {
+		if receipt.Status == "succeeded" {
+			settled++
+		}
+	}
+	if settled != 2 {
+		t.Fatal("known parallel receipts lost", state.InvocationReceipts)
+	}
+	p.hook = nil
+	run, err = h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "completed" || p.calls != 4 {
+		t.Fatal("known operations were replayed", run.Status, err, p.calls)
+	}
+}
+
 func TestConcurrentUnknownCallRetainsWakeAndOtherResults(t *testing.T) {
 	p := &parallelTestProvider{&hostProvider{hook: func(_ context.Context, _ string, args JSON, _ *InvocationContext) (CapabilityResult, error) {
 		if args["id"] == "0" {

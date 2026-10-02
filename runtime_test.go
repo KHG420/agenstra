@@ -181,14 +181,36 @@ func (m *promptCaptureModel) Decide(_ context.Context, _ ContextPacket, prompt s
 	m.prompts = append(m.prompts, prompt)
 	return m.decisions[len(m.prompts)-1], nil
 }
+func TestRuntimeProtocolPromptDoesNotChangeProviderPrompt(t *testing.T) {
+	provider := &coreTestProvider{caps: map[string]CapabilityDescription{}}
+	original := provider.SystemPrompt()
+	runtime := &AgentRuntime{Provider: provider}
+	prompt := runtime.systemPrompt()
+	for _, field := range []string{"input_schema", "result_refs", "model_output"} {
+		if !strings.Contains(prompt, field) {
+			t.Fatalf("runtime prompt omits %s", field)
+		}
+	}
+	if strings.Contains(prompt, "search_capabilities") {
+		t.Fatal("disabled capability search advertised")
+	}
+	runtime.MaxContextCapabilities = 5
+	if !strings.Contains(runtime.systemPrompt(), "search_capabilities") {
+		t.Fatal("enabled capability search not advertised")
+	}
+	if provider.SystemPrompt() != original {
+		t.Fatal("runtime protocol changed provider prompt")
+	}
+}
 func TestCoreFiniteJSONAndContextBudget(t *testing.T) {
 	if _, err := CanonicalJSON(JSON{"bad": []any{math.NaN()}}); err == nil {
 		t.Fatal("NaN accepted")
 	}
 	provider := &coreTestProvider{caps: map[string]CapabilityDescription{}}
 	// Keep the packet allowance constant while accounting for runtime guidance.
-	budget := 3000 + utf8.RuneCountInString(conversationGuidance) + 1
-	runtime := &AgentRuntime{Provider: provider, MaxContextCharacters: budget}
+	runtime := &AgentRuntime{Provider: provider}
+	budget := 3000 + utf8.RuneCountInString(runtime.systemPrompt())
+	runtime.MaxContextCharacters = budget
 	state, err := runtime.NewState(strings.Repeat("x", 2150), "")
 	if err != nil {
 		t.Fatal(err)
@@ -224,7 +246,8 @@ func TestCoreFiniteJSONAndContextBudget(t *testing.T) {
 func TestCoreChineseContextBudgetCountsCharacters(t *testing.T) {
 	provider := &coreTestProvider{caps: map[string]CapabilityDescription{}}
 	model := &promptCaptureModel{decisions: []Decision{{Kind: "final", AnswerMarkdown: "完成"}}}
-	runtime := &AgentRuntime{Provider: provider, Model: model, MaxContextCharacters: 1600 + utf8.RuneCountInString(conversationGuidance) + 1}
+	runtime := &AgentRuntime{Provider: provider, Model: model}
+	runtime.MaxContextCharacters = 1600 + utf8.RuneCountInString(runtime.systemPrompt())
 	state, err := runtime.NewState(strings.Repeat("航", 1000), "")
 	if err != nil {
 		t.Fatal(err)

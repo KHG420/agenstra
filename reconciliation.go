@@ -72,7 +72,8 @@ func (h *AgentHost) Reconcile(ctx context.Context, id, owner, invocationID, args
 	if err != nil {
 		return run, err
 	}
-	if state.Status != "needs_reconciliation" || run.CancelRequested {
+	stopped := state.Status == "cancelled" || state.Status == "failed"
+	if state.Status != "needs_reconciliation" && !stopped {
 		return run, hostError("reconciliation_not_required")
 	}
 	var item *Invocation
@@ -82,7 +83,7 @@ func (h *AgentHost) Reconcile(ctx context.Context, id, owner, invocationID, args
 			break
 		}
 	}
-	if item == nil || (item.Status != "unknown" && item.Status != "in_flight") {
+	if item == nil || !unsettledInvocation(*item) {
 		return run, hostError("reconciliation_invocation_mismatch")
 	}
 	if item.ArgumentsSHA256 != argsSHA || ArgumentsDigest(item.Call) != argsSHA {
@@ -157,10 +158,12 @@ func (h *AgentHost) Reconcile(ctx context.Context, id, owner, invocationID, args
 	if latest.LeaseToken != run.LeaseToken {
 		return run, ErrLeaseLost
 	}
-	state.Status, state.ErrorCode = "queued", nil
+	if !stopped {
+		state.Status, state.ErrorCode = "queued", nil
+	}
 	for i := range state.Pending {
 		other := &state.Pending[i]
-		if other != item && (other.Status == "unknown" || other.Status == "in_flight" || other.PollInFlight) {
+		if !stopped && other != item && (other.Status == "unknown" || other.Status == "in_flight" || other.PollInFlight) {
 			state.Status, state.ErrorCode = "needs_reconciliation", strptr("provider_outcome_unknown")
 		}
 	}
@@ -200,9 +203,15 @@ func validateReconciledResult(result CapabilityResult, cap CapabilityDescription
 		if err != nil || !ok || (!containsString(cap.Operation.SuccessStates, settled) && !containsString(cap.Operation.FailureStates, settled)) {
 			return hostError("reconciliation_result_not_settled")
 		}
+		expectedID := ""
 		if item.Operation != nil {
+			expectedID = item.Operation.OperationID
+		} else if item.Receipt != nil {
+			expectedID = item.Receipt.OperationID
+		}
+		if expectedID != "" {
 			id, err := operationValue(result.Data, cap.Operation.IDPath)
-			if err != nil || !operationIDMatches(id, item.Operation.OperationID) {
+			if err != nil || !operationIDMatches(id, expectedID) {
 				return hostError("operation_identity_changed")
 			}
 		}

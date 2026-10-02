@@ -225,6 +225,36 @@ func jsonMedia(doc JSON, parent JSON, label string) (JSON, error) {
 	}
 	return schema, nil
 }
+
+func openAPIOutputSchema(schema JSON) (JSON, bool) {
+	root := schema
+	for depth := 0; depth < 16; depth++ {
+		ref, ok := root["$ref"].(string)
+		if !ok || !strings.HasPrefix(ref, "#/$defs/") {
+			break
+		}
+		defs, _ := schema["$defs"].(map[string]any)
+		name := strings.TrimPrefix(ref, "#/$defs/")
+		root, _ = defs[name].(map[string]any)
+		if root == nil {
+			return schema, false
+		}
+	}
+	if kind, ok := root["type"].(string); !ok || kind == "object" {
+		return schema, false
+	}
+	inner := JSON{}
+	for key, value := range schema {
+		if key != "$defs" {
+			inner[key] = value
+		}
+	}
+	wrapped := JSON{"type": "object", "properties": JSON{"result": inner}, "required": []any{"result"}, "additionalProperties": false}
+	if definitions, ok := schema["$defs"]; ok {
+		wrapped["$defs"] = definitions
+	}
+	return wrapped, true
+}
 func resolveParameters(doc JSON, v any) ([]JSON, error) {
 	items, ok := v.([]any)
 	if !ok {
@@ -437,11 +467,18 @@ func ImportOpenAPIDocument(doc JSON, name, baseURLEnv string, operations []strin
 				return nil, errors.New("responses must be an object")
 			}
 			byStatus := JSON{}
+			wrapResponse := false
+			emptySuccess := false
 			for status, source := range responses {
 				if regexp.MustCompile(`^2[0-9]{2}$`).MatchString(status) {
 					resolved, e := resolveOpenAPI(doc, source, map[string]bool{})
 					if e != nil {
 						return nil, e
+					}
+					if status == "204" && resolved["content"] == nil {
+						byStatus[status] = JSON{"type": "object", "properties": JSON{}, "additionalProperties": false}
+						emptySuccess = true
+						continue
 					}
 					schema, e := jsonMedia(doc, resolved, opID+" response "+status)
 					if e != nil {
@@ -451,6 +488,8 @@ func ImportOpenAPIDocument(doc JSON, name, baseURLEnv string, operations []strin
 					if e != nil {
 						return nil, e
 					}
+					converted, wrapped := openAPIOutputSchema(converted)
+					wrapResponse = wrapResponse || wrapped
 					byStatus[status] = converted
 				}
 			}
@@ -466,7 +505,7 @@ func ImportOpenAPIDocument(doc JSON, name, baseURLEnv string, operations []strin
 			for _, v := range byStatus {
 				raw, _ := CanonicalJSON(v)
 				if !bytes.Equal(raw, firstRaw) {
-					return nil, errors.New("differing 2xx response schemas need manual mapping")
+					return nil, fmt.Errorf("%s: differing 2xx response schemas need manual mapping", opID)
 				}
 			}
 			description, _ := operation["description"].(string)
@@ -484,7 +523,14 @@ func ImportOpenAPIDocument(doc JSON, name, baseURLEnv string, operations []strin
 					effect = "write"
 				}
 			}
-			found[opID] = JSON{"name": opID, "description": description, "method": strings.ToUpper(method), "path": path, "input_schema": input, "output_schema": first, "response_schemas": byStatus, "effect": effect}
+			capability := JSON{"name": opID, "description": description, "method": strings.ToUpper(method), "path": path, "input_schema": input, "output_schema": first, "response_schemas": byStatus, "effect": effect}
+			if wrapResponse {
+				capability["response_mode"] = "wrap"
+			}
+			if emptySuccess {
+				capability["allow_empty_success"] = true
+			}
+			found[opID] = capability
 		}
 	}
 	caps := []any{}

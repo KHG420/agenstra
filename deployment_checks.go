@@ -83,17 +83,22 @@ func validCheckPath(path []any) bool {
 func configureDeploymentChecks(h *AgentHost, d *Deployment) error {
 	compiledCompletion, compiledReconciler := h.CompletionValidator, h.Reconciler
 	checks := map[string]map[string][]CompletionValidator{}
+	required := map[string]map[string]bool{}
 	for pack, requirements := range d.Config.CompletionChecks {
 		if pack == "" {
 			return fmt.Errorf("completion_checks pack required")
 		}
 		checks[pack] = map[string][]CompletionValidator{}
+		required[pack] = map[string]bool{}
 		for _, requirement := range requirements {
 			validator, err := RequireFactValues(requirement)
 			if err != nil {
 				return err
 			}
 			checks[pack][requirement.Capability] = append(checks[pack][requirement.Capability], validator)
+			if requirement.Required {
+				required[pack][requirement.Capability] = true
+			}
 		}
 	}
 	if h.CompletionValidator == nil && len(checks) > 0 {
@@ -106,6 +111,11 @@ func configureDeploymentChecks(h *AgentHost, d *Deployment) error {
 			}
 			for _, fact := range result.Facts {
 				used[fact.SourceCapability] = true
+			}
+			for name := range required[result.OriginPackID] {
+				if !used[name] {
+					return CompletionValidationError{"completion_capability_required", "Complete the required business operation before reporting completion."}
+				}
 			}
 			for name := range used {
 				for _, check := range checks[result.OriginPackID][name] {

@@ -3,6 +3,7 @@ package agenstra
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"unicode/utf8"
@@ -253,6 +254,9 @@ func (w *WebIntegration) advanceConversation(ctx context.Context, owner, id stri
 		if runtime, ok := run.State["runtime"].(map[string]any); ok {
 			m.AnswerMarkdown, _ = runtime["answer_markdown"].(string)
 			m.ErrorCode, _ = runtime["error_code"].(string)
+			if raw, err := CanonicalJSON(runtime["result_refs"]); err == nil && runtime["result_refs"] != nil {
+				_ = json.Unmarshal(raw, &m.ResultRefs)
+			}
 		}
 		if e = w.Store.store.write(func(tx *sql.Tx) error {
 			var latest ChatMessage
@@ -415,7 +419,7 @@ func (w *WebIntegration) Conversation(ctx context.Context, owner, id string) (Ch
 			return c, nil, e
 		}
 		messages[i].InputHistory = chatInputHistory(run)
-		if messages[i].Status == "active" || messages[i].Status == "cancelling" {
+		if messages[i].Status == "active" || messages[i].Status == "cancelling" || runHasInvocationEvidence(run) {
 			messages[i].Run = runView(run, w.Host)
 		}
 	}

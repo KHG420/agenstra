@@ -158,6 +158,7 @@ type ChatMessage struct {
 	Instruction      string                        `json:"instruction,omitempty"`
 	ErrorCode        string                        `json:"error_code,omitempty"`
 	AnswerMarkdown   string                        `json:"answer_markdown,omitempty"`
+	ResultRefs       []ResultObjectRef             `json:"result_refs,omitempty"`
 	InputHistory     []ChatInput                   `json:"input_history,omitempty"`
 	CreatedAt        float64                       `json:"created_at"`
 	Run              map[string]any                `json:"run,omitempty"`

@@ -26,6 +26,8 @@ type EvaluationCheck struct {
 }
 type EvaluationResult struct {
 	Name        string            `json:"name"`
+	Iteration   int               `json:"iteration,omitempty"`
+	ElapsedMS   int64             `json:"elapsed_ms,omitempty"`
 	RunID       string            `json:"run_id,omitempty"`
 	RequestID   string            `json:"request_id,omitempty"`
 	Status      string            `json:"status,omitempty"`

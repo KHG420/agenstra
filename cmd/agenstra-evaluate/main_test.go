@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -73,6 +74,91 @@ func TestEvaluationCreationRetriesTheSameIdentity(t *testing.T) {
 				t.Fatal(result, creates.Load())
 			}
 		})
+	}
+}
+
+func TestEvaluationRepeatUsesFreshRunsAndReportsFailures(t *testing.T) {
+	var mu sync.Mutex
+	var ids, requests []string
+	statuses := map[string]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Path == "/runs" {
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			request, _ := body["request_id"].(string)
+			requests = append(requests, request)
+			id := agenstra.NewID()
+			ids = append(ids, id)
+			status := "completed"
+			if len(ids) == 2 {
+				status = "failed"
+			}
+			statuses[id] = status
+			_ = json.NewEncoder(w).Encode(agenstra.StoredRun{RunID: id, PackID: "orders", Status: status})
+			return
+		}
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) < 2 {
+			t.Error("unexpected path", r.URL.Path)
+			return
+		}
+		id := parts[1]
+		status := statuses[id]
+		if len(parts) == 3 && parts[2] == "diagnostics" {
+			_ = json.NewEncoder(w).Encode(agenstra.RunDiagnostics{RunID: id, Status: status, Findings: []agenstra.DiagnosticFinding{{Code: "business_failed"}}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(agenstra.StoredRun{RunID: id, PackID: "orders", Status: status, State: agenstra.JSON{"runtime": agenstra.RuntimeState{RunID: id, Status: status}}})
+	}))
+	defer server.Close()
+	t.Setenv("EVALUATION_TEST_KEY", "local-key")
+	path := filepath.Join(t.TempDir(), "cases.json")
+	if err := os.WriteFile(path, []byte(`[{"name":"submit","pack_id":"orders","instruction":"Submit","request_id":"fixed-request"}]`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"--server", server.URL, "--key-env", "EVALUATION_TEST_KEY", "--cases", path, "--repeat", "3"}
+	var output bytes.Buffer
+	passed, err := run(args, &output)
+	if err != nil || passed {
+		t.Fatal(passed, err, output.String())
+	}
+	var report struct {
+		Repeat  int                         `json:"repeat"`
+		Results []agenstra.EvaluationResult `json:"results"`
+		Summary evaluationSummary           `json:"summary"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 3 || len(report.Results) != 3 || report.Repeat != 3 || report.Summary.Planned != 3 || report.Summary.Executed != 3 || report.Summary.Passed != 2 || report.Summary.PassRate != 2.0/3 || report.Summary.StatusCounts["failed"] != 1 || report.Summary.FindingCounts["business_failed"] != 3 {
+		t.Fatal(report, ids)
+	}
+	seen := map[string]bool{}
+	for i, result := range report.Results {
+		if result.Iteration != i+1 || result.RunID != ids[i] || result.RequestID == "fixed-request" || seen[result.RequestID] || result.RequestID == "" {
+			t.Fatal(result, requests)
+		}
+		seen[result.RequestID] = true
+		if result.RequestID != requests[i] {
+			t.Fatal(result, requests)
+		}
+	}
+	for _, repeat := range []string{"0", "101"} {
+		output.Reset()
+		if _, err := run(append(append([]string{}, args[:len(args)-2]...), "--repeat", repeat), &output); err == nil {
+			t.Fatal("accepted invalid repeat", repeat)
+		}
+	}
+	if err := os.WriteFile(path, []byte(`[{"name":"existing","run_id":"`+ids[0]+`"}]`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if _, err := run(args, &output); err == nil || len(ids) != 3 {
+		t.Fatal("repeated an existing run", err, ids)
 	}
 }
 

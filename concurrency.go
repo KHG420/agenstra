@@ -122,14 +122,16 @@ func (h *AgentHost) executeParallel(ctx context.Context, run StoredRun, state *R
 		tasks = append(tasks, parallelInvocation{call: item.Call, inv: call.inv, grants: call.grants})
 	}
 	outcomes := invokeParallel(ctx, provider, tasks, h.runSettings(run).MaxConcurrentTools, time.Duration(h.runSettings(run).InvocationTimeoutSeconds*1e9))
-	if ctx.Err() != nil {
-		return run, ctx.Err()
-	}
 	stopStatus := "running"
 	var stopCode *string
 	var wake *float64
 	priority := map[string]int{"running": 0, "waiting": 1, "failed": 2, "needs_authorization": 3, "needs_reconciliation": 4}
 	for i, index := range indices {
+		if ctx.Err() != nil && outcomes[i].Fact == nil && unknownOutcome(outcomes[i].ErrorCode) {
+			// Preserve interrupted reservations for the normal durable recovery
+			// path, while still recording responses that have a known outcome.
+			continue
+		}
 		var err error
 		run, err = h.settleInvocation(run, state, &state.Pending[index], prepared[i], outcomes[i])
 		if err != nil {
@@ -146,6 +148,9 @@ func (h *AgentHost) executeParallel(ctx context.Context, run StoredRun, state *R
 	state.Status, state.ErrorCode = stopStatus, stopCode
 	if stopStatus != "waiting" {
 		wake = nil
+	}
+	if ctx.Err() != nil {
+		return run, ctx.Err()
 	}
 	return h.save(run, state, "", wake, JSON{"kind": "parallel_finished", "count": len(tasks)})
 }

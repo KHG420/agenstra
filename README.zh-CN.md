@@ -157,6 +157,8 @@ go run ./cmd/agenstra-manage list
 
 发布不会自动启用或授权。从 `list` 结果读取完整内容哈希和当前修订版本，明确启用后，再为用户绑定连接与能力授权；启用旧版本即回滚。新版本只影响新任务，撤销授权则会立即影响已有任务。连接记录保存环境变量或 `secret:NAME` 引用，不保存明文密钥。配置示例、启用与回滚命令、连接检查及备份要求见[能力管理指南](docs/capability-management.md)。
 
+接入现有登录体系时，可配置 `host_auth: {"url_env":"HOST_AUTH_URL","owner_path":["owner_id"]}`，由可信 HTTP 接口逐次核验 Bearer token；`owner_path` 默认为 `owner_id`。这要求启用管理功能，并为每个动态用户建立明确的 registry binding；动态用户不会继承静态用户授权。原有静态 API key 行为不变。
+
 ## 能力包支持范围
 
 | 来源 | 已提供的接入方式 | 导入后仍需审查 |
@@ -180,15 +182,21 @@ go run ./cmd/agenstra-import-openapi \
 
 导入命令**不会**据接口名字推断审批、幂等性或后台任务。写操作和长期任务的声明请按[接入教程](docs/tutorial.md)补充和验证。
 
+REST endpoint 可选用 `response_mode: "wrap"`，将根数组或标量包装为 `{ "result": ... }`；`allow_empty_success: true` 将空 HTTP 204 映射为 `{}`；`business_success: {"path":["success"],"value":true,"error_code":"business_rejected"}` 可把 HTTP 2xx 中的业务失败识别为失败。输出 schema 须匹配映射后的结构；已有对象响应保持默认映射。能力还可配置 `model_output: {"paths":[["id"],["status"]]}`，仅向模型及 Fact 引用暴露已声明的结果字段，Host 仍保存完整 Fact；不配置时沿用完整模型视图。
+
 ## 运行与数据保证
 
 - Host 在外部调用前保存调用 ID、确切参数和哈希。对于失败后结果不确定的调用，只有声明为安全或真正可幂等重放的能力才能按同一 ID 恢复；其他情况进入 `needs_reconciliation`，由接入方核对真实外部状态。
 - 被批准的是特定用户、特定调用和参数哈希；提交前会重新检查身份、权限及租约。技能文本不能跳过这些检查。
-- 完整工具结果作为 Fact 单独持久化；上下文预算保留任务约束和 Fact 身份，优先呈现近期证据，并明确标记遗漏内容供按路径检查。工具传参仍可通过 Fact 引用获取完整原值，详见[上下文管理设计](docs/context-management.md)。Fact ID 是框架本地证据 ID，不等于外部资源 ID。
+- 完整工具结果作为 Fact 单独持久化；上下文预算保留任务约束和 Fact 身份，优先呈现近期证据，并明确标记遗漏内容供按路径检查。工具传参可通过 Fact 引用获取完整原值，但 `model_output` 限定了可访问字段，详见[上下文管理设计](docs/context-management.md)。Fact ID 是框架本地证据 ID，不等于外部资源 ID。
+- 运行可设置 `max_context_capabilities`，只展示有界的已授权能力目录；模型可按名称、描述或输入字段搜索未展示的能力，搜索不会调用业务接口。默认目录行为不变。缺失输入可携带 `string`、`enum` 或 `date` 类型的 `input_schema`；最终回答可附 `result_refs`，由服务器从已引用、模型可见的 Fact 中解析业务 ID。
 - 对声明了 `OperationBinding` 的后台作业，Host 保存外部作业回执并轮询状态接口；HTTP 请求成功或返回 `queued` 不代表任务完成。
+- 非只读调用记录调用回执，包括参数哈希以及已知结果或不确定状态。可选的能力包级 `completion_checks` 可用 `required: true` 要求任务执行指定能力，并核验最新成功 Fact 的字段值后才允许完成。可选的 `reconciliation_checks` 使用与原调用关联的已授权只读能力核对结果，不重放原写操作。详见[业务校验配置](docs/completion-evaluation.md)。
 - 运行、事件、Fact 和续接接口按 `owner_id` 隔离；一个部署可配置多个用户及不同能力集合。
 
 取消只停止本地编排，不承诺撤销已提交到外部系统的作业。SQLite WAL 适合当前单节点范围；请使用持久磁盘并制定备份与数据保留策略。
+
+取消或终态失败后，仍可按原调用与原操作身份核对不确定结果；核对只更新证据，不恢复已停止的任务。已知业务结果超过产物限制时，精简回执保留结果状态、摘要及存储错误，完整结果则不可用。启用新增可选契约前须先部署新版服务器。新检查点含有额外字段，旧版严格读取器无法恢复，计划回退二进制时应保留数据库备份。
 
 ## 从 Python 版本切换
 
@@ -205,6 +213,8 @@ go build ./cmd/...
 ```
 
 测试使用临时生成的 REST/MCP 契约、模型替身和 SQLite；不需要场景能力包或真实外部服务。发布前仍应在目标环境验收真实身份、模型决策、接口契约、长任务以及运维条件。当前实现的取舍和上线前检查见[架构说明](docs/architecture.md)与[部署与运维](docs/deployment.md)。
+
+真实接入案例可运行 `agenstra-evaluate --cases local/cases.json --repeat 5`，每个案例独立执行五次，报告各案例通过率、状态分布、问题及耗时。重复执行要求案例创建新运行，不能指定 `run_id`；默认只执行一次。
 
 ## 许可证
 

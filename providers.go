@@ -119,6 +119,7 @@ type CapabilityDescription struct {
 	Effect              string            `json:"effect"`
 	OutputFields        JSON              `json:"output_fields"`
 	OutputSchema        JSON              `json:"output_schema"`
+	ModelOutput         *ModelOutput      `json:"model_output,omitempty"`
 	SkillsList          []string          `json:"skills"`
 	Replay              string            `json:"replay"`
 	IdempotencyArgument []string          `json:"idempotency_argument"`
@@ -252,6 +253,9 @@ func ExecuteCall(ctx context.Context, provider CapabilityProvider, grants map[st
 	if !grants[cap.Name] {
 		return CallOutcome{ErrorCode: "capability_not_granted"}, nil
 	}
+	if validateModelOutput(cap.ModelOutput) != nil {
+		return CallOutcome{ErrorCode: "model_output_config_invalid"}, nil
+	}
 	if inv != nil {
 		var err error
 		call, err = BindIdempotency(call, cap, *inv)
@@ -270,7 +274,7 @@ func ExecuteCall(ctx context.Context, provider CapabilityProvider, grants map[st
 	if result.ReferenceScope == "connection" || cap.ReferenceScope == "connection" {
 		scope = "connection"
 	}
-	fact := Fact{FactID: NewID(), SourceCapability: cap.Name, SourceVersion: cap.Version, Value: JSON{"data": result.Data}, Quality: "provider_reported", ObservedAt: time.Now().UTC(), ReferenceScope: scope, ExpiresAt: result.ExpiresAt}
+	fact := Fact{FactID: NewID(), SourceCapability: cap.Name, SourceVersion: cap.Version, Value: JSON{"data": result.Data}, ModelOutput: cap.ModelOutput, Quality: "provider_reported", ObservedAt: time.Now().UTC(), ReferenceScope: scope, ExpiresAt: result.ExpiresAt}
 	if inv != nil {
 		fact.ConnectionID = &inv.ConnectionID
 		fact.SourcePackID, fact.SourceRelease, fact.SourceSubject = inv.TargetPackID, inv.TargetRelease, inv.TargetSubject

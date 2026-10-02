@@ -30,6 +30,7 @@ type FactRequirement struct {
 	Capability string `json:"capability"`
 	Path       []any  `json:"path"`
 	Value      any    `json:"value"`
+	Required   bool   `json:"required,omitempty"`
 }
 
 func (r *FactRequirement) UnmarshalJSON(raw []byte) error {
