@@ -42,13 +42,11 @@ func run() error {
 		defer dep.Registry.Close()
 	}
 	settings := dep.Config.Settings
-	model, e := agenstra.NewHTTPJSONDecisionModel(os.Getenv("AGENT_MODEL"), os.Getenv("AGENT_MODEL_BASE_URL"), os.Getenv("AGENT_MODEL_API_KEY"), time.Duration(settings.ModelTimeoutSeconds*float64(time.Second)), nil)
+	model, e := dep.NewModel()
 	if e != nil {
 		return e
 	}
 	defer model.Close()
-	model.MaxOutputTokens = settings.MaxModelOutputTokens
-	model.TokenLimitField = settings.ModelTokenLimitField
 	host := agenstra.NewAgentHost(store, dep.ProviderFactory, model, dep.PolicyResolver)
 	host.Settings = settings
 	if dep.Registry != nil {

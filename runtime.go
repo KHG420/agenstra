@@ -595,6 +595,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		if d.ModelCall != nil {
 			metrics = *d.ModelCall
 		}
+		metrics.FormatRecovery = attempt > 0
 		metrics.Round = state.RoundsUsed
 		metrics.Purpose = "decision"
 		metrics.Reservation = false

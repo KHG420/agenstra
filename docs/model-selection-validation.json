@@ -1,0 +1,206 @@
+{
+  "date": "2026-10-03",
+  "framework_base": "182ec4ec1bfdaf38e3a7160ab02d6aa4968b0cca",
+  "fixture": {
+    "sample": true,
+    "people": 156,
+    "initial_revision": 6,
+    "initial_history_rounds": 2
+  },
+  "max_context_capabilities": 8,
+  "parameter_profiles": {
+    "memory_extraction": {
+      "api_type": "deepseek_chat",
+      "thinking": "disabled"
+    },
+    "decision": {
+      "api_type": "deepseek_chat",
+      "thinking": "enabled",
+      "reasoning_effort": "low"
+    }
+  },
+  "business_acceptance_passed": true,
+  "notes": [
+    "One real-model suite; not a controlled causal comparison or a production success-rate estimate.",
+    "Model parameters are configured by the shipped framework module, not injected by the benchmark proxy.",
+    "Synthetic activity database is an isolated copy; host source and production model defaults are unchanged.",
+    "Known token breakdown totals include only provider-reported values; coverage request counts distinguish unknown from zero."
+  ],
+  "runs": [
+    {
+      "scenario": "read activity",
+      "run_id": "fa21c6ec-34f8-557e-a0a5-3de865ef8fde",
+      "status": "completed",
+      "requests": 4,
+      "elapsed_ms": 11154,
+      "approvals": 0,
+      "usage": {
+        "reported_requests": 4,
+        "format_recovery_requests": 0,
+        "cached_input_tokens": 6784,
+        "reasoning_output_tokens": 844,
+        "cached_input_requests": 4,
+        "reasoning_output_requests": 3,
+        "priced_requests": 0,
+        "elapsed_ms": 8048,
+        "invalid_responses": 0,
+        "retry_attempts": 0,
+        "requests": 4,
+        "input_tokens": 12240,
+        "output_tokens": 1202,
+        "budget_tokens": 13442,
+        "estimated_requests": 0,
+        "estimated_cost_usd": 0,
+        "cost_available": false
+      },
+      "format_errors": {},
+      "observation_errors": {},
+      "decision_sequence": [
+        "ui.get_context",
+        "ui.read_activity",
+        "final"
+      ]
+    },
+    {
+      "scenario": "start round",
+      "run_id": "76e11580-9cb0-5ab8-a029-c00157d3e9d1",
+      "status": "completed",
+      "requests": 6,
+      "elapsed_ms": 18208,
+      "approvals": 1,
+      "usage": {
+        "reported_requests": 6,
+        "format_recovery_requests": 0,
+        "cached_input_tokens": 14336,
+        "reasoning_output_tokens": 1729,
+        "cached_input_requests": 6,
+        "reasoning_output_requests": 5,
+        "priced_requests": 0,
+        "elapsed_ms": 13262,
+        "invalid_responses": 0,
+        "retry_attempts": 0,
+        "requests": 6,
+        "input_tokens": 21248,
+        "output_tokens": 2065,
+        "budget_tokens": 23313,
+        "estimated_requests": 0,
+        "estimated_cost_usd": 0,
+        "cost_available": false
+      },
+      "format_errors": {},
+      "observation_errors": {},
+      "decision_sequence": [
+        "search_capabilities",
+        "ui.get_context",
+        "ui.read_activity",
+        "ui.start_round",
+        "final"
+      ]
+    },
+    {
+      "scenario": "finish round",
+      "run_id": "b3afd9ee-782d-51b0-8c65-15b3711d2650",
+      "status": "completed",
+      "requests": 8,
+      "elapsed_ms": 31424,
+      "approvals": 1,
+      "usage": {
+        "reported_requests": 8,
+        "format_recovery_requests": 1,
+        "cached_input_tokens": 24832,
+        "reasoning_output_tokens": 3401,
+        "cached_input_requests": 8,
+        "reasoning_output_requests": 7,
+        "priced_requests": 0,
+        "elapsed_ms": 23233,
+        "invalid_responses": 1,
+        "retry_attempts": 0,
+        "requests": 8,
+        "input_tokens": 39747,
+        "output_tokens": 4164,
+        "budget_tokens": 43911,
+        "estimated_requests": 0,
+        "estimated_cost_usd": 0,
+        "cost_available": false
+      },
+      "format_errors": {
+        "model_decision_schema_invalid": 1
+      },
+      "observation_errors": {},
+      "decision_sequence": [
+        "ui.get_context+ui.read_activity",
+        "ui.get_context+ui.read_activity",
+        "ui.finish_round",
+        "ui.get_context",
+        "ui.read_winners",
+        "final"
+      ]
+    },
+    {
+      "scenario": "UI navigation",
+      "run_id": "aa39d9fc-157a-5b4a-9532-22e83ff9318a",
+      "status": "completed",
+      "requests": 6,
+      "elapsed_ms": 14069,
+      "approvals": 0,
+      "usage": {
+        "reported_requests": 6,
+        "format_recovery_requests": 0,
+        "cached_input_tokens": 13952,
+        "reasoning_output_tokens": 902,
+        "cached_input_requests": 6,
+        "reasoning_output_requests": 5,
+        "priced_requests": 0,
+        "elapsed_ms": 9346,
+        "invalid_responses": 0,
+        "retry_attempts": 0,
+        "requests": 6,
+        "input_tokens": 20850,
+        "output_tokens": 1312,
+        "budget_tokens": 22162,
+        "estimated_requests": 0,
+        "estimated_cost_usd": 0,
+        "cost_available": false
+      },
+      "format_errors": {},
+      "observation_errors": {},
+      "decision_sequence": [
+        "ui.get_context",
+        "ui.open_panel",
+        "ui.get_context",
+        "ui.set_theme",
+        "final"
+      ]
+    }
+  ],
+  "usage_by_purpose": {
+    "memory_extraction": {
+      "requests": 4,
+      "input_tokens": 2223,
+      "output_tokens": 71,
+      "reported_requests": 4,
+      "cached_input_requests": 4,
+      "reasoning_output_requests": 0,
+      "elapsed_ms": 3171,
+      "invalid_responses": 0,
+      "format_recovery_requests": 0,
+      "retry_attempts": 0,
+      "cached_input_tokens": 1408
+    },
+    "decision": {
+      "requests": 20,
+      "input_tokens": 91862,
+      "output_tokens": 8672,
+      "reported_requests": 20,
+      "cached_input_requests": 20,
+      "reasoning_output_requests": 20,
+      "elapsed_ms": 50718,
+      "invalid_responses": 1,
+      "format_recovery_requests": 1,
+      "retry_attempts": 0,
+      "cached_input_tokens": 58496,
+      "reasoning_output_tokens": 6876
+    }
+  },
+  "wall_elapsed_ms": 74855
+}

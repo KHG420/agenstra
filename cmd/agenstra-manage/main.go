@@ -21,7 +21,7 @@ func main() {
 	flag.Parse()
 	args := flag.Args()
 	if len(args) == 0 {
-		fail(errors.New("command required: draft, list, validate, publish, activate, bind, disable, check, audit"))
+		fail(errors.New("command required: model, draft, list, validate, publish, activate, bind, disable, check, audit"))
 	}
 	base, e := validateServer(*server)
 	if e != nil {
@@ -30,6 +30,16 @@ func main() {
 	key := os.Getenv(*keyEnv)
 	if key == "" {
 		fail(fmt.Errorf("missing administrator key in %s", *keyEnv))
+	}
+	if args[0] == "model" {
+		out, err := modelCommand(args[1:], func(method, path string, body any) (any, error) {
+			return managementRequest(base, key, method, path, body)
+		})
+		if err != nil {
+			fail(err)
+		}
+		printResult(out)
+		return
 	}
 	if args[0] == "draft" {
 		out, err := draftCommand(args[1:], func(method, path string, body any) (any, error) {

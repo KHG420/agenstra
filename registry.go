@@ -55,6 +55,7 @@ func (r *CapabilityRegistry) Initialize() error {
 	}
 	db.SetMaxOpenConns(1)
 	for _, s := range []string{`PRAGMA busy_timeout=30000`, `PRAGMA foreign_keys=ON`, `PRAGMA journal_mode=WAL`,
+		`CREATE TABLE IF NOT EXISTS model_configuration (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, config_json TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS releases (pack_id TEXT NOT NULL, digest TEXT NOT NULL, version TEXT NOT NULL, manifest_json TEXT NOT NULL, capabilities_json TEXT NOT NULL, created_at REAL NOT NULL, PRIMARY KEY(pack_id,digest), UNIQUE(pack_id,version))`,
 		`CREATE TABLE IF NOT EXISTS active (pack_id TEXT PRIMARY KEY,digest TEXT NOT NULL,revision INTEGER NOT NULL,FOREIGN KEY(pack_id,digest) REFERENCES releases(pack_id,digest))`,
 		`CREATE TABLE IF NOT EXISTS bindings (owner_id TEXT NOT NULL,pack_id TEXT NOT NULL,config_json TEXT NOT NULL,enabled INTEGER NOT NULL,updated_at REAL NOT NULL,PRIMARY KEY(owner_id,pack_id))`,

@@ -11,6 +11,10 @@ type MeasuredMemoryExtractor interface {
 }
 
 func (h *AgentHost) extractRunMemories(ctx context.Context, run StoredRun, request MemoryExtractionRequest, sourceID string) (StoredRun, []MemoryProposal, error) {
+	runModel, modelErr := h.modelForRun(run)
+	if modelErr != nil {
+		return run, nil, modelErr
+	}
 	state, err := h.restore(run)
 	if err != nil {
 		return run, nil, err
@@ -58,10 +62,10 @@ func (h *AgentHost) extractRunMemories(ctx context.Context, run StoredRun, reque
 	started := time.Now()
 	var proposals []MemoryProposal
 	metrics := ModelCallMetrics{Attempts: 1, EstimatedInputTokens: int64(len(input) + len(memoryExtractionPrompt) + 128)}
-	if measured, ok := h.Model.(MeasuredMemoryExtractor); ok {
+	if measured, ok := runModel.(MeasuredMemoryExtractor); ok {
 		proposals, metrics, err = measured.ExtractMemoriesMeasured(extractCtx, request)
 	} else {
-		proposals, err = h.Model.(MemoryExtractor).ExtractMemories(extractCtx, request)
+		proposals, err = runModel.(MemoryExtractor).ExtractMemories(extractCtx, request)
 	}
 	if ctx.Err() != nil {
 		return run, nil, ctx.Err()

@@ -198,7 +198,22 @@ func (h *AgentHost) prepareRun(ctx context.Context, owner, pack, instruction, id
 	}
 	delete(runtime, "facts")
 	settings := normalizedRunSettings(h.Settings)
-	info := modelInfo(h.Model)
+	runModel := h.Model
+	var selection *ModelSelectionSnapshot
+	if manager, ok := h.Model.(*ModelManager); ok {
+		snapshot := manager.Snapshot()
+		profiles := map[string]ModelProfile{}
+		for _, id := range []string{snapshot.Config.DefaultProfile, snapshot.Config.profileID("decision"), snapshot.Config.profileID("memory_extraction")} {
+			profiles[id] = snapshot.Config.Profiles[id]
+		}
+		snapshot.Config.Profiles = profiles
+		selected, err := manager.selectedModel(snapshot.Config)
+		if err != nil {
+			return nil, err
+		}
+		runModel, selection = selected, &snapshot
+	}
+	info := modelInfo(runModel)
 	settings.ModelProtocolReserveTokens = max(settings.ModelProtocolReserveTokens, info.ProtocolReserveTokens)
 	if info.ContextWindowTokens != nil && (settings.ModelContextWindowTokens == 0 || *info.ContextWindowTokens < settings.ModelContextWindowTokens) {
 		settings.ModelContextWindowTokens = *info.ContextWindowTokens
@@ -212,7 +227,7 @@ func (h *AgentHost) prepareRun(ctx context.Context, owner, pack, instruction, id
 	if err := settings.Validate(); err != nil {
 		return nil, err
 	}
-	envelope := map[string]any{"runtime": runtime, "artifact_ids": []string{}, "pack_fingerprint": nil, "pack_release": release, "effective_config": EffectiveRunConfig{Version: 1, Source: "run_snapshot", Settings: settings, Model: modelInfo(h.Model)}}
+	envelope := map[string]any{"runtime": runtime, "artifact_ids": []string{}, "pack_fingerprint": nil, "pack_release": release, "effective_config": EffectiveRunConfig{Version: 1, Source: "run_snapshot", Settings: settings, Model: info, ModelSelection: selection}}
 	setMemoryInput(envelope, id+":instruction", instruction)
 	raw, err := CanonicalJSON(envelope)
 	if err != nil {
@@ -1029,7 +1044,11 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 	if configErr != nil {
 		return run, configErr
 	}
-	currentModel := modelInfo(h.Model)
+	runModel, modelErr := h.modelForRun(run)
+	if modelErr != nil {
+		return run, modelErr
+	}
+	currentModel := modelInfo(runModel)
 	if config.Source == "run_snapshot" && config.Model.Name != "" && config.Model.Name != currentModel.Name {
 		return run, hostError("model_changed")
 	}
@@ -1042,7 +1061,7 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 	if previous, ok := run.State["pack_fingerprint"].(string); ok && previous != fp {
 		return run, hostError("pack_changed")
 	}
-	runtime := &AgentRuntime{Provider: provider, Model: h.Model, Grants: policy.GrantedCapabilities, OriginPackID: run.PackID, ConnectionID: NewID(), Durable: true, MaxModelRounds: h.runSettings(run).MaxModelRounds, MaxToolCalls: h.runSettings(run).MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.runSettings(run).MaxContextCharacters}
+	runtime := &AgentRuntime{Provider: provider, Model: runModel, Grants: policy.GrantedCapabilities, OriginPackID: run.PackID, ConnectionID: NewID(), Durable: true, MaxModelRounds: h.runSettings(run).MaxModelRounds, MaxToolCalls: h.runSettings(run).MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.runSettings(run).MaxContextCharacters}
 	runtime.CompletionValidator = h.CompletionValidator
 	runtime.ContextPolicy = h.runSettings(run).ContextPolicy
 	runtime.ModelContextWindowTokens = h.runSettings(run).ModelContextWindowTokens

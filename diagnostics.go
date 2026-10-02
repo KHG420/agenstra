@@ -30,6 +30,8 @@ type RunDiagnostics struct {
 func ExplainRunError(code, capability string) DiagnosticFinding {
 	f := DiagnosticFinding{Actionable: true, Category: "business", Code: code, Capability: capability, Message: "业务操作未完成。", NextAction: "核对业务接口的返回状态与实际数据。"}
 	switch {
+	case code == "model_output_invalid_json" || code == "model_output_protocol_mismatch" || code == "model_response_invalid" || code == "model_output_empty" || code == "model_decision_schema_invalid" || code == "model_memory_schema_invalid":
+		f.Category, f.Message, f.NextAction = "model", "模型响应未满足结构化输出契约。", "在模型配置中验证所选 API、模型和参数的结构化输出；检查网关协议适配，保留严格 JSON 与决策校验。"
 	case code == "browser_context_required" || code == "browser_context_changed":
 		f.Category, f.Message, f.NextAction = "browser", "页面观察数据尚未读取或已发生改变。", "先读取 ui.get_context 获取当前页面状态，再决定是否重新提交页面操作；活动写入还需核对宿主业务版本。"
 	case strings.Contains(code, "authorization") || strings.Contains(code, "unauthorized") || strings.Contains(code, "forbidden") || strings.Contains(code, "not_granted") || strings.Contains(code, "identity") || strings.Contains(code, "access_denied"):
@@ -89,6 +91,27 @@ func (h *AgentHost) GetDiagnostics(ctx context.Context, id, owner string) (RunDi
 	}
 	if state.ErrorCode != nil {
 		add(ExplainRunError(*state.ErrorCode, ""))
+	}
+	for i, call := range state.ModelCalls {
+		if call.FormatError == "" {
+			continue
+		}
+		finding := ExplainRunError(call.FormatError, "")
+		purpose := call.Purpose
+		if purpose == "" {
+			purpose = "decision"
+		}
+		for _, later := range state.ModelCalls[i+1:] {
+			laterPurpose := later.Purpose
+			if laterPurpose == "" {
+				laterPurpose = "decision"
+			}
+			if laterPurpose == purpose && later.Attempts > 0 && !later.Reservation && later.ErrorCode == nil {
+				finding.Recovered, finding.Actionable = true, false
+				break
+			}
+		}
+		add(finding)
 	}
 	latest := map[string]int{}
 	unresolved := map[string]bool{}

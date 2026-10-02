@@ -104,12 +104,14 @@ go run ./cmd/agenstra \
   --pack local/packs/records/pack.json --inspect
 ```
 
-其中 `local/packs/records/pack.json` 由你按教程创建，不在仓库内。服务运行还需要：
+其中 `local/packs/records/pack.json` 由你按教程创建，不在仓库内。未配置 `models` 目录时，服务运行需要：
 
 - `AGENT_MODEL`：模型名称。
 - `AGENT_MODEL_BASE_URL`：模型网关基地址，例如 `https://gateway.example/v1`；适配器请求其 `/chat/completions`。
 - `AGENT_MODEL_API_KEY`：模型网关密钥。
 - 部署配置中指定的每个用户 API key、外部接口地址与凭据环境变量。
+
+框架也支持多个模型连接，并分别为业务决策和记忆提取选择 API、模型及推理参数；可通过管理页面、API 或 CLI 配置。新任务固定所选配置，后续修改只影响新任务，详见[模型配置与选择](docs/model-selection.md)。
 
 默认模型适配器要求 `/chat/completions` 返回 JSON 字符串决策，使用 `response_format: {"type":"json_object"}`。模型必须实际支持这一协议；其他模型可实现 `DecisionModel` 接口接入。准备好自己的 `local/deployment.json` 后启动：
 
