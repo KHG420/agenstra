@@ -5,6 +5,9 @@ import "context"
 // UsageAvailable distinguishes provider-reported usage from an estimate.
 // EstimatedCostUSD is populated only when the caller configured model prices.
 type ModelCallMetrics struct {
+	Purpose               string   `json:"purpose,omitempty"`
+	SourceID              string   `json:"source_id,omitempty"`
+	Reservation           bool     `json:"reservation,omitempty"`
 	Round                 int      `json:"round"`
 	Attempts              int      `json:"attempts"`
 	InputTokens           int64    `json:"input_tokens"`
