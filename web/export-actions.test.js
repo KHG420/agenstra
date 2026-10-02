@@ -53,3 +53,22 @@ test("invalid profiles fail before altering any host files", async () => {
     await exportActions(path, dir);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test("closed empty object contracts stay objects rather than accepting primitives", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "agenstra-empty-action-"));
+  try {
+    const path = join(dir, "profile.json");
+    await writeFile(path, JSON.stringify({ schema: "agenstra.frontend-profile.v1", version: "1", handler_version: "1", context_schema: { type: "object" }, actions: [{ name: "ui.close", description: "Close a panel", input_schema: { type: "object", additionalProperties: false }, output_schema: { type: "object", additionalProperties: false } }] }));
+    await exportActions(path, dir);
+    const types = await readFile(join(dir, "agenstra-actions.d.ts"), "utf8");
+    assert.match(types, /args: Record<string, never>/);
+    assert.match(types, /=> Record<string, never> \| Promise<Record<string, never>>/);
+    assert.doesNotMatch(types, /\{\s*\}/);
+    // Pattern-constrained objects can still contain keys even when additional
+    // properties are disabled; do not mistake them for the empty object.
+    const profile = JSON.parse(await readFile(path, "utf8"));
+    profile.actions[0].input_schema.patternProperties = { "^x": { type: "string" } };
+    await writeFile(path, JSON.stringify(profile)); await exportActions(path, dir);
+    assert.match(await readFile(join(dir, "agenstra-actions.d.ts"), "utf8"), /args: \{ \[key: string\]: unknown;/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

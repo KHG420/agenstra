@@ -32,6 +32,7 @@ export class AgenstraClient {
   this.runWatchers = new Set();
     this.aborters = new Set();
     this.browserEpoch = 0;
+    this.browserConnected = false;
     this.pagehide = () => { this.destroy({ closeSession: false }); };
     globalThis.addEventListener?.("pagehide", this.pagehide);
   }
@@ -62,8 +63,9 @@ export class AgenstraClient {
       if (body !== undefined) headers["Content-Type"] = "application/json";
       if (browserKey) headers["X-Agenstra-Browser-Key"] = browserKey;
       const response = await this.fetch(this.endpoint + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: aborter.signal, credentials: "same-origin" });
-      if (response.status === 401 && retry) { this.token = null; return await this.request(path, { method, body, browserKey, retry: false }); }
       const data = await response.json();
+      const code = data.code || data.detail?.code;
+      if (response.status === 401 && retry && code === "unauthorized") { this.token = null; return await this.request(path, { method, body, browserKey, retry: false }); }
       if (!response.ok) throw new AgenstraError(data.code || data.detail?.code || "request_failed", response.status);
       return data;
     } finally { this.aborters.delete(aborter); }
@@ -80,7 +82,7 @@ export class AgenstraClient {
     if (!this.options.browser) return null;
     if (this.recoveryPromise) return this.recoveryPromise;
     if (this.browserPromise) return this.browserPromise;
-    this.browserPromise = this.connectBrowserOnce().catch(error => { this.browserPromise = null; throw error; });
+    this.browserPromise = this.connectBrowserOnce().catch(error => { this.browserPromise = null; this.browserConnected = false; this.emit("connection", { status: "disconnected" }); throw error; });
     return this.browserPromise;
   }
   async connectBrowserOnce() {
@@ -116,6 +118,7 @@ export class AgenstraClient {
     await this.flushReceipts();
     await this.publishPageObservation();
     if (!this.closed) this.browserTimer = setTimeout(() => this.pollBrowser(), 0);
+    this.browserConnected = true;
     this.emit("connection", { status: "connected" });
     return this.browser;
   }
@@ -157,6 +160,7 @@ export class AgenstraClient {
       await this.replaceBrowser(acknowledgeUnknown);
       await this.publishPageObservation();
       if (!this.closed) this.browserTimer = setTimeout(() => this.pollBrowser(), 0);
+      this.browserConnected = true;
       this.emit("connection", { status: "connected" });
       return this.browser;
     })();
@@ -164,7 +168,7 @@ export class AgenstraClient {
       const browser = await this.recoveryPromise;
       this.browserPromise = Promise.resolve(browser);
       return browser;
-    } catch (error) { this.browserPromise = null; throw error; }
+    } catch (error) { this.browserPromise = null; this.browserConnected = false; this.emit("connection", { status: "disconnected" }); throw error; }
     finally { this.recoveryPromise = null; }
   }
   updatePageObservation(observation) {
@@ -198,10 +202,12 @@ export class AgenstraClient {
       if (epoch !== this.browserEpoch) return;
       const data = await this.request("/browser/v1/sessions/" + this.browser.id + "/poll", { method: "POST", browserKey: this.browser.key, body: { generation: this.browser.generation } });
       if (this.closed || epoch !== this.browserEpoch) return;
+      if (!this.browserConnected) { this.browserConnected = true; this.emit("connection", { status: "connected" }); }
       if (data.blocked_unknown) this.emit("reconciliation", { status: "unknown" });
       for (const command of data.commands) void this.executeCommand(command);
     } catch (error) {
       if (this.closed || epoch !== this.browserEpoch) return;
+      this.browserConnected = false;
       this.emit("error", error);
       this.emit("connection", { status: "disconnected" });
       if (["browser_generation_changed", "browser_session_invalid"].includes(error.code)) return;
@@ -369,7 +375,7 @@ export class AgenstraClient {
       const selectionRevision = this.selectionRevision;
       const snapshot = await this.request("/chat/v1/conversations/" + conversation.id);
       if (selectionRevision === this.selectionRevision && snapshot.conversation.id === this.conversation?.id) this.emit("conversation", snapshot);
-      this.emit("connection", { status: "connected" });
+      if (!this.options.browser || this.browserConnected) this.emit("connection", { status: "connected" });
     }
     catch (error) { this.emit("error", error); this.emit("connection", { status: "disconnected" }); }
     if (!this.closed && this.chatWatchers) this.chatTimer = setTimeout(() => this.pollChat(), this.options.pollInterval || 1000);

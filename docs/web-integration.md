@@ -49,6 +49,23 @@
 
 `AGENT_WEB_SESSION_KEY` 是至少 32 字节的随机服务端秘密，可用 `openssl rand -hex 32` 生成。票据有效期默认 900 秒，可配置 60–3600 秒。`allowed_origins` 为不含路径的精确 HTTP(S) origin；直接同源请求自动允许。TLS 在反向代理终止时，显式配置外部 HTTPS origin。可使用同源 `/agent` 反向代理，代理去掉 `/agent` 前缀。
 
+同源代理必须保留 `Authorization`、`Content-Type` 和 `X-Agenstra-Browser-Key` 请求头。前两个用于登录票据和 JSON；最后一个用于浏览器会话及动作回执。只转发前两个会造成“聊天历史可读，但页面观察、动作投递和发送消息报 `browser_session_invalid`”。`/agent/web/v1/token` 应由宿主服务端换票接口调用，不向浏览器透传宿主长期 API key；宿主换票及写请求仍要校验已登录身份和同源来源。
+
+代理的最小转发片段（目标 URL 已由宿主限定为框架路径）：
+
+```js
+const headers = new Headers();
+for (const name of ["authorization", "content-type", "x-agenstra-browser-key"]) {
+  const value = request.headers.get(name);
+  if (value) headers.set(name, value);
+}
+// 将 headers 传给服务端 fetch；不要记录上述凭证头。
+```
+
+框架返回 `unauthorized` 时，SDK 会重新获取一次登录票据；`browser_session_invalid` 代表页面会话凭证不匹配，换登录票据不能修复它。排查代理头、会话恢复和宿主身份映射。浏览器模式下，标准聊天的“已连接”需要页面桥接已成功；聊天历史能读不代表页面能执行动作。
+
+`ui.get_context` 返回的是带页面 revision 的快照引用，其生命周期不再绑定读取时那一次 30 秒心跳。用户正常等待审批且页面不变时，不应因心跳时间推移而重读、重新审批。动作投递和开始执行仍检查当前在线状态、代次、授权及页面 revision；页面变化会使原命令返回 `browser_context_changed`，需要刷新观察和重新确认。其他业务 Fact 的显式到期时间、操作审批期限和任务总时限仍照常生效。
+
 扩展库必须与运行库、管理库分开。备份和恢复时停止写入，同时保存各数据库和能力包，避免恢复到不一致的时间点。模块没有自动保留期清理。
 
 上述组合接入对应用户增加 `"browser_actions": {"records-web": ["ui.navigate"]}`。用户仍须拥有 `users.<owner>.packs.records` 的有效连接及 `allow_model_data: true`。后端授权沿用现有配置。浏览器注册 handler 仅声明能执行的动作，服务端决定权限。组合接入的 Go 嵌入式服务可设置 `server.Web.ResolveBrowserActions`，实时读取宿主授权；先以 `workerEnabled=false` 构造服务器、设置 hook，再运行自己的 `Web.Tick` / `Host.WakeDue` 调度。不要在运行期间并发修改配置 map 或 hook。

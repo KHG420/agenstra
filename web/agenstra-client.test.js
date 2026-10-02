@@ -339,3 +339,47 @@ test('public HTTP pages without randomUUID still get stable valid UUID request I
     assert.notEqual(first, second);
   } finally { Object.defineProperty(globalThis, 'crypto', original); await c.destroy({ closeSession: false }); }
 });
+
+test("browser key rejection does not exchange another login ticket", async t => {
+  let tickets = 0, requests = 0;
+  const c = new AgenstraClient({ integration: "lottery", storage: null,
+    getSession: async () => { tickets++; return "ticket"; },
+    fetch: async () => { requests++; return response({ code: "browser_session_invalid" }, 401); },
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  await assert.rejects(c.request("/browser/v1/sessions/tab/observation", { method: "POST", browserKey: "key", body: {} }), { code: "browser_session_invalid" });
+  assert.equal(tickets, 1); assert.equal(requests, 1);
+});
+
+test("chat polling cannot report connected while the browser bridge failed", async t => {
+  const states = [];
+  const c = new AgenstraClient({ integration: "lottery", storage: null, browser: true, handlerVersion: "1", getSession: async () => "ticket",
+    fetch: async path => {
+      if (path.endsWith("/sessions")) return response({ session: { id: "tab", generation: 1, context_revision: 0 }, key: "key" });
+      if (path.endsWith("/observation")) return response({ code: "browser_session_invalid" }, 401);
+      if (path.endsWith("/conversations")) return response({ id: "chat", integration_id: "lottery" });
+      return response({ conversation: { id: "chat", integration_id: "lottery" }, messages: [] });
+    },
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.on("connection", state => states.push(state.status));
+  await assert.rejects(c.connectBrowser(), { code: "browser_session_invalid" });
+  c.chatWatchers = 1;
+  await c.pollChat();
+  assert.deepEqual(states, ["disconnected"]);
+});
+
+test("transient browser polling failure recovers its connected state", async t => {
+  let fail = true;
+  const states = [];
+  const c = new AgenstraClient({ integration: "lottery", storage: null, browser: true, getSession: async () => "ticket", fetch: async () => {
+    if (fail) throw new Error("temporary transport loss");
+    return response({ commands: [] });
+  } });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.browser = { id: "tab", generation: 1, key: "key" };
+  c.on("connection", state => states.push(state.status));
+  await c.pollBrowser(); clearTimeout(c.browserTimer);
+  fail = false; await c.pollBrowser();
+  assert.deepEqual(states, ["disconnected", "connected"]);
+});
