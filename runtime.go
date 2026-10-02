@@ -26,6 +26,7 @@ type AgentRuntime struct {
 	MaxRepeatedCall      int
 	MaxContextCharacters int
 	Memories             []MemoryView
+	CompletionValidator  CompletionValidator
 }
 
 func (r *AgentRuntime) defaults() {
@@ -574,6 +575,27 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		}
 		if !valid {
 			Reject(state, "final", "agent.final", "final_fact_citations_invalid", nil, "")
+		} else if r.CompletionValidator != nil {
+			err := r.CompletionValidator(ctx, CompletionContext{RunID: state.RunID, OriginPackID: r.OriginPackID, Instruction: state.Instruction, AnswerMarkdown: decision.AnswerMarkdown, FactIDs: decision.FactIDs, Facts: state.Facts, Observations: state.Observations, Followups: state.Followups})
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if err != nil {
+				code, feedback := "completion_validation_failed", "The final answer did not satisfy the host's completion checks."
+				var validation CompletionValidationError
+				if errors.As(err, &validation) {
+					if safeCodePattern.MatchString(validation.Kind) {
+						code = validation.Kind
+					}
+					if len(validation.Feedback) <= 1000 && validation.Feedback != "" {
+						feedback = validation.Feedback
+					}
+				}
+				Reject(state, "final", "agent.final", code, JSON{"feedback": feedback}, "")
+			} else {
+				state.Status = "completed"
+				state.AnswerMarkdown = decision.AnswerMarkdown
+			}
 		} else {
 			state.Status = "completed"
 			state.AnswerMarkdown = decision.AnswerMarkdown
