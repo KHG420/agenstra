@@ -20,15 +20,22 @@ func (e ModelDecisionError) Error() string { return e.Kind }
 func (e ModelDecisionError) Code() string  { return e.Kind }
 
 type HTTPJSONDecisionModel struct {
-	ContextWindowTokens   int64
-	MaxInputTokens        int64
-	ProtocolReserveTokens int64
-	CountInputTokens      func(model string, payload []byte) (int64, error)
-	Model                 string
-	BaseURL               string
-	APIKey                string
-	Timeout               time.Duration
-	Client                *http.Client
+	Profile                    string
+	APIType                    string
+	Thinking                   string
+	ReasoningEffort            string
+	Temperature                *float64
+	CachedInputPricePerMillion *float64
+	PricesConfigured           bool
+	ContextWindowTokens        int64
+	MaxInputTokens             int64
+	ProtocolReserveTokens      int64
+	CountInputTokens           func(model string, payload []byte) (int64, error)
+	Model                      string
+	BaseURL                    string
+	APIKey                     string
+	Timeout                    time.Duration
+	Client                     *http.Client
 	// Zero values use bounded defaults. MaxAttempts includes the first request;
 	// set it to one to disable transport retries.
 	MaxAttempts     int
@@ -83,6 +90,7 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet ContextPacket
 	}
 	decision, err = strictDecision(body)
 	if err != nil {
+		metrics.FormatError = modelContentError(body)
 		var oversized DecisionTooManyCallsError
 		if errors.As(err, &oversized) {
 			return Decision{}, oversized
@@ -92,6 +100,10 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet ContextPacket
 	return decision, nil
 }
 func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, prompt string) ([]byte, error) {
+	if metrics := modelMetrics(ctx); metrics != nil {
+		metrics.Profile, metrics.Model, metrics.APIType = m.Profile, m.Model, m.APIType
+		metrics.Thinking, metrics.ReasoningEffort = m.Thinking, m.ReasoningEffort
+	}
 	payload, err := m.requestPayload(input, prompt)
 	if err != nil {
 		return nil, err
@@ -229,9 +241,17 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		delay = min(delay*2, maxDelay)
 	}
 	var envelope struct {
+		Model string `json:"model"`
 		Usage *struct {
-			Input  *int64 `json:"prompt_tokens"`
-			Output *int64 `json:"completion_tokens"`
+			Input         *int64 `json:"prompt_tokens"`
+			Output        *int64 `json:"completion_tokens"`
+			CacheHit      *int64 `json:"prompt_cache_hit_tokens"`
+			PromptDetails *struct {
+				Cached *int64 `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
+			CompletionDetails *struct {
+				Reasoning *int64 `json:"reasoning_tokens"`
+			} `json:"completion_tokens_details"`
 		} `json:"usage"`
 		Choices []struct {
 			Message struct {
@@ -245,9 +265,12 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		metrics.EstimatedOutputTokens = int64(len(body))
 	}
 	if json.Unmarshal(body, &envelope) != nil || len(envelope.Choices) == 0 {
-		return nil, ModelDecisionError{"model_decision_invalid"}
+		return nil, invalidModelOutput(ctx, "model_response_invalid")
 	}
 	if metrics := modelMetrics(ctx); metrics != nil {
+		if len(envelope.Model) <= 128 {
+			metrics.ResponseModel = envelope.Model
+		}
 		metrics.FinishReason = envelope.Choices[0].FinishReason
 		if len(metrics.FinishReason) > 32 {
 			metrics.FinishReason = "unknown"
@@ -256,8 +279,26 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		if usage := envelope.Usage; usage != nil && usage.Input != nil && usage.Output != nil && *usage.Input >= 0 && *usage.Output >= 0 && *usage.Input <= 1000000000 && *usage.Output <= 1000000000 {
 			metrics.UsageAvailable = true
 			metrics.InputTokens, metrics.OutputTokens = *usage.Input, *usage.Output
-			if m.InputPricePerMillion >= 0 && m.OutputPricePerMillion >= 0 && (m.InputPricePerMillion > 0 || m.OutputPricePerMillion > 0) {
-				cost := (float64(metrics.InputTokens)*m.InputPricePerMillion + float64(metrics.OutputTokens)*m.OutputPricePerMillion) / 1e6
+			cached := usage.CacheHit
+			if usage.PromptDetails != nil && usage.PromptDetails.Cached != nil {
+				cached = usage.PromptDetails.Cached
+			}
+			if cached != nil && *cached >= 0 && *cached <= metrics.InputTokens {
+				metrics.CachedInputTokens = cached
+			}
+			if usage.CompletionDetails != nil {
+				n := usage.CompletionDetails.Reasoning
+				if n != nil && *n >= 0 && *n <= metrics.OutputTokens {
+					metrics.ReasoningOutputTokens = n
+				}
+			}
+			priced := m.PricesConfigured || m.InputPricePerMillion > 0 || m.OutputPricePerMillion > 0
+			if m.InputPricePerMillion >= 0 && m.OutputPricePerMillion >= 0 && priced && (m.CachedInputPricePerMillion == nil || *m.CachedInputPricePerMillion >= 0 && metrics.CachedInputTokens != nil) {
+				inputCost := float64(metrics.InputTokens) * m.InputPricePerMillion
+				if m.CachedInputPricePerMillion != nil {
+					inputCost = float64(metrics.InputTokens-*metrics.CachedInputTokens)*m.InputPricePerMillion + float64(*metrics.CachedInputTokens)*(*m.CachedInputPricePerMillion)
+				}
+				cost := (inputCost + float64(metrics.OutputTokens)*m.OutputPricePerMillion) / 1e6
 				if !math.IsNaN(cost) && !math.IsInf(cost, 0) {
 					metrics.EstimatedCostUSD = &cost
 				}
@@ -271,9 +312,26 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		return nil, ModelDecisionError{"model_output_truncated"}
 	}
 	if envelope.Choices[0].Message.Content == "" {
-		return nil, ModelDecisionError{"model_decision_invalid"}
+		return nil, invalidModelOutput(ctx, "model_output_empty")
 	}
 	return []byte(envelope.Choices[0].Message.Content), nil
+}
+
+func invalidModelOutput(ctx context.Context, detail string) error {
+	if metrics := modelMetrics(ctx); metrics != nil {
+		metrics.FormatError = detail
+	}
+	return ModelDecisionError{"model_decision_invalid"}
+}
+
+func modelContentError(body []byte) string {
+	if !json.Valid(body) {
+		if strings.Contains(string(body), "DSML") {
+			return "model_output_protocol_mismatch"
+		}
+		return "model_output_invalid_json"
+	}
+	return "model_decision_schema_invalid"
 }
 
 func (m *HTTPJSONDecisionModel) retrySettings() (int, time.Duration, time.Duration) {

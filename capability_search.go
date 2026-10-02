@@ -3,11 +3,57 @@ package agenstra
 import (
 	"sort"
 	"strings"
+	"unicode"
 )
 
 type capabilityMatch struct {
 	name  string
 	score int
+}
+
+// Han text has no space-delimited words. Overlapping short phrases retain
+// natural-language matches without a dictionary, model request or business IO.
+func capabilityQueryTerms(query string, significantOnly bool) []string {
+	terms, seen := []string{}, map[string]bool{}
+	add := func(term string) {
+		if term != "" && !seen[term] {
+			seen[term] = true
+			terms = append(terms, term)
+		}
+	}
+	for _, part := range strings.FieldsFunc(strings.ToLower(query), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '.' }) {
+		runes := []rune(part)
+		hasHan := false
+		for _, r := range runes {
+			if unicode.Is(unicode.Han, r) {
+				hasHan = true
+				break
+			}
+		}
+		if !significantOnly || hasHan || len(runes) >= 3 {
+			add(part)
+		}
+		if hasHan {
+			for i := range runes {
+				for _, n := range []int{2, 3} {
+					if i+n > len(runes) {
+						continue
+					}
+					allHan := true
+					for _, r := range runes[i : i+n] {
+						if !unicode.Is(unicode.Han, r) {
+							allHan = false
+							break
+						}
+					}
+					if allHan {
+						add(string(runes[i : i+n]))
+					}
+				}
+			}
+		}
+	}
+	return terms
 }
 
 func capabilitySearchText(cap CapabilityDescription) (string, string, string) {
@@ -26,7 +72,7 @@ func searchAuthorizedCapabilities(caps map[string]CapabilityDescription, grants 
 	if limit < 1 {
 		return []string{}
 	}
-	terms := strings.Fields(strings.ToLower(query))
+	terms := capabilityQueryTerms(query, false)
 	if len(terms) == 0 {
 		return []string{}
 	}
@@ -85,7 +131,7 @@ func selectedCapabilityNames(caps map[string]CapabilityDescription, grants map[s
 	}
 	selected := []string{}
 	seen := map[string]bool{}
-	add := func(name string) {
+	addSingle := func(name string) {
 		cap, ok := caps[name]
 		if !ok || len(selected) >= limit || seen[name] || !grants[cap.Name] {
 			return
@@ -93,18 +139,25 @@ func selectedCapabilityNames(caps map[string]CapabilityDescription, grants map[s
 		selected = append(selected, name)
 		seen[name] = true
 	}
+	add := func(name string) {
+		cap, ok := caps[name]
+		if !ok || seen[name] || !grants[cap.Name] {
+			return
+		}
+		// Reserve a slot for the authorized prerequisite before revealing a page
+		// action. A limit of one may show context first; search remains available.
+		if strings.HasPrefix(cap.Name, "ui.") && cap.Operation != nil && cap.Operation.PollCapability == "ui.command_status" {
+			addSingle("ui.get_context")
+		}
+		addSingle(name)
+	}
 	for _, name := range filteredSearch {
 		add(name)
 	}
 	if state.InspectedCapability != nil {
 		add(*state.InspectedCapability)
 	}
-	significant := []string{}
-	for _, term := range strings.Fields(instruction) {
-		if len([]rune(term)) >= 3 {
-			significant = append(significant, term)
-		}
-	}
+	significant := capabilityQueryTerms(instruction, true)
 	for _, name := range searchAuthorizedCapabilities(caps, grants, strings.Join(significant, " "), limit) {
 		add(name)
 	}

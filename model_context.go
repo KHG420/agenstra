@@ -69,7 +69,19 @@ func (m *HTTPJSONDecisionModel) measurePayload(raw []byte) (InputMeasurement, er
 	return InputMeasurement{Tokens: int64(len(raw) + 128), Source: "utf8_bytes_estimate"}, nil
 }
 func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (JSON, error) {
+	if err := validateModelParameters(m.APIType, m.Thinking, m.ReasoningEffort, m.Temperature); err != nil {
+		return nil, ModelDecisionError{"model_parameters_invalid"}
+	}
 	payload := JSON{"model": m.Model, "response_format": JSON{"type": "json_object"}, "messages": []any{JSON{"role": "system", "content": prompt}, JSON{"role": "user", "content": string(input)}}}
+	if m.Thinking != "" {
+		payload["thinking"] = JSON{"type": m.Thinking}
+	}
+	if m.ReasoningEffort != "" {
+		payload["reasoning_effort"] = m.ReasoningEffort
+	}
+	if m.Temperature != nil {
+		payload["temperature"] = *m.Temperature
+	}
 	if m.MaxOutputTokens > 0 {
 		field := m.TokenLimitField
 		if field == "" {

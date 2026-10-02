@@ -74,9 +74,11 @@ func (m *HTTPJSONDecisionModel) ExtractMemoriesMeasured(ctx context.Context, req
 		Proposals []MemoryProposal `json:"proposals"`
 	}
 	if !json.Valid(raw) {
+		metrics.FormatError = modelContentError(raw)
 		return nil, metrics, hostError("memory_extraction_invalid")
 	}
 	if err = strictUnmarshal(raw, &response); err != nil || response.Proposals == nil {
+		metrics.FormatError = "model_memory_schema_invalid"
 		return nil, metrics, hostError("memory_extraction_invalid")
 	}
 	if err = validateProposals(request.Text, response.Proposals); err != nil {

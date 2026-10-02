@@ -5,6 +5,16 @@ import "context"
 // UsageAvailable distinguishes provider-reported usage from an estimate.
 // EstimatedCostUSD is populated only when the caller configured model prices.
 type ModelCallMetrics struct {
+	FormatRecovery        bool     `json:"format_recovery,omitempty"`
+	Profile               string   `json:"profile,omitempty"`
+	Model                 string   `json:"model,omitempty"`
+	ResponseModel         string   `json:"response_model,omitempty"`
+	APIType               string   `json:"api_type,omitempty"`
+	Thinking              string   `json:"thinking,omitempty"`
+	ReasoningEffort       string   `json:"reasoning_effort,omitempty"`
+	CachedInputTokens     *int64   `json:"cached_input_tokens,omitempty"`
+	ReasoningOutputTokens *int64   `json:"reasoning_output_tokens,omitempty"`
+	FormatError           string   `json:"format_error,omitempty"`
 	Purpose               string   `json:"purpose,omitempty"`
 	SourceID              string   `json:"source_id,omitempty"`
 	Reservation           bool     `json:"reservation,omitempty"`
@@ -23,13 +33,23 @@ type ModelCallMetrics struct {
 }
 
 type ModelUsage struct {
-	Requests          int     `json:"requests"`
-	InputTokens       int64   `json:"input_tokens"`
-	OutputTokens      int64   `json:"output_tokens"`
-	BudgetTokens      int64   `json:"budget_tokens"`
-	EstimatedRequests int     `json:"estimated_requests"`
-	EstimatedCostUSD  float64 `json:"estimated_cost_usd"`
-	CostAvailable     bool    `json:"cost_available"`
+	ReportedRequests        int     `json:"reported_requests"`
+	FormatRecoveryRequests  int     `json:"format_recovery_requests"`
+	CachedInputTokens       *int64  `json:"cached_input_tokens,omitempty"`
+	ReasoningOutputTokens   *int64  `json:"reasoning_output_tokens,omitempty"`
+	CachedInputRequests     int     `json:"cached_input_requests"`
+	ReasoningOutputRequests int     `json:"reasoning_output_requests"`
+	PricedRequests          int     `json:"priced_requests"`
+	ElapsedMilliseconds     int64   `json:"elapsed_ms"`
+	InvalidResponses        int     `json:"invalid_responses"`
+	RetryAttempts           int     `json:"retry_attempts"`
+	Requests                int     `json:"requests"`
+	InputTokens             int64   `json:"input_tokens"`
+	OutputTokens            int64   `json:"output_tokens"`
+	BudgetTokens            int64   `json:"budget_tokens"`
+	EstimatedRequests       int     `json:"estimated_requests"`
+	EstimatedCostUSD        float64 `json:"estimated_cost_usd"`
+	CostAvailable           bool    `json:"cost_available"`
 }
 
 type modelMetricsKey struct{}
@@ -61,7 +81,24 @@ func addModelUsage(usage *ModelUsage, metrics ModelCallMetrics) {
 	if metrics.Attempts == 0 {
 		return
 	}
+	usage.ElapsedMilliseconds += metrics.ElapsedMilliseconds
+	usage.RetryAttempts += max(0, metrics.Attempts-1)
+	if metrics.FormatError != "" || metrics.ErrorCode != nil && *metrics.ErrorCode == "model_decision_invalid" {
+		usage.InvalidResponses++
+	}
+	if metrics.FormatRecovery {
+		usage.FormatRecoveryRequests++
+	}
 	if metrics.UsageAvailable {
+		usage.ReportedRequests++
+		if metrics.CachedInputTokens != nil {
+			addKnownTokens(&usage.CachedInputTokens, *metrics.CachedInputTokens)
+			usage.CachedInputRequests++
+		}
+		if metrics.ReasoningOutputTokens != nil {
+			addKnownTokens(&usage.ReasoningOutputTokens, *metrics.ReasoningOutputTokens)
+			usage.ReasoningOutputRequests++
+		}
 		usage.InputTokens += metrics.InputTokens
 		usage.OutputTokens += metrics.OutputTokens
 		usage.BudgetTokens += metrics.InputTokens + metrics.OutputTokens
@@ -75,6 +112,14 @@ func addModelUsage(usage *ModelUsage, metrics ModelCallMetrics) {
 	}
 	if metrics.EstimatedCostUSD != nil {
 		usage.CostAvailable = true
+		usage.PricedRequests++
 		usage.EstimatedCostUSD += *metrics.EstimatedCostUSD
 	}
+}
+
+func addKnownTokens(total **int64, n int64) {
+	if *total == nil {
+		*total = new(int64)
+	}
+	**total += n
 }

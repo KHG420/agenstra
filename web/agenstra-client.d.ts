@@ -93,7 +93,9 @@ export interface HostSettings {
  approval_seconds: number; max_concurrent_runs: number; max_model_tokens?: number; max_model_output_tokens?: number;
  model_token_limit_field?: "" | "max_tokens" | "max_completion_tokens"; max_stagnant_rounds?: number; max_concurrent_tools?: number;
 }
-export interface EffectiveRunConfig { version: 1; source: "run_snapshot" | "current_host"; settings: HostSettings; model: ModelInfo }
+export interface ModelProfile { api_type: "compatible_chat" | "openai_chat" | "deepseek_chat"; model: string; api_key_ref: string; base_url?: string; base_url_env?: string; thinking?: "enabled" | "disabled"; reasoning_effort?: string; temperature?: number; max_output_tokens?: number; token_limit_field?: "max_tokens" | "max_completion_tokens"; context_window_tokens?: number; max_input_tokens?: number; protocol_reserve_tokens?: number; timeout_seconds?: number; max_attempts?: number; prices?: { input_per_million: number; output_per_million: number; cached_input_per_million?: number } }
+export interface ModelConfiguration { default_profile: string; decision_profile?: string; memory_extraction_profile?: string; profiles: Record<string, ModelProfile> }
+export interface EffectiveRunConfig { version: 1; source: "run_snapshot" | "current_host"; settings: HostSettings; model: ModelInfo; model_selection?: { revision: number; config: ModelConfiguration } }
 export interface ModelInfo { protocol_reserve_tokens: number; name?: string; context_window_tokens: number | null; max_input_tokens: number | null; max_output_tokens: number | null }
 export interface ContextTelemetry {
  policy: ContextPolicy; strategy: "projection"; policy_unit: "characters" | "tokens"; projection_reason: "none" | "soft_threshold" | "hard_limit"; target_met: boolean;
@@ -104,9 +106,11 @@ export interface ContextTelemetry {
  omissions: { observations: number; arguments: number; fact_paths: number; skills: number; memories: number; deferred_schemas: number };
 }
 export interface CounterBudget { used: number; limit: number; remaining: number }
-export interface ModelUsage { requests: number; input_tokens: number; output_tokens: number; budget_tokens: number; estimated_requests: number; estimated_cost_usd: number; cost_available: boolean }
+export interface ModelUsage { requests: number; input_tokens: number; output_tokens: number; budget_tokens: number; estimated_requests: number; estimated_cost_usd: number; cost_available: boolean; cached_input_tokens?: number; reasoning_output_tokens?: number; cached_input_requests?: number; reasoning_output_requests?: number; priced_requests?: number; reported_requests?: number; format_recovery_requests?: number; elapsed_ms?: number; invalid_responses?: number; retry_attempts?: number }
 export interface ModelCallMetrics {
  round: number; purpose?: "decision" | "memory_extraction"; source_id?: string; reservation?: boolean;
+ profile?: string; model?: string; response_model?: string; api_type?: string; thinking?: string; reasoning_effort?: string;
+ cached_input_tokens?: number; reasoning_output_tokens?: number; format_error?: string; format_recovery?: boolean;
  attempts: number; input_tokens: number; output_tokens: number; usage_available: boolean;
  estimated_input_tokens: number; estimated_output_tokens: number; estimated_cost_usd?: number; elapsed_ms: number;
  finish_reason?: string; request_id?: string; error_code?: string;

@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed web/admin_ui.html web/admin_ui.css web/admin_ui.js web/admin_drafts.js
+//go:embed web/admin_ui.html web/admin_ui.css web/admin_ui.js web/admin_drafts.js web/admin_models.js
 var adminAssets embed.FS
 
 func registryHTTPError(w http.ResponseWriter, e error) {
@@ -21,7 +21,7 @@ func registryHTTPError(w http.ResponseWriter, e error) {
 		switch re.Code {
 		case "release_not_found", "binding_not_found", "draft_not_found":
 			status = 404
-		case "revision_conflict", "version_already_published", "draft_revision_conflict", "draft_item_conflict":
+		case "revision_conflict", "version_already_published", "draft_revision_conflict", "draft_item_conflict", "model_revision_conflict":
 			status = 409
 		}
 		apiError(w, status, re.Code, true)
@@ -59,6 +59,8 @@ func (s *HTTPServer) adminHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	registry := s.Deployment.Registry
 	switch {
+	case p == "/admin/api/models" || p == "/admin/api/models/check":
+		s.adminModels(w, r)
 	case p == "/admin/api/drafts" || strings.HasPrefix(p, "/admin/api/drafts/"):
 		s.adminDraft(w, r)
 	case p == "/admin/api/overview" && r.Method == "GET":
@@ -184,7 +186,7 @@ func adminHTML(w http.ResponseWriter) {
 	_, _ = w.Write(b)
 }
 func adminAsset(w http.ResponseWriter, name string) {
-	if name != "admin_ui.js" && name != "admin_ui.css" && name != "admin_drafts.js" {
+	if name != "admin_ui.js" && name != "admin_ui.css" && name != "admin_drafts.js" && name != "admin_models.js" {
 		http.NotFound(w, nil)
 		return
 	}

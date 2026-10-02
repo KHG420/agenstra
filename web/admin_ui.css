@@ -186,3 +186,10 @@ textarea, input { caret-color: var(--accent); }
 .operation-list { scrollbar-color: var(--line) var(--paper); scrollbar-width: thin; }
 input::placeholder, textarea::placeholder { color: var(--muted); }
 fieldset { min-width: 0; }
+.model-selection-panel { align-self: start; }
+.model-selection-panel h3:not(:first-child) { margin-top: 30px; }
+.model-selection-panel > select { margin-bottom: 20px; }
+#model-profile-form > select { margin-bottom: 18px; }
+.usage-table { margin: 20px 0; }
+.usage-table td { font-variant-numeric: tabular-nums; }
+#model-check-result { margin-top: 18px; overflow-wrap: anywhere; }

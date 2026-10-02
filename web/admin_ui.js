@@ -4,6 +4,15 @@
   const state = { token: "", overview: null, openapiSpec: null };
   const $ = (id) => document.getElementById(id);
   const messages = {
+    model_revision_conflict: "模型配置已被其他管理员更新。请重新读取后合并修改。",
+    model_configuration_invalid: "模型配置不完整，请检查名称、模型 ID 和凭据引用。",
+    model_selection_invalid: "所选模型配置不存在，请检查默认模型与用途选择。",
+    model_endpoint_invalid: "模型地址无效，请填写 HTTP(S) 基础地址，或检查地址环境变量。",
+    model_parameters_invalid: "模型参数超出支持范围，请检查限制与数值。",
+    model_parameters_unsupported: "所选 API 不支持这组推理或温度参数，请调整参数后验证。",
+    model_credentials_unavailable: "服务端无法读取模型凭据，请检查环境变量或 secret 文件引用。",
+    model_prices_invalid: "价格必须是非负有限数值。",
+    model_management_unavailable: "当前服务使用自定义模型，请使用部署的模型模块启用选择功能。",
     draft_not_found: "草稿不存在，请刷新草稿列表。",
     draft_revision_conflict: "草稿已在其他页面或 CLI 更新。当前修改仍在页面中；请导出后重新读取并合并。",
     draft_item_conflict: "存在同名能力或技能。请检查导入预览，并明确选择保留或替换。",
@@ -233,6 +242,7 @@
     renderBindings();
     renderAudit();
     await drafts.refreshList();
+    await models.refresh();
     $("connection-state").textContent = "已连接";
     $("connection-state").classList.add("connected");
   }
@@ -310,6 +320,7 @@
     } catch (error) { feedback(error.message, "error", "binding-feedback"); }
   });
   const drafts = window.installDraftEditor({ api, feedback, names, formatDate, onPublish: refresh, getOverview: () => state.overview });
+  const models = window.installModelEditor({ api, feedback });
 
   let diagnosticBusy = false;
   let diagnosticCreate = null;
@@ -330,6 +341,7 @@
     const result = $("diagnostic-result"); result.replaceChildren();
     const heading = document.createElement("h3"); heading.textContent = `任务 ${report.run_id} · ${report.status}`; result.append(heading);
     const metrics = document.createElement("p"); metrics.textContent = `耗时 ${(report.elapsed_ms / 1000).toFixed(1)} 秒 · 业务调用 ${report.budget.tool_calls.used} 次 · 模型预算计入 ${report.budget.tokens.charged_tokens} tokens`; result.append(metrics);
+    models.renderUsage(result, report.budget.usage_by_purpose, report.budget.usage);
     for (const finding of report.findings) {
       const item = document.createElement("div"); item.className = "diagnostic-finding";
       const title = document.createElement("strong"); title.textContent = finding.message;

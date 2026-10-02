@@ -104,12 +104,14 @@ go run ./cmd/agenstra \
   --pack local/packs/records/pack.json --inspect
 ```
 
-`local/packs/records/pack.json` is a path you create; it is not in this repository. Serving runs also requires:
+`local/packs/records/pack.json` is a path you create; it is not in this repository. Without a `models` catalog, serving runs requires:
 
 - `AGENT_MODEL`: the model name.
 - `AGENT_MODEL_BASE_URL`: the model gateway base URL, such as `https://gateway.example/v1`; the adapter calls its `/chat/completions` endpoint.
 - `AGENT_MODEL_API_KEY`: the model gateway credential.
 - The user API keys, external service addresses, and credentials referenced by your deployment configuration.
+
+To configure multiple model connections and select separate parameters for decisions and memory extraction, use the management console, API, or CLI described in [model selection (Chinese)](docs/model-selection.md). New runs pin their selected configuration; changes apply to future runs.
 
 The default model adapter asks `/chat/completions` for a JSON-object decision using `response_format: {"type":"json_object"}`. The model must actually support this protocol. To use another model interface, implement `DecisionModel`. Once you have created `local/deployment.json`, start the host:
 

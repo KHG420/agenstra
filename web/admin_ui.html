@@ -7,6 +7,7 @@
   <title>Agenstra · 能力管理</title>
   <link rel="stylesheet" href="/admin/assets/admin_ui.css">
   <script src="/admin/assets/admin_drafts.js" defer></script>
+  <script src="/admin/assets/admin_models.js" defer></script>
   <script src="/admin/assets/admin_ui.js" defer></script>
 </head>
 <body>
@@ -20,6 +21,7 @@
     <aside class="sidebar" aria-label="管理导航">
       <p class="sidebar-label">工作区</p>
       <a href="#releases">版本目录</a>
+      <a href="#models">模型配置</a>
       <a href="#publish">草稿编辑</a>
       <a href="#bindings">连接与授权</a>
       <a href="#diagnostics">试运行与诊断</a>
@@ -57,6 +59,45 @@
           </table>
         </div>
         <p id="release-feedback" class="feedback inline-feedback" role="status" aria-live="polite"></p>
+      </section>
+
+      <section id="models" class="section" aria-labelledby="models-title">
+        <div class="section-heading"><div><h2 id="models-title">模型配置</h2><p>选择模型服务和推理参数，分别用于业务决策与记忆提取。保存后用于新任务，已有任务保留原配置。</p></div><button id="models-reload" class="button secondary" type="button">重新读取</button></div>
+        <p id="models-status" role="status">连接管理服务后读取配置。</p>
+        <div id="models-editor" class="two-column" hidden>
+          <form id="model-profile-form" class="form-panel">
+            <h3>模型服务与参数</h3>
+            <label for="model-profile-list">编辑配置</label><select id="model-profile-list"><option value="">添加模型配置</option></select>
+            <div class="form-grid"><div><label for="model-profile-id">配置名称</label><input id="model-profile-id" type="text" required placeholder="business"></div><div><label for="model-api-type">API 接口</label><select id="model-api-type"><option value="compatible_chat">通用 Chat Completions</option><option value="openai_chat">OpenAI Chat Completions</option><option value="deepseek_chat">DeepSeek Chat Completions</option></select></div></div>
+            <label for="model-name">模型名称</label><input id="model-name" type="text" required placeholder="服务提供的模型 ID">
+            <label for="model-base-url">API 地址</label><input id="model-base-url" type="text" placeholder="https://api.example.com/v1"><small>填写基础地址，框架请求其 /chat/completions。也可以在高级设置中引用地址环境变量。</small>
+            <label for="model-key-ref">API key 引用</label><input id="model-key-ref" type="text" required placeholder="MODEL_API_KEY"><small>填写服务端环境变量名或 secret:NAME 文件引用。</small>
+            <div class="form-grid"><div><label for="model-reasoning">推理设置</label><select id="model-reasoning"></select></div><div><label for="model-output-limit">输出 token 上限</label><input id="model-output-limit" type="number" min="0" step="1" placeholder="使用任务限制"></div></div>
+            <small id="model-parameter-help"></small>
+            <details class="advanced"><summary>请求限制与价格</summary>
+              <div class="form-grid"><div><label for="model-url-env">地址环境变量</label><input id="model-url-env" type="text" placeholder="MODEL_BASE_URL"></div><div><label for="model-temperature">温度（可选）</label><input id="model-temperature" type="number" min="0" max="2" step="any"></div></div>
+              <div class="form-grid"><div><label for="model-timeout">超时（秒）</label><input id="model-timeout" type="number" min="0" max="600" step="any" placeholder="使用部署限制"></div><div><label for="model-attempts">最大请求尝试次数</label><input id="model-attempts" type="number" min="1" max="10" step="1" placeholder="默认 3，1 表示不重试"></div></div>
+              <div class="form-grid"><div><label for="model-window">上下文窗口 tokens</label><input id="model-window" type="number" min="0" step="1" placeholder="未知"></div><div><label for="model-input-limit">输入 token 上限</label><input id="model-input-limit" type="number" min="0" step="1" placeholder="使用任务限制"></div></div>
+              <div class="form-grid"><div><label for="model-protocol-reserve">协议预留 tokens</label><input id="model-protocol-reserve" type="number" min="0" step="1"></div><div><label for="model-token-field">输出限制字段</label><select id="model-token-field"><option value="">按接口选择</option><option value="max_tokens">max_tokens</option><option value="max_completion_tokens">max_completion_tokens</option></select></div></div>
+              <div class="form-grid"><div><label for="model-input-price">输入美元 / 百万 tokens</label><input id="model-input-price" type="number" min="0" step="any"></div><div><label for="model-output-price">输出美元 / 百万 tokens</label><input id="model-output-price" type="number" min="0" step="any"></div></div>
+              <label for="model-cache-price">缓存输入美元 / 百万 tokens（可选）</label><input id="model-cache-price" type="number" min="0" step="any"><small>价格留空时不估算费用。配置缓存价格后，供应商未报告缓存量的请求不估算费用。</small>
+            </details>
+            <div class="actions"><button class="button secondary" type="submit">应用到配置草稿</button><button id="model-remove" class="button danger" type="button">移除此配置</button></div>
+          </form>
+          <div class="form-panel model-selection-panel">
+            <h3>按用途选择</h3>
+            <label for="model-default">默认模型配置</label><select id="model-default"></select>
+            <label for="model-decision">业务决策</label><select id="model-decision"></select>
+            <label for="model-memory">记忆提取</label><select id="model-memory"></select>
+            <p>记忆提取可以选择较小推理预算。业务决策需结合真实任务、审批和业务状态验收选择参数。</p>
+            <div class="actions"><button id="models-save" class="button primary" type="button">保存全部配置</button></div>
+            <h3>验证结构化输出</h3><p>对草稿中所选模型发送一条合成请求，会产生模型调用费用。不会执行业务动作。验证通过只代表当前样本符合协议。</p>
+            <label for="model-check-purpose">验证用途</label><select id="model-check-purpose"><option value="decision">业务决策</option><option value="memory_extraction">记忆提取</option></select>
+            <div class="actions"><button id="models-check" class="button secondary" type="button">验证当前编辑的模型</button></div>
+          </div>
+        </div>
+        <div id="model-check-result" aria-live="polite"></div>
+        <p id="models-feedback" class="feedback inline-feedback" role="status" aria-live="polite"></p>
       </section>
 
       <section id="publish" class="section" aria-labelledby="publish-title">

@@ -104,3 +104,43 @@ func TestCapabilitySearchEmptyStableAndLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestChineseNaturalInstructionsSelectActionsWithPrerequisite(t *testing.T) {
+	caps := map[string]CapabilityDescription{
+		"alpha.delete":     {Name: "alpha.delete", Description: "删除人员"},
+		"ui.get_context":   {Name: "ui.get_context", Description: "读取页面观察"},
+		"ui.read_activity": {Name: "ui.read_activity", Description: "读取活动人数、奖项余量与历史记录"},
+		"ui.start_round":   {Name: "ui.start_round", Description: "开始当前奖项的抽奖滚动"},
+		"ui.finish_round":  {Name: "ui.finish_round", Description: "停止并揭晓本轮抽奖，保存中奖名单"},
+		"ui.open_panel":    {Name: "ui.open_panel", Description: "打开记录面板"},
+		"ui.set_theme":     {Name: "ui.set_theme", Description: "切换页面主题"},
+		"secret.read":      {Name: "secret.read", Description: "读取活动人数、奖项余量与历史记录"},
+	}
+	grants := map[string]bool{}
+	for name, cap := range caps {
+		if strings.HasPrefix(name, "ui.") && name != "ui.get_context" {
+			cap.Operation = &OperationBinding{PollCapability: "ui.command_status"}
+			caps[name] = cap
+		}
+		grants[name] = name != "secret.read"
+	}
+	for _, tc := range []struct{ instruction, action string }{
+		{"请只读查询活动人数和奖项余量，不要修改数据。", "ui.read_activity"},
+		{"审批后仅开始当前奖项的抽奖滚动。", "ui.start_round"},
+		{"停止并揭晓本轮抽奖，然后核对保存的中奖名单。", "ui.finish_round"},
+		{"请打开记录面板。", "ui.open_panel"},
+		{"请把页面切换为深色主题。", "ui.set_theme"},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			names, _, _ := selectedCapabilityNames(caps, grants, tc.instruction, &RuntimeState{}, 3)
+			if !containsString(names, tc.action) || !containsString(names, "ui.get_context") || containsString(names, "secret.read") || len(names) > 3 {
+				t.Fatal("missing authorized action/prerequisite", names)
+			}
+		})
+	}
+	grants["ui.get_context"] = false
+	names, _, _ := selectedCapabilityNames(caps, grants, "打开记录面板", &RuntimeState{}, 2)
+	if containsString(names, "ui.get_context") || !containsString(names, "ui.open_panel") {
+		t.Fatal("prerequisite bypassed authorization", names)
+	}
+}

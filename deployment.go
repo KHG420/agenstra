@@ -54,6 +54,7 @@ type ManagementConfig struct {
 	SecretDir      string `json:"secret_dir"`
 }
 type DeploymentConfig struct {
+	Models               *ModelConfiguration                      `json:"models,omitempty"`
 	CompletionChecks     map[string][]FactRequirement             `json:"completion_checks,omitempty"`
 	ReconciliationChecks map[string]map[string]ReconciliationRule `json:"reconciliation_checks,omitempty"`
 	DatabasePath         string                                   `json:"database_path"`
@@ -101,6 +102,11 @@ func LoadDeployment(path string) (*Deployment, error) {
 	}
 	if e := c.Settings.Validate(); e != nil {
 		return nil, e
+	}
+	if c.Models != nil {
+		if err := c.Models.Validate(); err != nil {
+			return nil, err
+		}
 	}
 	if c.DatabasePath == "" {
 		return nil, fmt.Errorf("database_path required")
