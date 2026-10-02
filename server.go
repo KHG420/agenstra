@@ -161,7 +161,7 @@ func serverError(w http.ResponseWriter, e error) {
 			status = 403
 		case "authorization_unavailable", "connection_unavailable", "reconciliation_unavailable":
 			status = 503
-		case "source_scope_invalid", "schedule_invalid", "invalid_limit", "invalid_page", "memory_invalid", "steering_invalid", "reconciliation_invalid", "context_policy_invalid":
+		case "source_scope_invalid", "schedule_invalid", "invalid_limit", "invalid_page", "memory_invalid", "steering_invalid", "reconciliation_invalid", "context_policy_invalid", "input_invalid":
 			status = 422
 		}
 		apiError(w, status, host.Code, false)
@@ -212,7 +212,7 @@ func (s *HTTPServer) owner(r *http.Request) (string, error) {
 	if token == "" || token != strings.TrimSpace(token) {
 		return "", deploymentError("unauthorized")
 	}
-	return s.Deployment.Authenticate(token)
+	return s.Deployment.AuthenticateContext(r.Context(), token)
 }
 func (s *HTTPServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path

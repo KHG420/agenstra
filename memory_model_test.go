@@ -134,7 +134,10 @@ func TestMemoryHostSkipsOversizedLearningAndContinuesBusinessRun(t *testing.T) {
 		t.Fatal("oversized source reached extractor")
 		return nil, nil
 	}}
-	h, _ := memoryTestHost(t, model)
+	// This case needs no business capability; keep its catalog empty so the
+	// business context fits while the extraction prompt exceeds the limit.
+	h := testHost(t, testStore(t), &hostProvider{caps: map[string]CapabilityDescription{}}, model.hostModel)
+	h.Model = model
 	// Allow the business prompt, but keep the extraction prompt over budget.
 	h.Settings.MaxContextCharacters = utf8.RuneCountInString(memoryExtractionPrompt) - 1
 	run := memoryRun(t, h, "alice", "records", "请用中文写报告", "budget")

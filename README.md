@@ -159,6 +159,8 @@ Publishing neither activates a release nor grants access. Read the full content 
 
 Web and CLI also share saved REST/MCP drafts: configure one section at a time, append selected OpenAPI operations or package capabilities with explicit conflict handling, and publish after validation. Use `agenstra-manage draft` for the command list; the [draft workflow and examples (Chinese)](docs/capability-management.md#6-分步编辑共享草稿) cover save/resume, export, and revision conflicts.
 
+For an existing login system, optional `host_auth: {"url_env":"HOST_AUTH_URL","owner_path":["owner_id"]}` verifies each bearer token through a trusted HTTP endpoint. `owner_path` defaults to `owner_id`. This requires management and an explicit registry binding for each dynamic owner; a dynamic owner never inherits a static user's grants. Static API keys retain their existing behavior.
+
 ## Supported capability sources
 
 | Source | Built-in integration | Review still required |
@@ -182,15 +184,21 @@ go run ./cmd/agenstra-import-openapi \
 
 The importer **does not** infer approvals, idempotency, or background-job completion from an operation name. Review and complete declarations for writes and long-running tasks using the [integration tutorial (Chinese)](docs/tutorial.md).
 
+REST endpoints may opt into `response_mode: "wrap"` to expose a root array or scalar as `{ "result": ... }`, `allow_empty_success: true` to map an empty HTTP 204 to `{}`, and `business_success: {"path":["success"],"value":true,"error_code":"business_rejected"}` to reject an unsuccessful business response despite HTTP 2xx. The output schema must match the resulting shape; existing object responses keep their default mapping. A capability can also set `model_output: {"paths":[["id"],["status"]]}` to expose only those declared result fields to the model and Fact references while retaining the complete Fact for the host. Omitting `model_output` preserves the full model view.
+
 ## Execution guarantees and limits
 
 - Before an external call, the host persists its invocation ID, exact arguments, and hash. After an uncertain outcome, it can replay only a capability declared safe or backed by real upstream idempotency. Other calls enter `needs_reconciliation` so the integrator can check the external system.
 - An approval applies to a specific user, invocation, and argument hash. Identity, grants, and leases are checked again before submission; skill text cannot bypass them.
-- Complete tool results are stored separately as Facts with provenance. Context budgeting preserves task constraints and Fact identities, prioritizes recent evidence, and explicitly marks omitted details for inspection. Full values remain available for tool arguments through Fact references. See the [context management design (Chinese)](docs/context-management.md). A Fact ID identifies local evidence, not an external resource.
+- Complete tool results are stored separately as Facts with provenance. Context budgeting preserves task constraints and Fact identities, prioritizes recent evidence, and explicitly marks omitted details for inspection. Fact references can pass complete values for tool arguments unless `model_output` restricts the accessible fields. See the [context management design (Chinese)](docs/context-management.md). A Fact ID identifies local evidence, not an external resource.
+- A run can set `max_context_capabilities` to show a bounded authorized catalog; the model can search omitted capabilities by name, description, or input fields without invoking a provider. The default catalog behavior remains unchanged. Missing user input can carry a `string`, `enum`, or `date` `input_schema`; a final answer can cite `result_refs`, whose business IDs are resolved from cited, model-visible Facts instead of invented by the model.
 - For an `OperationBinding`, the host saves the external job receipt and polls the status capability. An HTTP success or `queued` response does not mean the job has finished.
+- Non-read calls record invocation receipts, including the argument hash and known result or uncertain status. Optional pack-level `completion_checks` can require a capability to have been used (`required: true`) and its latest successful Fact to match a value before completion. Optional `reconciliation_checks` can use an authorized read capability correlated to the original invocation to verify an uncertain write; they do not replay that write. See the [business-check configuration (Chinese)](docs/completion-evaluation.md).
 - Runs, events, Facts, and continuation APIs are scoped by `owner_id`. A deployment may configure multiple users with different capability sets.
 
 Cancellation stops local orchestration; it does not promise to cancel a job already submitted upstream. SQLite WAL fits the current single-node scope. Use persistent storage and define backup and retention policies.
+
+Unknown calls can still be verified after cancellation or terminal failure, against the original invocation and operation identity; verification updates the evidence without resuming the stopped task. If a known business result exceeds the artifact limit, the bounded receipt retains its outcome, digest and storage error even though the full result is unavailable. Deploy the updated server before enabling the new optional contracts. New checkpoints contain additional fields that older strict readers cannot restore; retain a database backup when planning a binary rollback.
 
 ## Migrating from the Python version
 
@@ -207,6 +215,8 @@ go build ./cmd/...
 ```
 
 The tests generate temporary REST/MCP contracts, model doubles, and SQLite databases. They need no domain pack or live external service. Before production use, validate real identities, model decisions, API contracts, long-running tasks, and operating conditions in the target environment. Current trade-offs and pre-launch checks are in the [architecture guide (Chinese)](docs/architecture.md) and [deployment guide (Chinese)](docs/deployment.md).
+
+For live integration cases, `agenstra-evaluate --cases local/cases.json --repeat 5` starts five independent runs per case and reports per-case pass rates, status counts, findings, and elapsed time. Repetition requires cases that start new runs rather than specify `run_id`; the default is one execution.
 
 ## License
 

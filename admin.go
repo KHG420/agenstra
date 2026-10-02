@@ -238,8 +238,12 @@ func (s *HTTPServer) adminBinding(w http.ResponseWriter, r *http.Request, path s
 		sort.Strings(skills)
 		writeJSON(w, 200, map[string]any{"owner_id": owner, "pack_id": pack, "capabilities": caps, "skills": skills})
 	case !check && r.Method == "PUT":
-		if _, ok := s.Deployment.Config.Users[owner]; !ok {
+		if _, ok := s.Deployment.Config.Users[owner]; !ok && s.Deployment.Config.HostAuth == nil {
 			apiError(w, 404, "owner_not_found", true)
+			return
+		}
+		if s.Deployment.Config.HostAuth != nil && !validHostOwner(owner) {
+			apiError(w, 422, "invalid_owner_id", true)
 			return
 		}
 		var body ConnectionConfig

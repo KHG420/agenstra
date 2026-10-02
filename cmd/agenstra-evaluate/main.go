@@ -24,6 +24,26 @@ type evaluationClient struct {
 	http      *http.Client
 }
 
+type caseSummary struct {
+	CaseIndex int     `json:"case_index"`
+	Name      string  `json:"name"`
+	Passed    int     `json:"passed"`
+	Executed  int     `json:"executed"`
+	PassRate  float64 `json:"pass_rate"`
+}
+
+type evaluationSummary struct {
+	Planned          int            `json:"planned"`
+	Executed         int            `json:"executed"`
+	Passed           int            `json:"passed"`
+	PassRate         float64        `json:"pass_rate"`
+	ElapsedMS        int64          `json:"elapsed_ms"`
+	AverageElapsedMS float64        `json:"average_elapsed_ms"`
+	StatusCounts     map[string]int `json:"status_counts"`
+	FindingCounts    map[string]int `json:"finding_counts"`
+	Cases            []caseSummary  `json:"cases"`
+}
+
 func (c evaluationClient) request(ctx context.Context, method, path string, body, target any) error {
 	var data []byte
 	if body != nil {
@@ -159,11 +179,12 @@ func run(args []string, output io.Writer) (bool, error) {
 	casesPath := fs.String("cases", "", "JSON array of representative tasks and assertions")
 	reportPath := fs.String("output", "", "optional JSON report path")
 	timeout := fs.Duration("timeout", 2*time.Minute, "deadline per case; new timed-out runs receive a cancellation request")
+	repeat := fs.Int("repeat", 1, "independent executions per case (1-100)")
 	if err := fs.Parse(args); err != nil {
 		return false, err
 	}
 	u, err := url.Parse(*server)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || *timeout <= 0 || *casesPath == "" || fs.NArg() != 0 {
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || *timeout <= 0 || *repeat < 1 || *repeat > 100 || *casesPath == "" || fs.NArg() != 0 {
 		return false, errors.New("server, cases and timeout must be valid")
 	}
 	key := os.Getenv(*keyEnv)
@@ -189,22 +210,65 @@ func run(args []string, output io.Writer) (bool, error) {
 		if err := test.Validate(); err != nil {
 			return false, fmt.Errorf("case %q: %w", test.Name, err)
 		}
+		if *repeat > 1 && test.RunID != "" {
+			return false, fmt.Errorf("case %q: repeat requires a new run, not run_id", test.Name)
+		}
 	}
 	client := evaluationClient{strings.TrimRight(*server, "/"), key, &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	results := []agenstra.EvaluationResult{}
 	passed := true
-	for _, test := range cases {
-		if ctx.Err() != nil {
-			break
+	summary := evaluationSummary{Planned: len(cases) * *repeat, StatusCounts: map[string]int{}, FindingCounts: map[string]int{}, Cases: make([]caseSummary, len(cases))}
+	for i, test := range cases {
+		entry := &summary.Cases[i]
+		entry.CaseIndex, entry.Name = i, test.Name
+		for iteration := 1; iteration <= *repeat; iteration++ {
+			if ctx.Err() != nil {
+				break
+			}
+			attempt := test
+			if *repeat > 1 {
+				attempt.RequestID = agenstra.NewID()
+			}
+			started := time.Now()
+			result := client.evaluate(ctx, attempt, *timeout)
+			result.ElapsedMS = time.Since(started).Milliseconds()
+			if *repeat > 1 {
+				result.Iteration = iteration
+			}
+			passed = passed && result.Passed
+			results = append(results, result)
+			entry.Executed++
+			summary.Executed++
+			summary.ElapsedMS += result.ElapsedMS
+			if result.Passed {
+				entry.Passed++
+				summary.Passed++
+			}
+			if result.Status != "" {
+				summary.StatusCounts[result.Status]++
+			}
+			if result.Diagnostics != nil {
+				for _, finding := range result.Diagnostics.Findings {
+					summary.FindingCounts[finding.Code]++
+				}
+			}
 		}
-		result := client.evaluate(ctx, test, *timeout)
-		passed = passed && result.Passed
-		results = append(results, result)
+		if entry.Executed > 0 {
+			entry.PassRate = float64(entry.Passed) / float64(entry.Executed)
+		}
 	}
-	passed = passed && len(results) == len(cases)
+	passed = passed && summary.Executed == summary.Planned
+	if summary.Executed > 0 {
+		summary.PassRate = float64(summary.Passed) / float64(summary.Executed)
+		summary.AverageElapsedMS = float64(summary.ElapsedMS) / float64(summary.Executed)
+	}
 	report := map[string]any{"schema": "agenstra.integration-evaluation.v1", "passed": passed, "results": results}
+	if *repeat > 1 {
+		report["repeat"] = *repeat
+		report["summary"] = summary
+	}
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return false, err

@@ -112,6 +112,26 @@ func TestDeploymentCompletionChecksApplyOnlyToUsedOperations(t *testing.T) {
 	}
 }
 
+func TestDeploymentCompletionRequiredOperationRejectsFinalWithoutAction(t *testing.T) {
+	provider := &hostProvider{}
+	h := testHost(t, testStore(t), provider, &hostModel{})
+	d := &Deployment{Config: DeploymentConfig{CompletionChecks: map[string][]FactRequirement{"orders": {{Capability: "orders.approve", Path: []any{"approved"}, Value: true, Required: true}}}}}
+	if err := configureDeploymentChecks(h, d); err != nil {
+		t.Fatal(err)
+	}
+	if code := ErrorCode(h.CompletionValidator(t.Context(), CompletionContext{OriginPackID: "orders"})); code != "completion_capability_required" {
+		t.Fatal("required operation was skipped", code)
+	}
+	run, err := h.Create(t.Context(), "alice", "orders", "Approve the order", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status == "completed" || provider.calls != 0 {
+		t.Fatal("model completed without required action", run.Status, err, provider.calls)
+	}
+}
+
 func TestDeclarativeReconciliationChecksOriginalIdentityAndReadPermission(t *testing.T) {
 	for _, mode := range []string{"confirmed", "not_confirmed", "not_granted", "write_verifier", "large_number", "large_number_mismatch"} {
 		t.Run(mode, func(t *testing.T) {

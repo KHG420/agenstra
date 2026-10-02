@@ -173,3 +173,84 @@ func TestOpenAPI30ExclusiveBoundRequiresNumericInclusiveBound(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenAPIImportsArrayScalarAndEmptyResponses(t *testing.T) {
+	doc := JSON{"openapi": "3.1.0", "components": JSON{"schemas": JSON{"Ids": JSON{"type": "array", "items": JSON{"type": "string"}}}}, "paths": JSON{
+		"/ids":    JSON{"get": JSON{"operationId": "listIds", "responses": JSON{"200": JSON{"content": JSON{"application/json": JSON{"schema": JSON{"$ref": "#/components/schemas/Ids"}}}}}}},
+		"/count":  JSON{"get": JSON{"operationId": "getCount", "responses": JSON{"200": JSON{"content": JSON{"application/json": JSON{"schema": JSON{"type": "integer"}}}}}}},
+		"/delete": JSON{"delete": JSON{"operationId": "deleteItem", "responses": JSON{"204": JSON{"description": "Deleted"}}}},
+	}}
+	draft, err := ImportOpenAPIDocument(doc, "sample", "API_URL", []string{"listIds", "getCount", "deleteItem"}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePackManifest(draft, nil); err != nil {
+		t.Fatalf("imported manifest invalid: %v", err)
+	}
+	caps := draft["capabilities"].([]any)
+	for _, index := range []int{0, 1} {
+		cap := caps[index].(map[string]any)
+		if cap["response_mode"] != "wrap" {
+			t.Fatalf("non-object response lacks wrap mode: %v", cap)
+		}
+		output := cap["output_schema"].(map[string]any)
+		validator, err := validateLocalSchema(output, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		valid := any([]any{"A"})
+		invalid := any(json.Number("1"))
+		if index == 1 {
+			valid, invalid = json.Number("1"), []any{"A"}
+		}
+		if validateSchema(validator, JSON{"result": valid}) != nil || validateSchema(validator, JSON{"result": invalid}) == nil {
+			t.Fatalf("bad generated output schema: %v", output)
+		}
+	}
+	if caps[2].(map[string]any)["allow_empty_success"] != true {
+		t.Fatalf("204 was not enabled: %v", caps[2])
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ids":
+			_, _ = w.Write([]byte(`["A","B"]`))
+		case "/count":
+			_, _ = w.Write([]byte(`2`))
+		case "/delete":
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	pack, err := LoadRestPack(writeTestManifest(t, draft), map[string]string{"API_URL": server.URL}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pack.Close()
+	for _, tc := range []struct {
+		name string
+		want JSON
+	}{
+		{"listIds", JSON{"result": []any{"A", "B"}}},
+		{"getCount", JSON{"result": json.Number("2")}},
+		{"deleteItem", JSON{}},
+	} {
+		result, err := pack.Invoke(context.Background(), tc.name, JSON{}, nil)
+		if err != nil || result.ErrorCode != "" || !reflect.DeepEqual(result.Data, tc.want) {
+			t.Fatalf("%s: result=%+v err=%v want=%v", tc.name, result, err, tc.want)
+		}
+	}
+}
+
+func TestOpenAPIMixedSuccessShapesRequireManualMapping(t *testing.T) {
+	doc := JSON{"openapi": "3.1.0", "paths": JSON{"/records": JSON{"get": JSON{
+		"operationId": "listRecords",
+		"responses": JSON{
+			"200": JSON{"content": JSON{"application/json": JSON{"schema": JSON{"type": "array", "items": JSON{"type": "string"}}}}},
+			"204": JSON{"description": "No records"},
+		},
+	}}}}
+	_, err := ImportOpenAPIDocument(doc, "records", "API_URL", []string{"listRecords"}, nil, "")
+	if err == nil || !strings.Contains(err.Error(), "listRecords: differing 2xx response schemas need manual mapping") {
+		t.Fatalf("mixed 2xx responses silently accepted: %v", err)
+	}
+}

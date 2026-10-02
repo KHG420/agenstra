@@ -176,22 +176,35 @@ func safeHeaderValue(v any) (string, error) {
 func traversePath(v any, path []any) (any, error) { return valueAt(v, path) }
 
 type RestEndpoint struct {
-	Name                string            `json:"name"`
-	Description         string            `json:"description"`
-	Method              string            `json:"method"`
-	Path                string            `json:"path"`
-	InputSchema         JSON              `json:"input_schema"`
-	OutputSchema        JSON              `json:"output_schema"`
-	Effect              string            `json:"effect"`
-	ResponsePath        []any             `json:"response_path"`
-	ResponseSchemas     map[string]JSON   `json:"response_schemas"`
-	ErrorCodes          map[string]string `json:"error_codes"`
-	TimeoutSeconds      float64           `json:"timeout_seconds"`
-	IdempotencyHeader   *string           `json:"idempotency_header"`
-	IdempotencyArgument []string          `json:"idempotency_argument"`
-	Operation           *OperationBinding `json:"operation"`
-	Skills              []string          `json:"skills"`
-	ApprovalRequired    bool              `json:"approval_required"`
+	Name                string             `json:"name"`
+	Description         string             `json:"description"`
+	Method              string             `json:"method"`
+	Path                string             `json:"path"`
+	InputSchema         JSON               `json:"input_schema"`
+	OutputSchema        JSON               `json:"output_schema"`
+	ModelOutput         *ModelOutput       `json:"model_output,omitempty"`
+	Effect              string             `json:"effect"`
+	ResponsePath        []any              `json:"response_path"`
+	ResponseMode        string             `json:"response_mode,omitempty"`
+	AllowEmptySuccess   bool               `json:"allow_empty_success,omitempty"`
+	BusinessSuccess     *RestBusinessCheck `json:"business_success,omitempty"`
+	ResponseSchemas     map[string]JSON    `json:"response_schemas"`
+	ErrorCodes          map[string]string  `json:"error_codes"`
+	TimeoutSeconds      float64            `json:"timeout_seconds"`
+	IdempotencyHeader   *string            `json:"idempotency_header"`
+	IdempotencyArgument []string           `json:"idempotency_argument"`
+	Operation           *OperationBinding  `json:"operation"`
+	Skills              []string           `json:"skills"`
+	ApprovalRequired    bool               `json:"approval_required"`
+}
+
+// RestBusinessCheck treats a successful HTTP status as a business failure when
+// the response field differs from Value. ErrorCode is deliberately namespaced
+// so a business response cannot impersonate an authorization or unknown outcome.
+type RestBusinessCheck struct {
+	Path      []any  `json:"path"`
+	Value     any    `json:"value"`
+	ErrorCode string `json:"error_code"`
 }
 
 func (e *RestEndpoint) UnmarshalJSON(raw []byte) error {
@@ -239,6 +252,12 @@ func (p *RestPack) SystemPrompt() string                           { return Agen
 func (p *RestPack) Close() error                                   { return nil }
 func (p *RestPack) ConcurrentInvocation(string) bool               { return true }
 func validateRestEndpoint(e RestEndpoint, headers map[string]string) error {
+	if err := validateModelOutput(e.ModelOutput); err != nil {
+		return err
+	}
+	if err := validateModelOutputSchema(e.ModelOutput, e.OutputSchema); err != nil {
+		return err
+	}
 	if !capNamePattern.MatchString(e.Name) || e.Description == "" || len(e.Description) > 500 {
 		return errors.New("invalid REST capability")
 	}
@@ -250,6 +269,55 @@ func validateRestEndpoint(e RestEndpoint, headers map[string]string) error {
 	}
 	if len(e.ResponsePath) > 16 {
 		return errors.New("REST response_path is too long")
+	}
+	if e.ResponseMode != "" && e.ResponseMode != "wrap" {
+		return errors.New("REST response_mode must be wrap")
+	}
+	if e.ResponseMode == "wrap" {
+		props, _ := e.OutputSchema["properties"].(map[string]any)
+		if e.OutputSchema["type"] != "object" || props["result"] == nil || !requiredProperty(e.OutputSchema, "result") {
+			return errors.New("REST wrapped output_schema must require result")
+		}
+	}
+	if e.AllowEmptySuccess {
+		if len(e.ResponsePath) > 0 {
+			return errors.New("REST empty success cannot use response_path")
+		}
+		output, err := validateLocalSchema(e.OutputSchema, true)
+		if err != nil || validateSchema(output, JSON{}) != nil {
+			return errors.New("REST empty success output_schema must accept an empty object")
+		}
+		if schema, ok := e.ResponseSchemas["204"]; ok {
+			validator, err := validateLocalSchema(schema, true)
+			if err != nil || validateSchema(validator, JSON{}) != nil {
+				return errors.New("REST 204 response_schema must accept an empty object")
+			}
+		}
+	}
+	if check := e.BusinessSuccess; check != nil {
+		if len(check.Path) == 0 || len(check.Path) > 16 || !strings.HasPrefix(check.ErrorCode, "business_") || !safeCodePattern.MatchString(check.ErrorCode) || check.Value == nil {
+			return errors.New("invalid REST business_success")
+		}
+		for _, part := range check.Path {
+			switch v := part.(type) {
+			case string:
+				if v == "" || len(v) > 128 {
+					return errors.New("invalid REST business_success path")
+				}
+			case json.Number:
+				n, err := v.Int64()
+				if err != nil || n < 0 || n > 1000000 {
+					return errors.New("invalid REST business_success path")
+				}
+			default:
+				return errors.New("invalid REST business_success path")
+			}
+		}
+		switch check.Value.(type) {
+		case string, bool, json.Number:
+		default:
+			return errors.New("REST business_success value must be a scalar")
+		}
 	}
 	if e.TimeoutSeconds < 0 || e.TimeoutSeconds > 300 {
 		return errors.New("invalid REST timeout_seconds")
@@ -368,6 +436,16 @@ func validateRestEndpoint(e RestEndpoint, headers map[string]string) error {
 	}
 	return nil
 }
+
+func requiredProperty(schema JSON, property string) bool {
+	required, _ := schema["required"].([]any)
+	for _, item := range required {
+		if item == property {
+			return true
+		}
+	}
+	return false
+}
 func LoadRestPack(path string, environment map[string]string, client *http.Client) (*RestPack, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -471,7 +549,7 @@ func LoadRestPack(path string, environment map[string]string, client *http.Clien
 		p.inputs[endpoint.Name] = input
 		p.outputs[endpoint.Name] = output
 		p.statuses[endpoint.Name] = statuses
-		p.capabilities[endpoint.Name] = CapabilityDescription{Name: endpoint.Name, Version: manifest.Version, Description: endpoint.Description, InputSchema: endpoint.InputSchema, OutputSchema: endpoint.OutputSchema, Effect: endpoint.Effect, Replay: replay, IdempotencyArgument: endpoint.IdempotencyArgument, Operation: endpoint.Operation, SkillsList: endpoint.Skills, ApprovalRequired: endpoint.ApprovalRequired, ReferenceScope: "durable"}
+		p.capabilities[endpoint.Name] = CapabilityDescription{Name: endpoint.Name, Version: manifest.Version, Description: endpoint.Description, InputSchema: endpoint.InputSchema, OutputSchema: endpoint.OutputSchema, ModelOutput: endpoint.ModelOutput, Effect: endpoint.Effect, Replay: replay, IdempotencyArgument: endpoint.IdempotencyArgument, Operation: endpoint.Operation, SkillsList: endpoint.Skills, ApprovalRequired: endpoint.ApprovalRequired, ReferenceScope: "durable"}
 	}
 	return p, nil
 }
@@ -581,12 +659,33 @@ func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any,
 		return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
 	}
 	var data any
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	if dec.Decode(&data) != nil {
-		return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
+	if response.StatusCode == http.StatusNoContent && len(raw) == 0 && endpoint.AllowEmptySuccess {
+		data = JSON{}
+	} else {
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		if dec.Decode(&data) != nil {
+			return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
+		}
+	}
+	if check := endpoint.BusinessSuccess; check != nil {
+		value, err := traversePath(data, check.Path)
+		if err != nil {
+			return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
+		}
+		actual, err := CanonicalJSON(value)
+		if err != nil {
+			return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
+		}
+		expected, _ := CanonicalJSON(check.Value)
+		if !bytes.Equal(actual, expected) {
+			return CapabilityResult{ErrorCode: check.ErrorCode}, nil
+		}
 	}
 	data, e = traversePath(data, endpoint.ResponsePath)
+	if e == nil && endpoint.ResponseMode == "wrap" {
+		data = JSON{"result": data}
+	}
 	if e != nil || validateSchema(p.outputs[name], data) != nil {
 		return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
 	}

@@ -42,6 +42,7 @@ type HostSettings struct {
 	MaxPollCalls                     int           `json:"max_poll_calls"`
 	MaxRunSeconds                    float64       `json:"max_run_seconds"`
 	MaxContextCharacters             int           `json:"max_context_characters"`
+	MaxContextCapabilities           int           `json:"max_context_capabilities,omitempty"`
 	MaxArtifactBytes                 int           `json:"max_artifact_bytes"`
 	MaxActiveArtifactBytes           int           `json:"max_active_artifact_bytes"`
 	MaxStateBytes                    int           `json:"max_state_bytes"`
@@ -72,6 +73,9 @@ func (s HostSettings) Validate() error {
 		return errors.New("host_settings_invalid")
 	}
 	if s.MaxConcurrentTools < 0 || s.MaxConcurrentTools > 4 {
+		return errors.New("host_settings_invalid")
+	}
+	if s.MaxContextCapabilities < 0 || s.MaxContextCapabilities > 200 {
 		return errors.New("host_settings_invalid")
 	}
 	if s.MaxStagnantRounds < 0 || s.MaxStagnantRounds > 1000 {
@@ -276,6 +280,7 @@ func (h *AgentHost) restore(run StoredRun) (*RuntimeState, error) {
 	return &state, nil
 }
 func (h *AgentHost) save(run StoredRun, state *RuntimeState, fingerprint string, wake *float64, event map[string]any) (StoredRun, error) {
+	checkpointInvocationReceipts(state)
 	h.recordExecution(state, event)
 	runtime, e := objectOf(state)
 	if e != nil {
@@ -377,6 +382,9 @@ func (h *AgentHost) SupplyInput(ctx context.Context, id, owner, field, text stri
 	if state.Status != "needs_input" || state.InputField == nil || *state.InputField != field {
 		return run, hostError("input_not_requested")
 	}
+	if e := ValidateRequestedInput(state.InputSchema, text); e != nil {
+		return run, e
+	}
 	inputs := []memoryInput{}
 	if raw, err := CanonicalJSON(run.State["memory_inputs"]); err == nil && run.State["memory_inputs"] != nil {
 		if err := strictUnmarshal(raw, &inputs); err != nil {
@@ -387,6 +395,7 @@ func (h *AgentHost) SupplyInput(ctx context.Context, id, owner, field, text stri
 	state.Followups = append(state.Followups, field+": "+text)
 	state.InputField = nil
 	state.InputPrompt = nil
+	state.InputSchema = nil
 	state.Status = "queued"
 	state.ErrorCode = nil
 	return h.save(run, state, "", nil, map[string]any{"kind": "input_received", "field": field})
@@ -503,7 +512,7 @@ func (h *AgentHost) execute(ctx context.Context, run StoredRun, state *RuntimeSt
 	callCtx, cancel := context.WithTimeout(ctx, time.Duration(h.runSettings(run).InvocationTimeoutSeconds*1e9))
 	outcome, err := ExecuteCall(callCtx, provider, prepared.grants, item.Call, &prepared.inv)
 	cancel()
-	if ctx.Err() != nil {
+	if ctx.Err() != nil && outcome.Fact == nil {
 		return run, ctx.Err()
 	}
 	if err != nil {
@@ -594,6 +603,7 @@ func (h *AgentHost) prepareInvocation(ctx context.Context, run StoredRun, state 
 	}
 	item.Status = "in_flight"
 	item.Attempts++
+	beginInvocationReceipt(item, cap)
 	audit := invocationAudit("call_started", inv)
 	audit["capability"], audit["arguments_sha256"] = cap.Name, digest
 	run, e = h.save(run, state, "", nil, audit)
@@ -605,6 +615,10 @@ func (h *AgentHost) prepareInvocation(ctx context.Context, run StoredRun, state 
 func (h *AgentHost) settleInvocation(run StoredRun, state *RuntimeState, item *Invocation, prepared preparedInvocation, outcome CallOutcome) (StoredRun, error) {
 	cap, inv := prepared.cap, prepared.inv
 	var e error
+	stoppedStatus, stoppedError := state.Status, state.ErrorCode
+	if outcome.Fact == nil {
+		captureInvocationReceipt(item, cap, outcome, nil)
+	}
 	if definiteAuth(outcome.ErrorCode) {
 		item.Status = "prepared"
 		item.ErrorCode = strptr(outcome.ErrorCode)
@@ -630,6 +644,7 @@ func (h *AgentHost) settleInvocation(run StoredRun, state *RuntimeState, item *I
 		if e != nil {
 			return run, e
 		}
+		captureInvocationReceipt(item, cap, outcome, b)
 		code := ""
 		if len(b) > h.runSettings(run).MaxArtifactBytes {
 			code = "result_too_large"
@@ -644,16 +659,28 @@ func (h *AgentHost) settleInvocation(run StoredRun, state *RuntimeState, item *I
 			}
 		}
 		if code != "" {
+			if item.Receipt != nil {
+				item.Receipt.FactID = ""
+				item.Receipt.ResultErrorCode = code
+			}
 			outcome = CallOutcome{ErrorCode: code}
 			state.Status = "failed"
 			state.ErrorCode = strptr(code)
 		}
 	}
 	Observe(state, item, outcome)
+	if item.Receipt != nil && item.Receipt.Status == "succeeded" && item.Receipt.ResultErrorCode != "" {
+		item.Status, item.ErrorCode = "succeeded", nil
+	} else if item.Receipt != nil && item.Receipt.ResultErrorCode != "" && (item.Receipt.Status == "accepted" || item.Receipt.Status == "unknown") {
+		item.Status, item.ErrorCode = "unknown", strptr("operation_outcome_unknown")
+	}
 	if outcome.Fact != nil && cap.Operation != nil {
 		if e = h.operation(state, item, *outcome.Fact, *cap.Operation); e != nil {
 			return run, e
 		}
+	}
+	if stoppedStatus == "cancelled" || stoppedStatus == "failed" {
+		state.Status, state.ErrorCode = stoppedStatus, stoppedError
 	}
 	var factID any
 	if outcome.Fact != nil {
@@ -863,7 +890,7 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 	callCtx, cancel := context.WithTimeout(ctx, time.Duration(h.runSettings(run).InvocationTimeoutSeconds*1e9))
 	outcome, e := ExecuteCall(callCtx, provider, policy.GrantedCapabilities, call, &inv)
 	cancel()
-	if ctx.Err() != nil {
+	if ctx.Err() != nil && outcome.Fact == nil {
 		return run, ctx.Err()
 	}
 	if e != nil {
@@ -877,12 +904,23 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 		receipt.NextPollAt = h.now() + receipt.Binding.IntervalSeconds
 		item.ErrorCode = strptr(outcome.ErrorCode)
 	} else {
+		// Check the persisted operation before replacing any of its evidence.
+		if e = h.operation(state, item, *outcome.Fact, receipt.Binding); e != nil {
+			item.Status, item.ErrorCode = "unknown", strptr(ErrorCode(e))
+			state.Status, state.ErrorCode = "needs_reconciliation", item.ErrorCode
+			return h.save(run, state, "", nil, JSON{"kind": "reconciliation_required", "invocation_id": item.InvocationID, "code": ErrorCode(e)})
+		}
+		if item.Status == "succeeded" || item.Status == "waiting" {
+			item.ErrorCode = nil
+		}
 		b, e := CanonicalJSON(outcome.Fact)
 		if e != nil {
 			return run, e
 		}
+		cap := provider.Capabilities()[item.Call.Capability]
+		captureInvocationReceipt(item, cap, outcome, b)
 		if len(b) > h.runSettings(run).MaxArtifactBytes {
-			return run, hostError("result_too_large")
+			return h.failOperationResultStorage(run, state, item, "result_too_large")
 		}
 		size := len(b)
 		facts := []Fact{}
@@ -894,27 +932,26 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 			}
 		}
 		if size > h.runSettings(run).MaxActiveArtifactBytes {
-			return run, hostError("run_artifacts_too_large")
+			return h.failOperationResultStorage(run, state, item, "run_artifacts_too_large")
 		}
 		state.Facts = append(facts, *outcome.Fact)
 		item.FactID = strptr(outcome.Fact.FactID)
-		item.ErrorCode = nil
-		if e = h.operation(state, item, *outcome.Fact, receipt.Binding); e != nil {
-			return run, e
-		}
 		observation := Observation{CallRef: call.CallRef, Capability: call.Capability, Status: "succeeded", FactID: item.FactID, Arguments: call.Arguments}
 		prefix := "poll-" + item.InvocationID + "-"
-		filter := func(items []Observation) []Observation {
+		filter := func(items []Observation, latest Observation) []Observation {
 			result := []Observation{}
 			for _, o := range items {
 				if !strings.HasPrefix(o.CallRef, prefix) {
 					result = append(result, o)
 				}
 			}
-			return append(result, observation)
+			return append(result, latest)
 		}
-		state.Observations = filter(state.Observations)
-		state.ModelObservations = filter(state.ModelObservations)
+		state.Observations = filter(state.Observations, observation)
+		// Poll arguments are generated from the full result and can contain
+		// fields deliberately excluded by model_output.
+		observation.Arguments, observation.ArgumentsOmitted = JSON{}, true
+		state.ModelObservations = filter(state.ModelObservations, observation)
 	}
 	return h.save(run, state, "", nil, map[string]any{"kind": "operation_polled", "invocation_id": item.InvocationID, "poll": receipt.Polls, "fact_id": item.FactID, "error_code": strptr(outcome.ErrorCode)})
 }
@@ -956,13 +993,11 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 		}
 		for i := range state.Pending {
 			item := &state.Pending[i]
-			if item.Status == "in_flight" || item.Status == "unknown" {
+			if unsettledInvocation(*item) {
 				if state.Status != "needs_authorization" {
 					state.Status = "needs_reconciliation"
 				}
-				if item.Status == "in_flight" {
-					item.Status = "unknown"
-				}
+				item.Status, item.PollInFlight = "unknown", false
 			}
 		}
 		state.ErrorCode = strptr(code)
@@ -1018,6 +1053,7 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 	runtime.MaxModelOutputTokens = h.runSettings(run).MaxModelOutputTokens
 	runtime.MaxStagnantRounds = h.runSettings(run).MaxStagnantRounds
 	runtime.MaxConcurrentTools = h.runSettings(run).MaxConcurrentTools
+	runtime.MaxContextCapabilities = h.runSettings(run).MaxContextCapabilities
 	run, e = h.prepareMemories(ctx, run)
 	if e != nil {
 		return run, e
@@ -1041,18 +1077,15 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 			return run, e
 		}
 		if latest.CancelRequested {
-			state.Status = "cancelled"
-			state.ErrorCode = strptr("cancel_requested")
-			break
+			return h.markCancelled(run, state)
 		}
 		if h.now()-run.CreatedAt >= h.runSettings(run).MaxRunSeconds {
 			state.Status = "failed"
 			state.ErrorCode = strptr("run_deadline_exceeded")
 			for i := range state.Pending {
 				item := &state.Pending[i]
-				if item.Status == "in_flight" || item.Status == "unknown" {
-					state.Status = "needs_reconciliation"
-					item.Status = "unknown"
+				if unsettledInvocation(*item) {
+					item.Status, item.PollInFlight = "unknown", false
 				}
 			}
 			break
@@ -1204,9 +1237,15 @@ func (h *AgentHost) markCancelled(run StoredRun, state *RuntimeState) (StoredRun
 	state.Status = "cancelled"
 	state.ErrorCode = strptr("cancel_requested")
 	for i := range state.Pending {
-		if state.Pending[i].Status == "in_flight" {
+		if unsettledInvocation(state.Pending[i]) {
 			state.Pending[i].Status = "unknown"
 			state.Pending[i].ErrorCode = strptr("provider_outcome_unknown")
+			if state.Pending[i].Receipt != nil {
+				if state.Pending[i].Receipt.Status != "accepted" {
+					state.Pending[i].Receipt.Status = "unknown"
+				}
+				state.Pending[i].Receipt.ErrorCode = "provider_outcome_unknown"
+			}
 		}
 	}
 	return h.save(run, state, "", nil, map[string]any{"kind": "run_cancelled"})
@@ -1261,7 +1300,7 @@ func (h *AgentHost) Drive(ctx context.Context, id, owner string) (StoredRun, err
 	case <-heartbeatErr:
 		e = ErrLeaseLost
 	default:
-		if workCtx.Err() != nil && e != nil {
+		if workCtx.Err() != nil {
 			if current, err := h.Store.GetRun(id, owner); err == nil && current.CancelRequested {
 				if current.LeaseToken != run.LeaseToken {
 					e = ErrLeaseLost
