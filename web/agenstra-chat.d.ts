@@ -4,4 +4,5 @@ export class AgenstraChat extends HTMLElement {
 }
 export function mountAgenstraChat(container: HTMLElement, options: {
   client: AgenstraClient; title?: string; locale?: "zh-CN" | "en";
+  subtitle?: string; emptyTitle?: string; emptyHint?: string; placeholder?: string;
 }): { element: AgenstraChat; unmount(): void };

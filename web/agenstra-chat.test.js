@@ -210,3 +210,59 @@ test("structured controls keep the right draft, label and keyboard submission", 
     else delete AgenstraChat.prototype.attachShadow;
   }
 });
+
+test("business Markdown produces semantic tables and lists without parsing HTML or URLs", () => {
+  const previous = globalThis.document;
+  class Element {
+    constructor(tag) { this.tag = tag;this.children = [];this.textContent = ""; }
+    append(...children) { this.children.push(...children); }
+    set innerHTML(value) { assert.fail("model output reached HTML parser: " + value); }
+  }
+  globalThis.document = { createElement: tag => new Element(tag), createTextNode: text => Object.assign(new Element("text"), { textContent: text }) };
+  const all = node => [node, ...node.children.flatMap(all)];
+  try {
+    const root = new Element("answer");
+    appendAnswer(root, "**结果**\n\n| 姓名 | 奖项 |\n| --- | --- |\n| 张三 | **一等奖** |\n| 李四 | A\\|B |\n\n- 已完成\n- `safe()`\n\n3. 核对\n4. 导出\n\n<img src=x onerror=alert(1)> [危险链接](javascript:alert(1))");
+    const nodes = all(root);
+    assert.equal(nodes.filter(n => n.tag === "table").length, 1);
+    assert.equal(nodes.filter(n => n.tag === "th").length, 2);
+    assert.equal(nodes.filter(n => n.tag === "td").length, 4);
+    assert.equal(nodes.filter(n => n.tag === "strong").length, 2);
+    assert.equal(nodes.filter(n => n.tag === "li").length, 4);
+    assert.equal(nodes.find(n => n.tag === "ol").start, 3);
+    assert.equal(nodes.some(n => ["img", "script", "a"].includes(n.tag)), false);
+    assert.match(nodes.map(n => n.textContent).join(""), /A\|B/);
+    assert.equal(nodes.find(n => n.className === "answer-table").tabIndex, 0);
+    const malformed = new Element("answer");appendAnswer(malformed, "| A | B |\n| --- | --- |\nwrong | columns | count\n```js\nunclosed");
+    assert.match(all(malformed).map(n => n.textContent).join(""), /wrong \| columns \| count/);
+    assert.equal(all(malformed).find(n => n.tag === "code").textContent, "unclosed");
+  } finally { globalThis.document = previous; }
+});
+
+test("host copy customizes onboarding and composer while input requests keep their labels", async () => {
+  const { mountAgenstraChat } = await import("./agenstra-chat.js");
+  const previous = globalThis.document;
+  class Element {
+    constructor() { this.children = [];this.dataset = {};this.attrs = {};this.textContent = ""; }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    setAttribute(key, value) { this.attrs[key] = value; }
+    querySelectorAll() { return []; }
+  }
+  globalThis.document = { createElement: () => new Element() };
+  try {
+    const container = new Element();
+    const { element } = mountAgenstraChat(container, { client: {}, emptyTitle: "活动助手", emptyHint: "查询当前轮次和中奖记录", placeholder: "描述活动操作…", subtitle: "年会活动" });
+    assert.equal(element.attrs["empty-hint"], "查询当前轮次和中奖记录");
+    const chat = Object.create(AgenstraChat.prototype);
+    chat.getAttribute = key => element.attrs[key] ?? null;
+    chat.log = Object.assign(new Element(), { scrollHeight: 0,scrollTop: 0,clientHeight: 100 });
+    chat.input = { value: "" };
+    const controls = new Map();
+    chat.shadowRoot = { querySelector: name => { if (!controls.has(name)) controls.set(name, new Element());return controls.get(name); } };
+    chat.text = { empty: "Default", hint: "Default", placeholder: "Default", statuses: {}, send: "发送" };
+    chat.render({ messages: [] });
+    assert.deepEqual(chat.log.children[0].children.map(n => n.textContent), ["活动助手", "查询当前轮次和中奖记录"]);
+    assert.equal(controls.get("label").textContent, "描述活动操作…");
+  } finally { globalThis.document = previous; }
+});

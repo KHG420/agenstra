@@ -129,4 +129,4 @@ export interface ExecutionTelemetry { stage: string; started_at: number | null; 
 export interface RuntimeInfo { schema: "agenstra.runtime-info.v1"; settings: HostSettings; model: ModelInfo; features: Record<string, boolean>; granted_capabilities: string[] }
 export interface ConversationContextSelection { history_limit: number; part_character_limit: number; included_messages: number; omitted_messages: number; truncated_parts: number; input_characters: number }
 
-export interface RunDiagnostics { schema: "agenstra.run-diagnostics.v1"; run_id: string; status: string; revision: number; elapsed_ms: number; findings: { category: string; code: string; capability?: string; message: string; next_action: string }[]; progress: RunProgress | null; budget: RunBudget }
+export interface RunDiagnostics { schema: "agenstra.run-diagnostics.v1"; run_id: string; status: string; revision: number; elapsed_ms: number; findings: { category: string; code: string; capability?: string; message: string; next_action: string; recovered: boolean; actionable: boolean }[]; progress: RunProgress | null; budget: RunBudget }

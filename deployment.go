@@ -169,7 +169,16 @@ func (d *Deployment) connection(ownerID, packID string) (ConnectionConfig, error
 		return ConnectionConfig{}, deploymentError("access_denied")
 	}
 	if _, ok := d.Config.Packs[packID]; !ok {
-		return ConnectionConfig{}, deploymentError("access_denied")
+		// A frontend-only integration uses the same explicit connection policy
+		// as business packs, without requiring a placeholder provider.
+		web := d.Config.WebIntegration
+		if web == nil {
+			return ConnectionConfig{}, deploymentError("access_denied")
+		}
+		profile, exists := web.Integrations[packID]
+		if !exists || !web.BrowserBridge || profile.PackID != "" || profile.FrontendProfilePath == "" {
+			return ConnectionConfig{}, deploymentError("access_denied")
+		}
 	}
 	c, ok := user.Packs[packID]
 	if !ok {
