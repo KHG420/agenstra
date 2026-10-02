@@ -2,6 +2,8 @@
 
 日期：2026-10-03。只修改 Agenstra 框架，抽奖软件继续使用原 handler、SDK 构建和业务接口；真实模型验收在独立的虚构活动数据库副本上运行。
 
+后续对实际 HTTP 参数、缓存/推理 usage、记忆提取和模型参数实验的审计见[真实模型调用分析](model-call-analysis.md)与 [model-call-audit.json](model-call-audit.json)。该审计还补上了异步失败观察的实际回执引用；其中参数实验独立于下文两组前后对照，没有改变生产模型默认配置。
+
 ## 原四场景的逐轮归因
 
 先只读检查原 `agent/data/runs.sqlite3`、`live-report.json` 和持久化 Facts，而不是根据请求总数推测原因。原始验收记录继续保留在[接入报告](lottery-integration-findings.md)。
