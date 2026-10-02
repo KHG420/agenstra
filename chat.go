@@ -395,7 +395,7 @@ func (w *WebIntegration) Conversation(ctx context.Context, owner, id string) (Ch
 		}
 		messages[i].InputHistory = chatInputHistory(run)
 		if messages[i].Status == "active" || messages[i].Status == "cancelling" {
-			messages[i].Run = runView(run)
+			messages[i].Run = runView(run, w.Host)
 		}
 	}
 	return c, messages, nil
