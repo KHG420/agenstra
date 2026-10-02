@@ -32,6 +32,8 @@ go run ./cmd/agenstra-serve \
 
 ## 3. Docker Compose
 
+模型请求默认最多尝试三次，使用 250ms 起始指数退避、5s 单次等待上限；网络故障、408、429 和暂时性 5xx 可重试。401/403、其他请求错误、拒绝和截断输出不会自动重试。`Retry-After` 超过等待上限时直接报告错误，避免提前重试。调用取消与 Host 模型超时会立即中断退避。嵌入式接入可通过 `HTTPJSONDecisionModel.MaxAttempts`、`RetryBaseDelay`、`MaxRetryDelay` 调整；`MaxAttempts=1` 关闭请求重试。重试仅发生在模型适配器内，不会重新执行已完成的业务工具。
+
 Compose 模板只挂载用户自己准备的配置与包。按教程完成本地包后，可将其复制到容器挂载目录，并编辑环境变量文件：
 
 ```sh

@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -22,6 +24,11 @@ type HTTPJSONDecisionModel struct {
 	APIKey  string
 	Timeout time.Duration
 	Client  *http.Client
+	// Zero values use bounded defaults. MaxAttempts includes the first request;
+	// set it to one to disable transport retries.
+	MaxAttempts    int
+	RetryBaseDelay time.Duration
+	MaxRetryDelay  time.Duration
 }
 
 func NewHTTPJSONDecisionModel(model, baseURL, apiKey string, timeout time.Duration, client *http.Client) (*HTTPJSONDecisionModel, error) {
@@ -71,28 +78,117 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	if client.Timeout == 0 {
 		client.Timeout = m.Timeout
 	}
-	res, err := client.Do(req)
-	if err != nil {
-		return nil, ModelDecisionError{"model_unavailable"}
-	}
-	defer res.Body.Close()
-	if res.StatusCode >= 400 {
-		return nil, ModelDecisionError{"model_http_error"}
-	}
-	body, err := io.ReadAll(io.LimitReader(res.Body, 8<<20))
-	if err != nil {
-		return nil, ModelDecisionError{"model_decision_invalid"}
+	attempts, delay, maxDelay := m.retrySettings()
+	var body []byte
+	for attempt := 0; attempt < attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		request := req.Clone(ctx)
+		request.Body = io.NopCloser(bytes.NewReader(raw))
+		res, requestErr := client.Do(request)
+		code, retry, retryAfter := "", false, time.Duration(0)
+		if requestErr != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			code, retry = "model_unavailable", true
+			var timeout net.Error
+			if errors.As(requestErr, &timeout) && timeout.Timeout() {
+				code = "model_timeout"
+			}
+		} else {
+			code, retry = modelHTTPError(res.StatusCode)
+			retryAfter = modelRetryAfter(res.Header.Get("Retry-After"), time.Now())
+			if code == "" {
+				body, requestErr = io.ReadAll(io.LimitReader(res.Body, (8<<20)+1))
+				if requestErr != nil {
+					code, retry = "model_unavailable", true
+				} else if len(body) > 8<<20 {
+					code = "model_response_too_large"
+				}
+			}
+			_ = res.Body.Close()
+		}
+		if code == "" {
+			break
+		}
+		wait := max(delay, retryAfter)
+		// Do not retry earlier than the server requested or exceed our wait bound.
+		if !retry || attempt+1 >= attempts || wait > maxDelay {
+			return nil, ModelDecisionError{code}
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+		delay = min(delay*2, maxDelay)
 	}
 	var envelope struct {
 		Choices []struct {
 			Message struct {
 				Content string `json:"content"`
+				Refusal string `json:"refusal"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
-	if json.Unmarshal(body, &envelope) != nil || len(envelope.Choices) == 0 || envelope.Choices[0].Message.Content == "" {
+	if json.Unmarshal(body, &envelope) != nil || len(envelope.Choices) == 0 {
+		return nil, ModelDecisionError{"model_decision_invalid"}
+	}
+	if envelope.Choices[0].Message.Refusal != "" || envelope.Choices[0].FinishReason == "content_filter" {
+		return nil, ModelDecisionError{"model_refused"}
+	}
+	if envelope.Choices[0].FinishReason == "length" {
+		return nil, ModelDecisionError{"model_output_truncated"}
+	}
+	if envelope.Choices[0].Message.Content == "" {
 		return nil, ModelDecisionError{"model_decision_invalid"}
 	}
 	return []byte(envelope.Choices[0].Message.Content), nil
+}
+
+func (m *HTTPJSONDecisionModel) retrySettings() (int, time.Duration, time.Duration) {
+	attempts, delay, maximum := m.MaxAttempts, m.RetryBaseDelay, m.MaxRetryDelay
+	if attempts <= 0 {
+		attempts = 3
+	}
+	if delay <= 0 {
+		delay = 250 * time.Millisecond
+	}
+	if maximum <= 0 {
+		maximum = 5 * time.Second
+	}
+	return min(attempts, 10), min(delay, maximum), maximum
+}
+
+func modelHTTPError(status int) (string, bool) {
+	switch {
+	case status < 300:
+		return "", false
+	case status == 401:
+		return "model_authentication_failed", false
+	case status == 403:
+		return "model_access_denied", false
+	case status == 429:
+		return "model_rate_limited", true
+	case status == 408 || status == 500 || status == 502 || status == 503 || status == 504:
+		return "model_unavailable", true
+	default:
+		return "model_http_error", false
+	}
+}
+
+func modelRetryAfter(value string, now time.Time) time.Duration {
+	if seconds, err := strconv.ParseInt(value, 10, 32); err == nil && seconds >= 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if date, err := http.ParseTime(value); err == nil {
+		return max(0, date.Sub(now))
+	}
+	return 0
 }
 func (m *HTTPJSONDecisionModel) Close() error { return nil }
