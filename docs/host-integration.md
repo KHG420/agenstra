@@ -58,3 +58,23 @@ SDK 在 `web/agenstra-client.js`，导出命令和完整配置见 [Web integrati
 `POST /runs/{id}/steer` 接收 `{ "request_id": "UUID", "revision": 12, "text": "先完成当前写操作，然后只汇报结果" }`，成功返回 202。request_id 支持响应丢失后的原请求重试，重复 ID 改写文本会冲突；revision 必须是提交时的当前版本。队列最多保留 32 条未处理指令，每条最多 30,000 字符。
 
 指令存入现有事件日志，在安全边界一次性加入 followups。已发出的写操作先记录实际结果；未发出且尚无尝试的调用会标记 steering_superseded，已有审批失效，模型依据新输入重新决定。异步任务继续跟踪，结果不明确的操作继续要求对账。模型返回 final 时的事务检查保证已接受的指令不会被完成检查点覆盖。排队、运行、等待和待审批支持补充；needs_input 使用原有 input 接口，needs_reconciliation 先完成对账。取消与预算仍优先。
+
+## 通用业务调用对账与原运行恢复
+
+响应丢失或不允许重放的调用进入 needs_reconciliation 后，宿主可配置 `AgentHost.Reconciler`（`InvocationReconciler`）。回调收到原 Invocation 的隔离副本、owner、来源项目、目标身份、原幂等键与 capability 契约；应用应通过原幂等键、业务回执或审计记录，只读核验原调用的真实结果。回调返回匹配原输出 schema 的 CapabilityResult，或业务系统已明确证实的失败；查询失败/证据不足应返回 error，不执行原操作。回调应遵守 context 的超时，核验期限为 invocation timeout 与租约一半的较小值。未注册核验器时返回 reconciliation_unavailable（503），运行继续暂停。
+
+`POST /runs/{id}/reconcile` 请求体为：
+
+```json
+{
+  "invocation_id": "原调用 UUID",
+  "arguments_sha256": "原调用日志中的 64 位参数摘要",
+  "revision": 12
+}
+```
+
+客户端不提交成功标志、Fact 或结果数据。Host 核对当前 owner/授权、运行版本、原调用摘要、Pack 指纹与租约，核验前后重新检查权限，再校验结果与异步操作终态/身份。运行中的任务、结果不明的错误和不同操作 ID 均不能解除暂停。浏览器 ui.command_status 绑定继续使用原有已验证 receipt 对账入口。
+
+已核验结果（Fact quality 为 verified_reconciliation）、调用 reconciled 标记、审计事件与原 run 的 queued 状态在一个检查点提交。还有其他不确定调用时仍为 needs_reconciliation；全部解决后，worker 或原有 resume/Drive 入口继续同一个 run，不重放已核验动作。取消始终阻止继续执行。响应丢失可用同一 invocation_id 和摘要重试，即使原 run 已继续执行或完成，也从持久调用日志返回结果。
+
+Web 集成对应 `/web/v1/runs/{id}/reconcile` 与 `client.reconcileInvocation(runId, invocation, revision)`，保留 owner/integration 校验。浏览器动作仍使用 `client.reconcile(commandId, revision)`。对账可靠性取决于宿主接入的权威业务核验；框架提供校验、持久化和恢复机制，不将模型判断或客户端声明当作业务证据。

@@ -156,9 +156,9 @@ func serverError(w http.ResponseWriter, e error) {
 			status = 404
 		case "access_denied", "forbidden", "identity_unverified", "model_data_not_authorized", "capability_not_granted":
 			status = 403
-		case "authorization_unavailable", "connection_unavailable":
+		case "authorization_unavailable", "connection_unavailable", "reconciliation_unavailable":
 			status = 503
-		case "source_scope_invalid", "schedule_invalid", "invalid_limit", "invalid_page", "memory_invalid", "steering_invalid":
+		case "source_scope_invalid", "schedule_invalid", "invalid_limit", "invalid_page", "memory_invalid", "steering_invalid", "reconciliation_invalid":
 			status = 422
 		}
 		apiError(w, status, host.Code, false)
@@ -343,6 +343,26 @@ func (s *HTTPServer) runHTTP(w http.ResponseWriter, r *http.Request, owner strin
 		return
 	}
 	switch parts[1] {
+	case "reconcile":
+		if len(parts) != 2 || r.Method != "POST" {
+			w.WriteHeader(405)
+			return
+		}
+		var b struct {
+			InvocationID    string `json:"invocation_id"`
+			ArgumentsSHA256 string `json:"arguments_sha256"`
+			Revision        *int   `json:"revision"`
+		}
+		if decodeBody(r, &b) != nil || b.Revision == nil {
+			apiError(w, 422, "invalid_request", true)
+			return
+		}
+		run, err := s.Host.Reconcile(ctx, id, owner, b.InvocationID, b.ArgumentsSHA256, *b.Revision)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, 200, runView(run))
 	case "steer":
 		if len(parts) != 2 || r.Method != "POST" {
 			w.WriteHeader(405)

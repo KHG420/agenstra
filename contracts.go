@@ -484,6 +484,7 @@ type Invocation struct {
 	FactID            *string           `json:"fact_id"`
 	Operation         *OperationReceipt `json:"operation"`
 	PollInFlight      bool              `json:"poll_in_flight"`
+	Reconciled        bool              `json:"reconciled,omitempty"`
 }
 type RuntimeState struct {
 	SchemaVersion       int                `json:"schema_version"`

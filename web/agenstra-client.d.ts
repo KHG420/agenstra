@@ -66,6 +66,8 @@ export class AgenstraClient {
   approve(id: string, invocation: JSONObject, revision: number, approved: boolean): Promise<Run>;
   cancelMessage(id: string): Promise<ChatMessage>;
   reconcile(id: string, revision: number): Promise<Run>;
+  /** Requires a server-side verifier for the original business invocation. */
+  reconcileInvocation(id: string, invocation: JSONObject, revision: number): Promise<Run>;
   run(instruction: string, options?: { requestId?: string; sources?: RunSource[] }): Promise<Run>;
   destroy(options?: { closeSession?: boolean }): Promise<void>;
 }

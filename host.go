@@ -78,6 +78,7 @@ type AgentHost struct {
 	ProviderFactory        ProviderFactory
 	Model                  DecisionModel
 	CompletionValidator    CompletionValidator
+	Reconciler             InvocationReconciler
 	PolicyResolver         PolicyResolver
 	ReleaseResolver        ReleaseResolver
 	ReleaseProviderFactory ReleaseProviderFactory
@@ -605,7 +606,11 @@ func (h *AgentHost) settleInvocation(run StoredRun, state *RuntimeState, item *I
 	if outcome.Fact != nil {
 		factID = outcome.Fact.FactID
 	}
-	audit := invocationAudit("call_finished", inv)
+	kind := "call_finished"
+	if item.Reconciled {
+		kind = "invocation_reconciled"
+	}
+	audit := invocationAudit(kind, inv)
 	audit["fact_id"], audit["error_code"] = factID, strptr(outcome.ErrorCode)
 	return h.save(run, state, "", nil, audit)
 }
