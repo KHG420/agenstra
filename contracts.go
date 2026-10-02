@@ -487,6 +487,7 @@ type Invocation struct {
 	Reconciled        bool              `json:"reconciled,omitempty"`
 }
 type RuntimeState struct {
+	ContextTelemetry    *ContextTelemetry  `json:"context_telemetry,omitempty"`
 	SchemaVersion       int                `json:"schema_version"`
 	RunID               string             `json:"run_id"`
 	Instruction         string             `json:"instruction"`

@@ -336,7 +336,7 @@ func arrayOmissions(facts []Fact, views []FactView) []string {
 	}
 	return notes
 }
-func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
+func (r *AgentRuntime) contextCandidate(state *RuntimeState) ContextPacket {
 	r.defaults()
 	caps := []JSON{}
 	names := make([]string, 0, len(r.Provider.Capabilities()))
@@ -411,6 +411,11 @@ func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
 	}
 	packet.MaxModelOutputTokens = r.MaxModelOutputTokens
 	packet.Progress = runProgress(state, r.MaxStagnantRounds)
+	return packet
+}
+
+func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
+	packet := r.contextCandidate(state)
 	available := r.MaxContextCharacters - utf8.RuneCountInString(r.systemPrompt())
 	return budgetContext(packet, state, available)
 }
@@ -459,7 +464,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			state.ErrorCode = strptr("model_token_budget_exhausted")
 			return nil
 		}
-		packet := r.Context(state)
+		packet := r.contextCandidate(state)
 		prompt := r.systemPrompt() + feedback
 		if packet.Progress != nil {
 			prompt += "\n" + progressUsagePrompt
@@ -494,7 +499,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 				}
 			}
 		}
+		candidate := packet
 		packet = budgetContext(packet, state, r.MaxContextCharacters-utf8.RuneCountInString(prompt))
+		state.ContextTelemetry = measureContext(state, prompt, candidate, packet, r.MaxContextCharacters)
 		raw, _ := CanonicalJSON(packet)
 		if utf8.RuneCountInString(prompt)+utf8.RuneCount(raw) > r.MaxContextCharacters {
 			state.Status = "failed"
