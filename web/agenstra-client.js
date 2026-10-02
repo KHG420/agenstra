@@ -27,8 +27,10 @@ export class AgenstraClient {
     this.selectionChain = Promise.resolve();
     this.selectionRevision = 0;
     this.receipts = this.load("receipts") || {};
+    this.browserRecovery = this.load("browser_recovery");
     this.chatWatchers = 0;
     this.aborters = new Set();
+    this.browserEpoch = 0;
     this.pagehide = () => { this.destroy({ closeSession: false }); };
     globalThis.addEventListener?.("pagehide", this.pagehide);
   }
@@ -75,20 +77,34 @@ export class AgenstraClient {
   }
   async connectBrowser() {
     if (!this.options.browser) return null;
+    if (this.recoveryPromise) return this.recoveryPromise;
     if (this.browserPromise) return this.browserPromise;
     this.browserPromise = this.connectBrowserOnce().catch(error => { this.browserPromise = null; throw error; });
     return this.browserPromise;
   }
   async connectBrowserOnce() {
-    const saved = this.load("browser");
-    if (saved && saved.handler_version === this.options.handlerVersion) {
+    const saved = this.browser || this.load("browser");
+    if (saved) {
+      this.browser = saved;
       try {
-        const data = await this.request("/browser/v1/sessions/" + saved.id + "/resume", { method: "POST", browserKey: saved.key, body: { generation: saved.generation } });
-        this.browser = { ...data.session, key: saved.key };
+        if (this.browserRecovery || saved.handler_version !== this.options.handlerVersion) {
+          if (saved.handler_version !== this.options.handlerVersion) this.emit("connection", { status: "profile_changed" });
+          await this.replaceBrowser(false);
+        }
+        else {
+          try {
+            const data = await this.request("/browser/v1/sessions/" + saved.id + "/resume", { method: "POST", browserKey: saved.key, body: { generation: saved.generation } });
+            this.browser = { ...data.session, key: saved.key };
+          } catch (error) {
+            if (error.code !== "browser_profile_changed") throw error;
+            this.emit("connection", { status: "profile_changed" });
+            await this.replaceBrowser(false);
+          }
+        }
       } catch (error) {
         // A different signed-in owner cannot resume the previous user's session.
         if (!["not_found", "browser_session_invalid", "browser_generation_changed"].includes(error.code)) throw error;
-        this.remove("browser"); this.receipts = {}; this.save("receipts", {});
+        this.browser = null; this.browserRecovery = null; this.remove("browser"); this.remove("browser_recovery"); this.receipts = {}; this.save("receipts", {});
       }
     }
     if (!this.browser) {
@@ -102,6 +118,54 @@ export class AgenstraClient {
     this.emit("connection", { status: "connected" });
     return this.browser;
   }
+  async replaceBrowser(acknowledgeUnknown) {
+    const browser = this.browser || this.load("browser");
+    if (!browser) throw new AgenstraError("browser_session_unavailable");
+    let recovery = this.browserRecovery;
+    if (!recovery || recovery.session_id !== browser.id) {
+      recovery = { session_id: browser.id, generation: browser.generation, handler_version: this.options.handlerVersion, handlers: [...this.actions.keys()], request_id: this.id(), acknowledge_unknown: acknowledgeUnknown };
+      this.browserRecovery = recovery;
+      this.save("browser_recovery", recovery);
+    }
+    let data;
+    try {
+      data = await this.request("/browser/v1/sessions/" + browser.id + "/recover", { method: "POST", browserKey: browser.key, body: { generation: recovery.generation, handler_version: recovery.handler_version, handlers: recovery.handlers, request_id: recovery.request_id, acknowledge_unknown: recovery.acknowledge_unknown } });
+    } catch (error) {
+      // A definite rejection permits a new decision; a lost response must retry
+      // the original ID so it cannot create another replacement or lose its key.
+      if (error instanceof AgenstraError && error.status >= 400 && error.status < 500) { this.browserRecovery = null; this.remove("browser_recovery"); }
+      if (error.code === "browser_outcome_unresolved") this.emit("reconciliation", { status: "unknown" });
+      throw error;
+    }
+    if (this.closed) throw new AgenstraError("client_closed");
+    this.browser = { ...data.session, key: data.key };
+    this.browserRecovery = null;
+    this.save("browser", this.browser); this.remove("browser_recovery");
+  }
+  async recoverBrowser({ acknowledgeUnknown = false } = {}) {
+    if (this.closed) throw new AgenstraError("client_closed");
+    if (!this.options.browser) throw new AgenstraError("browser_integration_unavailable");
+    if (this.recoveryPromise) return this.recoveryPromise;
+    const connecting = this.browserPromise;
+    this.recoveryPromise = (async () => {
+      if (connecting) await connecting.catch(() => {});
+      if (this.executing) throw new AgenstraError("browser_recovery_busy");
+      this.browserEpoch++; clearTimeout(this.browserTimer);
+      await this.observationChain.catch(() => {});
+      if (this.flushPromise) await this.flushPromise.catch(() => {});
+      await this.replaceBrowser(acknowledgeUnknown);
+      await this.publishPageObservation();
+      if (!this.closed) this.browserTimer = setTimeout(() => this.pollBrowser(), 0);
+      this.emit("connection", { status: "connected" });
+      return this.browser;
+    })();
+    try {
+      const browser = await this.recoveryPromise;
+      this.browserPromise = Promise.resolve(browser);
+      return browser;
+    } catch (error) { this.browserPromise = null; throw error; }
+    finally { this.recoveryPromise = null; }
+  }
   updatePageObservation(observation) {
     // Page observations are tool data, never the conversation's agent context.
     // Serialize updates so page revisions cannot race in one tab.
@@ -112,29 +176,36 @@ export class AgenstraClient {
   }
   async publishPageObservation() {
     if (!this.browser) return;
+    const browser = this.browser, epoch = this.browserEpoch;
     const observation = this.options.getPageObservation ? await this.options.getPageObservation() : this.pageObservation;
-    const data = await this.request("/browser/v1/sessions/" + this.browser.id + "/observation", { method: "POST", browserKey: this.browser.key, body: { generation: this.browser.generation, revision: this.browser.context_revision, observation } });
-    this.browser = { ...data.session, key: this.browser.key };
+    const data = await this.request("/browser/v1/sessions/" + browser.id + "/observation", { method: "POST", browserKey: browser.key, body: { generation: browser.generation, revision: browser.context_revision, observation } });
+    if (this.closed || epoch !== this.browserEpoch) return;
+    this.browser = { ...data.session, key: browser.key };
     this.pageObservation = structuredClone(observation);
     this.save("browser", this.browser);
   }
   async pollBrowser() {
     if (this.closed) return;
+    const epoch = this.browserEpoch;
     try {
       if (this.options.getPageObservation) {
         const latest = await this.options.getPageObservation();
         if (JSON.stringify(latest) !== JSON.stringify(this.pageObservation)) await this.updatePageObservation(latest);
       }
+      if (epoch !== this.browserEpoch) return;
       await this.flushReceipts();
+      if (epoch !== this.browserEpoch) return;
       const data = await this.request("/browser/v1/sessions/" + this.browser.id + "/poll", { method: "POST", browserKey: this.browser.key, body: { generation: this.browser.generation } });
+      if (this.closed || epoch !== this.browserEpoch) return;
       if (data.blocked_unknown) this.emit("reconciliation", { status: "unknown" });
       for (const command of data.commands) void this.executeCommand(command);
     } catch (error) {
+      if (this.closed || epoch !== this.browserEpoch) return;
       this.emit("error", error);
       this.emit("connection", { status: "disconnected" });
       if (["browser_generation_changed", "browser_session_invalid"].includes(error.code)) return;
     }
-    if (!this.closed) this.browserTimer = setTimeout(() => this.pollBrowser(), this.options.pollInterval || 1000);
+    if (!this.closed && epoch === this.browserEpoch && !this.recoveryPromise) this.browserTimer = setTimeout(() => this.pollBrowser(), this.options.pollInterval || 1000);
   }
   async executeCommand(command) {
     if (this.executing) return;
@@ -253,7 +324,6 @@ export class AgenstraClient {
   selectConversation(id) {
     if (typeof id !== "string" || !id) return Promise.reject(new TypeError("conversation id is required"));
     return this.changeConversation(async () => {
-      await this.connectBrowser();
       const snapshot = await this.request("/chat/v1/conversations/" + encodeURIComponent(id));
       const conversation = this.rememberConversation(snapshot.conversation);
       this.emit("conversation", snapshot);
@@ -262,7 +332,6 @@ export class AgenstraClient {
   }
   createConversation() {
     return this.changeConversation(async () => {
-      await this.connectBrowser();
       const conversation = this.rememberConversation(await this.request("/chat/v1/conversations", { method: "POST", body: { integration_id: this.options.integration } }));
       this.emit("conversation", { conversation, messages: [] });
       return conversation;
@@ -272,7 +341,6 @@ export class AgenstraClient {
     return this.changeConversation(() => this.conversation || this.ensureConversation());
   }
   async ensureConversation() {
-    await this.connectBrowser();
     const saved = this.load("conversation");
     if (saved) {
       try { const data = await this.request("/chat/v1/conversations/" + encodeURIComponent(saved)); return this.rememberConversation(data.conversation); }
@@ -283,13 +351,13 @@ export class AgenstraClient {
   async snapshot() { const conversation = await this.getConversation(); return this.request("/chat/v1/conversations/" + conversation.id); }
   async send(text, { clientId = this.id(), sources = [] } = {}) {
     const conversation = await this.getConversation();
-    try { return await this.request("/chat/v1/conversations/" + conversation.id + "/messages", { method: "POST", browserKey: this.browser?.key, body: { client_id: clientId, text, ...(sources.length ? { sources } : {}), session_id: this.browser?.id || "" } }); }
+    try { await this.connectBrowser(); return await this.request("/chat/v1/conversations/" + conversation.id + "/messages", { method: "POST", browserKey: this.browser?.key, body: { client_id: clientId, text, ...(sources.length ? { sources } : {}), session_id: this.browser?.id || "" } }); }
     catch (error) { error.clientId = clientId; throw error; }
   }
   watchConversation(callback) {
     const off = this.on("conversation", callback);
     this.chatWatchers++;
-    if (this.chatWatchers === 1) this.pollChat();
+    if (this.chatWatchers === 1) { void this.connectBrowser().catch(error => this.emit("error", error)); this.pollChat(); }
     let watching = true;
     return () => { if (!watching) return; watching = false; off(); this.chatWatchers--; if (!this.chatWatchers) clearTimeout(this.chatTimer); };
   }

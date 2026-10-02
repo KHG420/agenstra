@@ -38,6 +38,8 @@ export class AgenstraClient {
   registerActions(actions: Record<string, (args: JSONObject, context: { commandId: string; runId: string }) => JSONObject | Promise<JSONObject>>): this;
   on(name: string, callback: (value: any) => void): () => void;
   connectBrowser(): Promise<unknown>;
+  /** Stop old tasks and verify actual business state before acknowledging unknown results. Does not replay actions or delete history. */
+  recoverBrowser(options?: { acknowledgeUnknown?: boolean }): Promise<unknown>;
   updatePageObservation(observation: JSONObject): Promise<void>;
   /** Framework-owned memory management; authenticated owner and pack are resolved server-side. */
   listMemories(options?: { limit?: number; offset?: number }): Promise<Memory[]>;

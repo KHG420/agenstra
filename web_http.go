@@ -323,6 +323,25 @@ func (s *HTTPServer) browserHTTP(w http.ResponseWriter, r *http.Request, owner s
 	}
 	if len(parts) == 3 && parts[0] == "sessions" && r.Method == "POST" {
 		switch parts[2] {
+		case "recover":
+			var b struct {
+				Generation         int      `json:"generation"`
+				HandlerVersion     string   `json:"handler_version"`
+				Handlers           []string `json:"handlers"`
+				RequestID          string   `json:"request_id"`
+				AcknowledgeUnknown bool     `json:"acknowledge_unknown"`
+			}
+			if decodeBody(r, &b) != nil {
+				apiError(w, 422, "invalid_request", false)
+				return
+			}
+			session, newKey, e := s.Web.RecoverBrowserSession(r.Context(), owner, parts[1], key, b.Generation, b.HandlerVersion, b.Handlers, b.RequestID, b.AcknowledgeUnknown)
+			if e != nil {
+				webError(w, e)
+				return
+			}
+			writeJSON(w, 200, JSON{"session": session, "key": newKey})
+			return
 		case "resume":
 			var b struct {
 				Generation int `json:"generation"`

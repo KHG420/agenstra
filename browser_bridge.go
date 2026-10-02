@@ -4,18 +4,19 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	"errors"
 )
 
-func (w *WebIntegration) CreateBrowserSession(ctx context.Context, owner, integration, handlerVersion string, handlers []string) (BrowserSession, string, error) {
+func (w *WebIntegration) browserRegistration(ctx context.Context, owner, integration, handlerVersion string, handlers []string) (*compiledFrontend, error) {
 	p := w.profiles[integration]
 	if !w.Config.BrowserBridge || p == nil {
-		return BrowserSession{}, "", hostError("browser_integration_unavailable")
+		return nil, hostError("browser_integration_unavailable")
 	}
 	if _, e := w.Host.policy(ctx, owner, integration, true); e != nil {
-		return BrowserSession{}, "", e
+		return nil, e
 	}
 	if handlerVersion != p.profile.HandlerVersion || len(handlers) > 100 {
-		return BrowserSession{}, "", hostError("browser_handler_version_mismatch")
+		return nil, hostError("browser_handler_version_mismatch")
 	}
 	names := map[string]bool{}
 	for _, a := range p.profile.Actions {
@@ -24,16 +25,23 @@ func (w *WebIntegration) CreateBrowserSession(ctx context.Context, owner, integr
 	seen := map[string]bool{}
 	for _, n := range handlers {
 		if !names[n] || seen[n] {
-			return BrowserSession{}, "", hostError("browser_handler_unknown")
+			return nil, hostError("browser_handler_unknown")
 		}
 		seen[n] = true
 	}
 	if _, e := w.release(ctx, owner, integration); e != nil {
+		return nil, e
+	}
+	return p, nil
+}
+func (w *WebIntegration) CreateBrowserSession(ctx context.Context, owner, integration, handlerVersion string, handlers []string) (BrowserSession, string, error) {
+	p, e := w.browserRegistration(ctx, owner, integration, handlerVersion, handlers)
+	if e != nil {
 		return BrowserSession{}, "", e
 	}
 	key := randomWebKey()
 	s := BrowserSession{ID: NewID(), IntegrationID: integration, ProfileDigest: p.digest, Generation: 1, HandlerVersion: handlerVersion, Handlers: handlers, Context: JSON{}, ContextRevision: 0, LastSeen: w.Store.store.now(), KeyHash: webHash(key)}
-	e := w.Store.store.write(func(tx *sql.Tx) error { return webInsert(tx, "web_sessions", s.ID, owner, s) })
+	e = w.Store.store.write(func(tx *sql.Tx) error { return webInsert(tx, "web_sessions", s.ID, owner, s) })
 	s.KeyHash = ""
 	return s, key, e
 }
@@ -55,6 +63,9 @@ func (w *WebIntegration) ResumeBrowserSession(owner, id, key string, generation 
 		}
 		if e := browserSessionAuth(s, key, generation); e != nil {
 			return e
+		}
+		if p := w.profiles[s.IntegrationID]; p == nil || p.digest != s.ProfileDigest {
+			return hostError("browser_profile_changed")
 		}
 		commands, e := w.Store.commands(tx, owner, id)
 		if e != nil {
@@ -83,6 +94,120 @@ func (w *WebIntegration) ResumeBrowserSession(owner, id, key string, generation 
 	})
 	s.KeyHash = ""
 	return s, e
+}
+
+// RecoverBrowserSession replaces a stopped tab connection without changing or
+// replaying its run/command history. Unknown outcomes require host verification.
+// A stable request ID also recovers the same replacement after a lost response.
+func (w *WebIntegration) RecoverBrowserSession(ctx context.Context, owner, id, key string, generation int, handlerVersion string, handlers []string, requestID string, acknowledgeUnknown bool) (BrowserSession, string, error) {
+	var old, replacement BrowserSession
+	if requestID == "" || len(requestID) > 128 {
+		return replacement, "", hostError("request_id_required")
+	}
+	if e := webLoad(w.Store.store.DB, "web_sessions", id, owner, &old); e != nil {
+		return replacement, "", e
+	}
+	if subtle.ConstantTimeCompare([]byte(webHash(key)), []byte(old.KeyHash)) != 1 || key == "" {
+		return replacement, "", hostError("browser_session_invalid")
+	}
+	p, e := w.browserRegistration(ctx, owner, old.IntegrationID, handlerVersion, handlers)
+	if e != nil {
+		return replacement, "", e
+	}
+	newID := RequestRunID(owner, "browser-recovery:"+id+":"+requestID)
+	newKey := webHash(JSON{"session_id": id, "browser_key": key, "request_id": requestID, "handler_version": handlerVersion, "handlers": handlers, "acknowledge_unknown": acknowledgeUnknown})
+	e = w.Store.store.write(func(tx *sql.Tx) error {
+		if e := webLoad(tx, "web_sessions", id, owner, &old); e != nil {
+			return e
+		}
+		if old.Generation != generation {
+			return hostError("browser_generation_changed")
+		}
+		// The same request can only retrieve its original, still-open replacement.
+		if e := webLoad(tx, "web_sessions", newID, owner, &replacement); e == nil {
+			if !old.Closed || replacement.Closed || replacement.KeyHash != webHash(newKey) || replacement.ProfileDigest != p.digest || replacement.HandlerVersion != handlerVersion || webHash(replacement.Handlers) != webHash(handlers) {
+				return hostError("browser_recovery_conflict")
+			}
+			return nil
+		} else if ErrorCode(e) != "not_found" {
+			return e
+		}
+		if old.Closed {
+			return hostError("browser_generation_changed")
+		}
+		commands, e := w.Store.commands(tx, owner, id)
+		if e != nil {
+			return e
+		}
+		for _, c := range commands {
+			if c.Status == "running" {
+				return hostError("browser_recovery_busy")
+			}
+			if c.Status == "unknown" && !acknowledgeUnknown {
+				return hostError("browser_outcome_unresolved")
+			}
+		}
+		// Check every bound run, including other conversations and unpublished chat.
+		rows, e := tx.Query("SELECT run FROM web_bindings WHERE owner=? AND payload->>'session_id'=?", owner, id)
+		if e != nil {
+			return e
+		}
+		runs := []string{}
+		for rows.Next() {
+			var run string
+			if e = rows.Scan(&run); e != nil {
+				break
+			}
+			runs = append(runs, run)
+		}
+		if e == nil {
+			e = rows.Err()
+		}
+		rows.Close()
+		if e != nil {
+			return e
+		}
+		for _, runID := range runs {
+			run, e := w.Host.Store.GetRun(runID, owner)
+			if e == nil {
+				if !terminal(run.Status) {
+					return hostError("browser_recovery_run_active")
+				}
+				continue
+			}
+			if !errors.Is(e, ErrRunNotFound) {
+				return e
+			}
+			var status string
+			e = tx.QueryRow("SELECT payload->>'status' FROM web_messages WHERE owner=? AND payload->>'run_id'=?", owner, runID).Scan(&status)
+			if e == nil && !terminal(status) {
+				return hostError("browser_recovery_run_active")
+			}
+			if e != nil && !errors.Is(e, sql.ErrNoRows) {
+				return e
+			}
+		}
+		for _, c := range commands {
+			if c.Status == "queued" || c.Status == "dispatched" {
+				c.Status = "cancelled"
+				c.ErrorCode = "browser_connection_recovered"
+				if e := webSave(tx, "web_commands", c.ID, c); e != nil {
+					return e
+				}
+			}
+		}
+		old.Closed = true
+		if e := webSave(tx, "web_sessions", id, old); e != nil {
+			return e
+		}
+		replacement = BrowserSession{ID: newID, IntegrationID: old.IntegrationID, ProfileDigest: p.digest, Generation: 1, HandlerVersion: handlerVersion, Handlers: handlers, Context: JSON{}, LastSeen: w.Store.store.now(), KeyHash: webHash(newKey)}
+		return webInsert(tx, "web_sessions", newID, owner, replacement)
+	})
+	replacement.KeyHash = ""
+	if e != nil {
+		return BrowserSession{}, "", e
+	}
+	return replacement, newKey, nil
 }
 func (w *WebIntegration) frontend(digest string) (*compiledFrontend, error) {
 	for _, p := range w.profiles {
