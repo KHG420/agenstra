@@ -2,6 +2,7 @@ package agenstra
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 )
 
@@ -26,9 +27,26 @@ func (e CompletionValidationError) Error() string { return e.Kind }
 func (e CompletionValidationError) Code() string  { return e.Kind }
 
 type FactRequirement struct {
-	Capability string
-	Path       []any
-	Value      any
+	Capability string `json:"capability"`
+	Path       []any  `json:"path"`
+	Value      any    `json:"value"`
+}
+
+func (r *FactRequirement) UnmarshalJSON(raw []byte) error {
+	type requirement FactRequirement
+	var parsed requirement
+	if err := strictUnmarshal(raw, &parsed); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	if _, ok := fields["value"]; !ok {
+		return fmt.Errorf("fact requirement value required")
+	}
+	*r = FactRequirement(parsed)
+	return nil
 }
 
 // RequireFactValues checks the latest evidence from each required capability,

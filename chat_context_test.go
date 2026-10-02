@@ -188,8 +188,16 @@ func TestHeadlessChatHTTPBoundary(t *testing.T) {
 	if out.Code != 200 || !strings.Contains(out.Body.String(), `"page":"orders"`) {
 		t.Fatal("page observation route failed", out.Code, out.Body.String())
 	}
-	if out = request("GET", "/web/assets/agenstra-chat.js", ""); out.Code != 404 {
-		t.Fatal("core still serves a styled chat component", out.Code)
+	if out = request("GET", "/web/assets/agenstra-client.js", ""); out.Code != 200 {
+		t.Fatal("headless client unavailable", out.Code)
+	}
+	for _, uiDependency := range []string{"agenstra-chat.js", "createElement(", "attachShadow(", "<style"} {
+		if strings.Contains(out.Body.String(), uiDependency) {
+			t.Fatal("headless client loads a renderer", uiDependency)
+		}
+	}
+	if out = request("GET", "/web/assets/agenstra-chat.js", ""); out.Code != 200 || !strings.Contains(out.Body.String(), "mountAgenstraChat") {
+		t.Fatal("optional chat entry unavailable", out.Code)
 	}
 	if out = request("POST", "/browser/v1/sessions/unused/context", `{}`); out.Code != 404 {
 		t.Fatal("host context-management route remains", out.Code)

@@ -55,12 +55,14 @@ type ManagementConfig struct {
 	SecretDir      string `json:"secret_dir"`
 }
 type DeploymentConfig struct {
-	DatabasePath   string                `json:"database_path"`
-	Packs          map[string]PackConfig `json:"packs"`
-	Users          map[string]UserConfig `json:"users"`
-	Management     *ManagementConfig     `json:"management"`
-	Settings       HostSettings          `json:"settings"`
-	WebIntegration *WebIntegrationConfig `json:"web_integration,omitempty"`
+	CompletionChecks     map[string][]FactRequirement             `json:"completion_checks,omitempty"`
+	ReconciliationChecks map[string]map[string]ReconciliationRule `json:"reconciliation_checks,omitempty"`
+	DatabasePath         string                                   `json:"database_path"`
+	Packs                map[string]PackConfig                    `json:"packs"`
+	Users                map[string]UserConfig                    `json:"users"`
+	Management           *ManagementConfig                        `json:"management"`
+	Settings             HostSettings                             `json:"settings"`
+	WebIntegration       *WebIntegrationConfig                    `json:"web_integration,omitempty"`
 }
 type Deployment struct {
 	Config         DeploymentConfig
@@ -82,6 +84,7 @@ func LoadDeployment(path string) (*Deployment, error) {
 	c := DeploymentConfig{Settings: DefaultHostSettings()}
 	d := json.NewDecoder(strings.NewReader(string(b)))
 	d.DisallowUnknownFields()
+	d.UseNumber()
 	if e = d.Decode(&c); e != nil {
 		return nil, e
 	}

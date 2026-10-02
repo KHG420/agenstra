@@ -1,5 +1,7 @@
 # Agenstra
 
+[快速接入：独立服务、标准聊天组件、MCP 发现与任务验收](docs/quick-integration.md)
+
 语言 / Language：**简体中文** · [English](README.md)
 
 **让现有系统更容易接入 Agent。**
@@ -85,7 +87,7 @@ go mod download
 CGO_ENABLED=0 go build -trimpath -o dist/ ./cmd/...
 ```
 
-构建后，`dist/` 中包含四个独立命令。SQLite 存储与 JSON Schema 校验使用纯 Go 库；管理页面及其静态资源嵌入服务端二进制。
+构建后，`dist/` 中包含五个独立命令。SQLite 存储与 JSON Schema 校验使用纯 Go 库；管理页面及其静态资源嵌入服务端二进制。
 
 | 命令 | 用途 |
 | --- | --- |
@@ -93,6 +95,7 @@ CGO_ENABLED=0 go build -trimpath -o dist/ ./cmd/...
 | `agenstra-serve` | 提供 HTTP API、持久化 worker 和可选管理入口。 |
 | `agenstra-manage` | 通过管理 API 校验、发布和管理能力版本与授权。 |
 | `agenstra-import-openapi` | 将指定 OpenAPI 操作导入为 REST 能力包草稿。 |
+| `agenstra-evaluate` | 通过 HTTP 执行代表性任务，验收状态、能力调用和业务证据。 |
 
 REST 与 MCP 支持均包含在 Go 二进制中。按[接入教程](docs/tutorial.md)创建自己的包，并设置清单引用的环境变量后，`agenstra` 命令可先检查能力目录，不调用 LLM：
 

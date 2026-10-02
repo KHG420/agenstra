@@ -38,6 +38,8 @@ export class AgenstraClient {
   options: ClientOptions;
   id(): string;
   registerActions(actions: Record<string, (args: JSONObject, context: { commandId: string; runId: string }) => JSONObject | Promise<JSONObject>>): this;
+  /** Accept profile-generated handler types; the server validates each action's input contract. */
+  registerActions<T extends { [K in keyof T]: (args: never, context: { commandId: string; runId: string }) => JSONObject | Promise<JSONObject> }>(actions: T): this;
   on(name: string, callback: (value: any) => void): () => void;
   connectBrowser(): Promise<unknown>;
   /** Stop old tasks and verify actual business state before acknowledging unknown results. Does not replay actions or delete history. */
@@ -64,6 +66,7 @@ export class AgenstraClient {
   resumeRun(id: string): Promise<Run>;
   getArtifact(id: string, artifactId: string): Promise<JSONObject>;
   getRunTelemetry(id: string): Promise<RunTelemetry>;
+  getRunDiagnostics(id: string): Promise<RunDiagnostics>;
   getRunEvents(id: string, options?: { after?: number; limit?: number }): Promise<RunEvent[]>;
   /** Applied at a safe boundary; reuse requestId when retrying a lost response. */
   steerRun(id: string, text: string, revision: number, options?: { requestId?: string }): Promise<Run>;
@@ -122,3 +125,5 @@ export interface RuntimeState extends JSONObject { run_id: string; status: strin
 export interface ExecutionTelemetry { stage: string; started_at: number | null; retry_at: number | null; wait_reason: string | null; next_wake_at: number | null; cancel_requested: boolean; active: { invocation_id: string; capability: string; status: string; attempts: number; approval_expires_at: number | null; operation_deadline: number | null }[] }
 export interface RuntimeInfo { schema: "agenstra.runtime-info.v1"; settings: HostSettings; model: ModelInfo; features: Record<string, boolean>; granted_capabilities: string[] }
 export interface ConversationContextSelection { history_limit: number; part_character_limit: number; included_messages: number; omitted_messages: number; truncated_parts: number; input_characters: number }
+
+export interface RunDiagnostics { schema: "agenstra.run-diagnostics.v1"; run_id: string; status: string; revision: number; elapsed_ms: number; findings: { category: string; code: string; capability?: string; message: string; next_action: string }[]; progress: RunProgress | null; budget: RunBudget }

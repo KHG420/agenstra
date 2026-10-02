@@ -25,7 +25,7 @@
 | 原系统自己的聊天 UI | 聊天/会话接口、队列、消息历史、运行检查点 |
 | 文件选择、业务幂等与原后端校验 | 稳定 client/command ID、不重跑已认领 handler |
 
-SDK 在 `web/agenstra-client.js`，导出命令和完整配置见 [Web integration guide](web-integration.md)。Agenstra 不带聊天 DOM、样式、React/Vue 组件或业务页面驱动器；同一个 SDK 可供不同系统使用。
+SDK 在 `web/agenstra-client.js`，导出命令和完整配置见 [Web integration guide](web-integration.md)。headless client 不加载 DOM 或样式；宿主也可单独导入标准聊天组件和服务端票据助手。同一个 SDK 可供不同系统使用，实际页面行为仍由宿主绑定。
 
 ## 年会抽奖的实际接法
 
@@ -78,3 +78,7 @@ SDK 在 `web/agenstra-client.js`，导出命令和完整配置见 [Web integrati
 已核验结果（Fact quality 为 verified_reconciliation）、调用 reconciled 标记、审计事件与原 run 的 queued 状态在一个检查点提交。还有其他不确定调用时仍为 needs_reconciliation；全部解决后，worker 或原有 resume/Drive 入口继续同一个 run，不重放已核验动作。取消始终阻止继续执行。响应丢失可用同一 invocation_id 和摘要重试，即使原 run 已继续执行或完成，也从持久调用日志返回结果。
 
 Web 集成对应 `/web/v1/runs/{id}/reconcile` 与 `client.reconcileInvocation(runId, invocation, revision)`，保留 owner/integration 校验。浏览器动作仍使用 `client.reconcile(commandId, revision)`。对账可靠性取决于宿主接入的权威业务核验；框架提供校验、持久化和恢复机制，不将模型判断或客户端声明当作业务证据。
+
+## 快速接入与诊断
+
+完整接入套件见[快速接入指南](quick-integration.md)。`GET /runs/{id}/diagnostics` 返回归因、恢复建议、调用进度、耗时和模型预算，保持 owner 校验且不触发模型或业务接口。可选部署 `completion_checks` 和 `reconciliation_checks` 见[业务校验配置](completion-evaluation.md)。

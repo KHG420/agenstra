@@ -2,10 +2,31 @@
   "name": "@agenstra/web",
   "version": "0.1.0",
   "license": "MIT",
-  "private": true,
   "type": "module",
   "exports": {
-    "./client": { "types": "./agenstra-client.d.ts", "default": "./agenstra-client.js" }
+    "./client": {
+      "types": "./agenstra-client.d.ts",
+      "default": "./agenstra-client.js"
+    },
+    "./chat": {
+      "types": "./agenstra-chat.d.ts",
+      "default": "./agenstra-chat.js"
+    },
+    "./session": {
+      "types": "./agenstra-session.d.ts",
+      "default": "./agenstra-session.js"
+    }
   },
-  "scripts": { "test": "node --test *.test.js" }
+  "scripts": {
+    "test": "node --test *.test.js"
+  },
+  "files": [
+    "LICENSE",
+    "agenstra-client.js",
+    "agenstra-client.d.ts",
+    "agenstra-chat.js",
+    "agenstra-chat.d.ts",
+    "agenstra-session.js",
+    "agenstra-session.d.ts"
+  ]
 }

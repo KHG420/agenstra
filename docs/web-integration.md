@@ -1,6 +1,6 @@
 # 可选聊天接口、会话管理与前端控制桥
 
-本模块提供无 UI 的聊天与会话接口、框架管理的 Agent 上下文、浏览器 SDK、动作投递和回执恢复。宿主系统自行设计所有聊天界面，只需接入自己的业务 API、登录身份、页面观察数据与 UI handler。宿主通过会话 ID 选择会话；上下文的读取、组装、持久化和任务恢复由框架负责。核心包不包含 DOM 渲染、聊天 Web Component 或 CSS，也不依赖 React/Vue。模块默认关闭，不修改 v1 运行库结构，原 `/runs` 和 `/admin` 的认证方式保持原样。部署范围是单节点、本地持久磁盘和 SQLite WAL。
+本模块提供无 UI 的聊天与会话接口、框架管理的 Agent 上下文、浏览器 SDK、动作投递和回执恢复。宿主可使用独立的可选聊天组件或自行设计界面，只需接入自己的业务 API、登录身份、页面观察数据与 UI handler。宿主通过会话 ID 选择会话；上下文的读取、组装、持久化和任务恢复由框架负责。headless client 不包含 DOM 渲染或 CSS；可选的 `@agenstra/web/chat` 单独导出，也不依赖 React/Vue。模块默认关闭，不修改 v1 运行库结构，原 `/runs` 和 `/admin` 的认证方式保持原样。部署范围是单节点、本地持久磁盘和 SQLite WAL。
 
 ## 运行完整示例
 
@@ -12,7 +12,7 @@
 - 连续发送消息可观察 FIFO 排队；可以停止排队或执行中的任务。
 - 新建或选择会话，观察各自的历史与任务状态；切换会话不会取消旧任务。
 
-示例聊天 UI 位于 `examples/web-integration/demo-chat.js`，仅由示例服务提供，不属于 SDK 导出或框架静态资源。示例只监听回环地址，身份固定为 `demo`，退出时删除临时数据库。生产环境须用宿主已经验证的登录会话解析身份，并使用真实模型、业务数据和持久存储。
+示例聊天入口复用 `web/agenstra-chat.js`，旧示例文件保留轻量入口。标准组件单独导出并通过 `/web/assets/agenstra-chat.js` 提供。示例只监听回环地址，身份固定为 `demo`，退出时删除临时数据库。生产环境须用宿主已经验证的登录会话解析身份，并使用真实模型、业务数据和持久存储。
 
 ## 选择要复用的模块
 
@@ -22,7 +22,7 @@
 | 聊天并控制页面 | 两项均为 `true` | 会话与上下文管理、浏览器控制桥 |
 | 仅需控制桥 | `chat: false`, `browser_bridge: true` | SDK 的 `run()` 和浏览器动作 |
 
-所有模式的 UI 均由宿主实现。
+所有模式均支持宿主自定义 UI；聊天模式也可使用标准组件。
 
 ## 部署配置和授权
 
@@ -103,9 +103,9 @@ Web ticket 只用于扩展路由以及该用户关联的聊天/浏览器 run，�
 
 ## 宿主使用无 UI 的 SDK
 
-SDK 资源嵌入 Go 二进制，无需静态资源构建；也可将 `web/agenstra-client.js` 纳入宿主 bundler。目录附 TypeScript 声明，`web/package.json` 当前为 private，未发布 npm 包，仅导出 `@agenstra/web/client`。
+SDK 资源嵌入 Go 二进制，无需静态资源构建；也可将 `web/agenstra-client.js` 纳入宿主 bundler。目录附 TypeScript 声明，包可用 `npm pack ./web` 打包安装，导出 `@agenstra/web/client`、`@agenstra/web/chat`、`@agenstra/web/session`；npm 注册表发布另行执行。
 
-宿主希望离线构建或固定 SDK 版本时，在框架仓库执行 `node web/export-client.mjs /path/to/host/vendor/agenstra`。它复制原始 JS 和 TypeScript 声明，并生成包含 SHA-256 的 `agenstra-sdk.json`；宿主可从本地 vendor 目录导入。升级时重新导出并审查差异，不需要新增 npm 依赖，也不需要复制聊天 UI。
+宿主希望离线构建或固定 SDK 版本时，在框架仓库执行 `node web/export-client.mjs /path/to/host/vendor/agenstra`。它复制原始 JS 和 TypeScript 声明，并生成包含 SHA-256 的 `agenstra-sdk.json`；宿主可从本地 vendor 目录导入。升级时重新导出并审查差异，不需要新增 npm 依赖，也可按需导入标准聊天组件。
 
 ```js
 import { createAgenstraClient } from "/agent/web/assets/agenstra-client.js";
@@ -270,3 +270,7 @@ stop();
 ```
 
 `getRunEvents(id, { after, limit })` 可手动读取事件。`watchRun` 使用现有认证与轮询连接，按游标去重、故障后重试、排空终态事件后停止；取消订阅会屏蔽迟到结果，destroy 会清理订阅并中止请求。补充指令返回 202 表示已持久接收，`steering_applied` 事件表示已进入运行上下文。响应丢失时使用相同 requestId 重试；错误对象也保留 requestId。指令在安全边界生效，不中断已发出的动作。
+
+## 最小接入套件与验收
+
+独立服务、票据助手、标准组件、页面动作类型生成、任务诊断和验收 CLI 的完整路径见[快速接入指南](quick-integration.md)。`client.getRunDiagnostics(id)` 使用同样的 owner 和 integration 绑定检查。

@@ -1,5 +1,5 @@
 "use strict";
-window.installDraftEditor = ({ api, feedback, names, formatDate, onPublish }) => {
+window.installDraftEditor = ({ api, feedback, names, formatDate, onPublish, getOverview }) => {
   const $ = (id) => document.getElementById(id);
   const steps = ["basic", "connection", "capabilities", "rules", "skills", "review"];
   const state = { draft: null, dirty: false, skillDirty: false, rawDirty: false, capName: "", skillName: "", step: "basic" };
@@ -16,7 +16,7 @@ window.installDraftEditor = ({ api, feedback, names, formatDate, onPublish }) =>
     return result;
   }
   function option(value, text) { const node = document.createElement("option"); node.value = value; node.textContent = text; return node; }
-  function dirty() { state.dirty = true; status(); }
+  function dirty() { state.dirty = true; state.published = null; $("setup-published").hidden = true; status(); }
   function status() {
     const d = state.draft;
     $("draft-status").textContent = d
@@ -30,6 +30,25 @@ window.installDraftEditor = ({ api, feedback, names, formatDate, onPublish }) =>
     buttons.forEach((node) => { node.disabled = true; });
     try { await fn(); } catch (error) { report(error.message, "error"); }
     finally { buttons.forEach((node, i) => { node.disabled = previous[i]; }); }
+  }
+  function showPublished(release) {
+    state.published = release;
+    $("setup-published").hidden = false;
+    $("setup-release").textContent = `${release.pack_id} ${release.version} 已发布；请选择用户和明确的能力范围。`;
+    $("setup-owner").replaceChildren(option("", "选择已有用户"), ...(getOverview()?.users || []).map(id => option(id, id)));
+    const m = state.draft.manifest, refs = {};
+    const source = m.source || {};
+    const variables = isMCP() ? [source.url_env, source.token_env, source.cwd_env, ...Object.values(source.environment || {})] : [m.base_url_env, m.token_env, ...Object.values(m.headers_env || {})];
+    for (const name of variables.filter(Boolean)) refs[name] = name;
+    $("setup-environment").value = JSON.stringify(refs, null, 2);
+    $("setup-model-data").checked = false;
+    $("setup-grants").replaceChildren();
+    for (const item of capabilities()) {
+      const label = document.createElement("label"); label.className = "operation-item";
+      const input = document.createElement("input"); input.type = "checkbox"; input.value = item.name;
+      const text = document.createElement("span"); text.textContent = `${item.name}${item.approval_required ? " · 执行前需确认" : ""}`;
+      label.append(input, text); $("setup-grants").append(label);
+    }
   }
   function requireDraft() { if (!state.draft) throw new Error("请先创建或选择一份草稿。"); }
   const knownFields = () => isMCP()
@@ -229,6 +248,7 @@ window.installDraftEditor = ({ api, feedback, names, formatDate, onPublish }) =>
   }));
   $("draft-editor").addEventListener("input", (event) => {
     if (!state.draft) return;
+    if (event.target.closest("#setup-published, #mcp-tools") || event.target.id === "discovery-environment") return;
     if (["skill-name", "skill-path", "skill-description", "skill-content"].includes(event.target.id)) state.skillDirty = true;
     if (event.target.id === "manifest-editor") state.rawDirty = true;
     if (!["manifest-file", "skill-files", "openapi-file"].includes(event.target.id)) dirty();
@@ -251,11 +271,64 @@ window.installDraftEditor = ({ api, feedback, names, formatDate, onPublish }) =>
     if (!spec || !operations.length) throw new Error("请选择 OpenAPI 文档，并勾选本次要导入的操作。");
     await merge("openapi", { value: { spec, operations } });
   }));
+  $("discover-mcp").addEventListener("click", () => action(async () => {
+    await save();
+    state.discovery = null;
+    $("mcp-tools").replaceChildren();
+    const result = await api(`/admin/api/drafts/${encodeURIComponent(state.draft.draft_id)}/discover`, { method: "POST", body: { expected_revision: state.draft.revision, environment: parse("discovery-environment", "凭据引用") } });
+    state.discovery = result;
+    for (const tool of result.tools) {
+      const label = document.createElement("label"); label.className = "operation-item";
+      const input = document.createElement("input"); input.type = "checkbox"; input.value = tool.name; input.disabled = !tool.supported;
+      const text = document.createElement("span"); text.textContent = `${tool.name} · ${tool.issue || tool.description || "可导入，请确认业务影响"}`;
+      label.append(input, text); $("mcp-tools").append(label);
+    }
+    if (!result.tools.length) $("mcp-tools").textContent = "服务没有提供工具。请检查服务配置。";
+    report(`读取到 ${result.tools.length} 项工具。勾选要开放的能力后导入；尚未执行任何业务操作。`, "success");
+  }));
+  $("import-mcp-tools").addEventListener("click", () => action(async () => {
+    const discovery = state.discovery;
+    if (!discovery || state.dirty || discovery.draft_id !== state.draft.draft_id || discovery.draft_revision !== state.draft.revision) throw new Error("草稿或连接已变化，请重新发现工具。");
+    const selected = [...$("mcp-tools").querySelectorAll("input:checked")].map(input => input.value);
+    const items = discovery.tools.filter(tool => tool.supported && selected.includes(tool.name)).map(tool => tool.exposure);
+    if (!items.length) throw new Error("请勾选至少一项受支持的工具。");
+    await merge("capabilities", { items });
+    state.discovery = null; showStep("rules");
+  }));
   $("validate").addEventListener("click", () => action(async () => { await save(); renderIssues(); showStep("review"); }));
   $("publish-draft").addEventListener("click", () => action(async () => {
     await save(); if (state.draft.issues.length) { renderIssues(); throw new Error("请先处理列出的待完成项，再发布。"); }
     const result = await api(`/admin/api/drafts/${encodeURIComponent(state.draft.draft_id)}/publish`, { method: "POST", body: { expected_revision: state.draft.revision } });
-    await onPublish(); report(`已发布 ${result.pack_id} ${result.version}。请在版本目录启用，再绑定用户权限。`, "success");
+    await onPublish(); showPublished(result); report(`已发布 ${result.pack_id} ${result.version}。继续选择用户和授权范围即可启用。`, "success");
+  }));
+  $("enable-draft").addEventListener("click", () => action(async () => {
+    const release = state.published, owner = value("setup-owner");
+    const grants = [...$("setup-grants").querySelectorAll("input:checked")].map(input => input.value);
+    if (!release || !owner || !grants.length || !$("setup-model-data").checked) throw new Error("请选择用户、授权能力，并确认模型数据使用范围。");
+    const environment = parse("setup-environment", "服务凭据引用");
+    const overview = getOverview();
+    const existing = overview.bindings.find(item => item.owner_id === owner && item.pack_id === release.pack_id)?.config || {};
+    const approvals = capabilities().filter(item => grants.includes(item.name) && item.approval_required).map(item => item.name);
+    const config = { ...existing, environment, granted_capabilities: grants, approval_capabilities: [...new Set([...(existing.approval_capabilities || []).filter(name => grants.includes(name)), ...approvals])], allow_model_data: true };
+    const path = `/admin/api/bindings/${encodeURIComponent(owner)}/${encodeURIComponent(release.pack_id)}`;
+    const current = overview.releases.find(item => item.digest === release.digest);
+    if (!current) throw new Error("发布目录已变化，请刷新后重试。");
+    await api(`/admin/api/packs/${encodeURIComponent(release.pack_id)}/activate`, { method: "POST", body: { digest: release.digest, expected_revision: current.revision } });
+    let completed = "版本已启用";
+    feedback("版本已启用，正在保存用户授权…", "info", "setup-feedback");
+    try {
+      await api(path, { method: "PUT", body: config });
+      completed += "，用户授权已保存";
+      feedback("用户授权已保存，正在检查契约与连接…", "info", "setup-feedback");
+      await api(path + "/check", { method: "POST" });
+      feedback("契约与连接配置检查通过。下一步用代表性业务任务验证实际执行结果。", "success", "setup-feedback");
+      $("setup-release").textContent = `${release.pack_id} ${release.version} 已启用，${owner} 的能力授权已保存。`;
+      report(`已启用 ${release.pack_id} ${release.version} 并为 ${owner} 保存授权，契约与连接配置检查通过。`, "success");
+      $("diagnostic-pack").value = release.pack_id;
+    } catch (error) {
+      feedback(`${completed}；${error.message} 请检查连接与授权后重试。`, "error", "setup-feedback");
+      throw error;
+    } finally { await onPublish(); }
   }));
   $("apply-json").addEventListener("click", () => action(async () => {
     requireDraft(); const manifest = parse("manifest-editor", "完整清单");

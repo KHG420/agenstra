@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-//go:embed web/agenstra-client.js
+//go:embed web/agenstra-client.js web/agenstra-chat.js
 var webAssets embed.FS
 
 func webError(w http.ResponseWriter, e error) {
@@ -72,7 +72,7 @@ func (s *HTTPServer) webHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	if strings.HasPrefix(p, "/web/assets/") && r.Method == "GET" {
 		name := strings.TrimPrefix(p, "/web/assets/")
-		if name != "agenstra-client.js" {
+		if name != "agenstra-client.js" && name != "agenstra-chat.js" {
 			http.NotFound(w, r)
 			return
 		}

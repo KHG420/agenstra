@@ -37,6 +37,9 @@ func NewHTTPServer(host *AgentHost, deployment *Deployment, workerEnabled bool, 
 	if interval <= 0 {
 		return nil, fmt.Errorf("worker interval must be positive")
 	}
+	if err := configureDeploymentChecks(host, deployment); err != nil {
+		return nil, err
+	}
 	s := &HTTPServer{Host: host, Deployment: deployment, WorkerEnabled: workerEnabled, WorkerInterval: interval, stop: make(chan struct{}), done: make(chan struct{})}
 	registryOpened := false
 	if deployment.Registry != nil {
@@ -359,6 +362,17 @@ func (s *HTTPServer) runHTTP(w http.ResponseWriter, r *http.Request, owner strin
 		return
 	}
 	switch parts[1] {
+	case "diagnostics":
+		if len(parts) != 2 || r.Method != "GET" {
+			w.WriteHeader(405)
+			return
+		}
+		result, err := s.Host.GetDiagnostics(ctx, id, owner)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, 200, result)
 	case "context-policy":
 		if len(parts) != 2 || r.Method != "POST" {
 			w.WriteHeader(405)
