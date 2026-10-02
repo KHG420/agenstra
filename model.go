@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -26,9 +27,15 @@ type HTTPJSONDecisionModel struct {
 	Client  *http.Client
 	// Zero values use bounded defaults. MaxAttempts includes the first request;
 	// set it to one to disable transport retries.
-	MaxAttempts    int
-	RetryBaseDelay time.Duration
-	MaxRetryDelay  time.Duration
+	MaxAttempts     int
+	RetryBaseDelay  time.Duration
+	MaxRetryDelay   time.Duration
+	MaxOutputTokens int
+	// TokenLimitField defaults to max_tokens; set max_completion_tokens when
+	// required by the selected compatible gateway.
+	TokenLimitField       string
+	InputPricePerMillion  float64
+	OutputPricePerMillion float64
 }
 
 func NewHTTPJSONDecisionModel(model, baseURL, apiKey string, timeout time.Duration, client *http.Client) (*HTTPJSONDecisionModel, error) {
@@ -43,16 +50,31 @@ func NewHTTPJSONDecisionModel(model, baseURL, apiKey string, timeout time.Durati
 	}
 	return &HTTPJSONDecisionModel{Model: model, BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, Timeout: timeout, Client: client}, nil
 }
-func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet ContextPacket, prompt string) (Decision, error) {
+func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet ContextPacket, prompt string) (decision Decision, resultErr error) {
+	metrics := &ModelCallMetrics{}
+	started := time.Now()
+	ctx = context.WithValue(ctx, modelMetricsKey{}, metrics)
+	ctx = context.WithValue(ctx, modelTokenBudgetKey{}, packet.ModelTokensRemaining)
+	defer func() {
+		metrics.ElapsedMilliseconds = time.Since(started).Milliseconds()
+		if resultErr != nil {
+			metrics.ErrorCode = strptr(ErrorCode(resultErr))
+		}
+		decision.ModelCall = metrics
+	}()
 	contextJSON, err := CanonicalJSON(packet)
 	if err != nil {
 		return Decision{}, ModelDecisionError{"model_decision_invalid"}
 	}
-	body, err := m.requestJSON(ctx, contextJSON, prompt)
+	requestModel := *m
+	if packet.MaxModelOutputTokens > 0 && (requestModel.MaxOutputTokens <= 0 || packet.MaxModelOutputTokens < requestModel.MaxOutputTokens) {
+		requestModel.MaxOutputTokens = packet.MaxModelOutputTokens
+	}
+	body, err := requestModel.requestJSON(ctx, contextJSON, prompt)
 	if err != nil {
 		return Decision{}, err
 	}
-	decision, err := strictDecision(body)
+	decision, err = strictDecision(body)
 	if err != nil {
 		var oversized DecisionTooManyCallsError
 		if errors.As(err, &oversized) {
@@ -64,9 +86,45 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet ContextPacket
 }
 func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, prompt string) ([]byte, error) {
 	payload := JSON{"model": m.Model, "response_format": JSON{"type": "json_object"}, "messages": []any{JSON{"role": "system", "content": prompt}, JSON{"role": "user", "content": string(input)}}}
+	if m.MaxOutputTokens > 0 {
+		field := m.TokenLimitField
+		if field == "" {
+			field = "max_tokens"
+		}
+		if field != "max_tokens" && field != "max_completion_tokens" {
+			return nil, ModelDecisionError{"model_token_limit_invalid"}
+		}
+		payload[field] = m.MaxOutputTokens
+	}
 	raw, err := CanonicalJSON(payload)
 	if err != nil {
 		return nil, ModelDecisionError{"model_decision_invalid"}
+	}
+	if metrics := modelMetrics(ctx); metrics != nil {
+		// UTF-8 bytes plus a framing allowance are a bounded fallback, not a
+		// tokenizer result. Provider usage replaces these estimates when available.
+		metrics.EstimatedInputTokens = int64(len(raw) + 128)
+		if remaining := packetTokenBudget(ctx); remaining > 0 && metrics.EstimatedInputTokens >= remaining {
+			return nil, ModelDecisionError{"model_token_budget_exhausted"}
+		}
+		if remaining := packetTokenBudget(ctx); remaining > 0 {
+			limit := remaining - metrics.EstimatedInputTokens
+			if m.MaxOutputTokens > 0 {
+				limit = min(limit, int64(m.MaxOutputTokens))
+			}
+			field := m.TokenLimitField
+			if field == "" {
+				field = "max_tokens"
+			}
+			if field != "max_tokens" && field != "max_completion_tokens" {
+				return nil, ModelDecisionError{"model_token_limit_invalid"}
+			}
+			payload[field] = limit
+			raw, err = CanonicalJSON(payload)
+			if err != nil {
+				return nil, ModelDecisionError{"model_decision_invalid"}
+			}
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.BaseURL+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
@@ -85,6 +143,9 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 			return nil, err
 		}
 		request := req.Clone(ctx)
+		if metrics := modelMetrics(ctx); metrics != nil {
+			metrics.Attempts++
+		}
 		request.Body = io.NopCloser(bytes.NewReader(raw))
 		res, requestErr := client.Do(request)
 		code, retry, retryAfter := "", false, time.Duration(0)
@@ -98,6 +159,12 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 				code = "model_timeout"
 			}
 		} else {
+			if metrics := modelMetrics(ctx); metrics != nil {
+				id := res.Header.Get("X-Request-ID")
+				if safeCodePattern.MatchString(id) {
+					metrics.RequestID = id
+				}
+			}
 			code, retry = modelHTTPError(res.StatusCode)
 			retryAfter = modelRetryAfter(res.Header.Get("Retry-After"), time.Now())
 			if code == "" {
@@ -128,6 +195,10 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		delay = min(delay*2, maxDelay)
 	}
 	var envelope struct {
+		Usage *struct {
+			Input  *int64 `json:"prompt_tokens"`
+			Output *int64 `json:"completion_tokens"`
+		} `json:"usage"`
 		Choices []struct {
 			Message struct {
 				Content string `json:"content"`
@@ -136,8 +207,28 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
+	if metrics := modelMetrics(ctx); metrics != nil {
+		metrics.EstimatedOutputTokens = int64(len(body))
+	}
 	if json.Unmarshal(body, &envelope) != nil || len(envelope.Choices) == 0 {
 		return nil, ModelDecisionError{"model_decision_invalid"}
+	}
+	if metrics := modelMetrics(ctx); metrics != nil {
+		metrics.FinishReason = envelope.Choices[0].FinishReason
+		if len(metrics.FinishReason) > 32 {
+			metrics.FinishReason = "unknown"
+		}
+		metrics.EstimatedOutputTokens = int64(len(envelope.Choices[0].Message.Content))
+		if usage := envelope.Usage; usage != nil && usage.Input != nil && usage.Output != nil && *usage.Input >= 0 && *usage.Output >= 0 && *usage.Input <= 1000000000 && *usage.Output <= 1000000000 {
+			metrics.UsageAvailable = true
+			metrics.InputTokens, metrics.OutputTokens = *usage.Input, *usage.Output
+			if m.InputPricePerMillion >= 0 && m.OutputPricePerMillion >= 0 && (m.InputPricePerMillion > 0 || m.OutputPricePerMillion > 0) {
+				cost := (float64(metrics.InputTokens)*m.InputPricePerMillion + float64(metrics.OutputTokens)*m.OutputPricePerMillion) / 1e6
+				if !math.IsNaN(cost) && !math.IsInf(cost, 0) {
+					metrics.EstimatedCostUSD = &cost
+				}
+			}
+		}
 	}
 	if envelope.Choices[0].Message.Refusal != "" || envelope.Choices[0].FinishReason == "content_filter" {
 		return nil, ModelDecisionError{"model_refused"}
