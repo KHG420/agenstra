@@ -20,11 +20,15 @@ func (e ModelDecisionError) Error() string { return e.Kind }
 func (e ModelDecisionError) Code() string  { return e.Kind }
 
 type HTTPJSONDecisionModel struct {
-	Model   string
-	BaseURL string
-	APIKey  string
-	Timeout time.Duration
-	Client  *http.Client
+	ContextWindowTokens   int64
+	MaxInputTokens        int64
+	ProtocolReserveTokens int64
+	CountInputTokens      func(model string, payload []byte) (int64, error)
+	Model                 string
+	BaseURL               string
+	APIKey                string
+	Timeout               time.Duration
+	Client                *http.Client
 	// Zero values use bounded defaults. MaxAttempts includes the first request;
 	// set it to one to disable transport retries.
 	MaxAttempts     int
@@ -67,6 +71,9 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet ContextPacket
 		return Decision{}, ModelDecisionError{"model_decision_invalid"}
 	}
 	requestModel := *m
+	if packet.MaxModelInputTokens > 0 && (requestModel.MaxInputTokens == 0 || packet.MaxModelInputTokens < requestModel.MaxInputTokens) {
+		requestModel.MaxInputTokens = packet.MaxModelInputTokens
+	}
 	if packet.MaxModelOutputTokens > 0 && (requestModel.MaxOutputTokens <= 0 || packet.MaxModelOutputTokens < requestModel.MaxOutputTokens) {
 		requestModel.MaxOutputTokens = packet.MaxModelOutputTokens
 	}
@@ -85,16 +92,9 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet ContextPacket
 	return decision, nil
 }
 func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, prompt string) ([]byte, error) {
-	payload := JSON{"model": m.Model, "response_format": JSON{"type": "json_object"}, "messages": []any{JSON{"role": "system", "content": prompt}, JSON{"role": "user", "content": string(input)}}}
-	if m.MaxOutputTokens > 0 {
-		field := m.TokenLimitField
-		if field == "" {
-			field = "max_tokens"
-		}
-		if field != "max_tokens" && field != "max_completion_tokens" {
-			return nil, ModelDecisionError{"model_token_limit_invalid"}
-		}
-		payload[field] = m.MaxOutputTokens
+	payload, err := m.requestPayload(input, prompt)
+	if err != nil {
+		return nil, err
 	}
 	raw, err := CanonicalJSON(payload)
 	if err != nil {
@@ -103,7 +103,11 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	if metrics := modelMetrics(ctx); metrics != nil {
 		// UTF-8 bytes plus a framing allowance are a bounded fallback, not a
 		// tokenizer result. Provider usage replaces these estimates when available.
-		metrics.EstimatedInputTokens = int64(len(raw) + 128)
+		measurement, measureErr := m.measurePayload(raw)
+		if measureErr != nil {
+			return nil, measureErr
+		}
+		metrics.EstimatedInputTokens = measurement.Tokens
 		if remaining := packetTokenBudget(ctx); remaining > 0 && metrics.EstimatedInputTokens >= remaining {
 			return nil, ModelDecisionError{"model_token_budget_exhausted"}
 		}
@@ -124,6 +128,28 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 			if err != nil {
 				return nil, ModelDecisionError{"model_decision_invalid"}
 			}
+		}
+	}
+	if m.MaxInputTokens > 0 || m.ContextWindowTokens > 0 {
+		measured, measureErr := m.measurePayload(raw)
+		if measureErr != nil {
+			return nil, measureErr
+		}
+		limit := m.MaxInputTokens
+		if m.ContextWindowTokens > 0 {
+			if m.MaxOutputTokens <= 0 {
+				return nil, ModelDecisionError{"model_output_reserve_required"}
+			}
+			available := m.ContextWindowTokens - int64(m.MaxOutputTokens) - m.ProtocolReserveTokens
+			if available <= 0 {
+				return nil, ModelDecisionError{"context_too_large"}
+			}
+			if limit == 0 || available < limit {
+				limit = available
+			}
+		}
+		if measured.Tokens > limit {
+			return nil, ModelDecisionError{"context_too_large"}
 		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.BaseURL+"/chat/completions", bytes.NewReader(raw))

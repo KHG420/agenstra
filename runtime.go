@@ -15,22 +15,26 @@ import (
 )
 
 type AgentRuntime struct {
-	OriginPackID         string
-	Provider             CapabilityProvider
-	Model                DecisionModel
-	Grants               map[string]bool
-	ConnectionID         string
-	Durable              bool
-	MaxModelRounds       int
-	MaxToolCalls         int
-	MaxRepeatedCall      int
-	MaxContextCharacters int
-	Memories             []MemoryView
-	CompletionValidator  CompletionValidator
-	MaxModelTokens       int64
-	MaxModelOutputTokens int
-	MaxStagnantRounds    int
-	MaxConcurrentTools   int
+	ModelContextWindowTokens   int64
+	MaxModelInputTokens        int64
+	ModelOutputReserveTokens   int
+	ModelProtocolReserveTokens int64
+	OriginPackID               string
+	Provider                   CapabilityProvider
+	Model                      DecisionModel
+	Grants                     map[string]bool
+	ConnectionID               string
+	Durable                    bool
+	MaxModelRounds             int
+	MaxToolCalls               int
+	MaxRepeatedCall            int
+	MaxContextCharacters       int
+	Memories                   []MemoryView
+	CompletionValidator        CompletionValidator
+	MaxModelTokens             int64
+	MaxModelOutputTokens       int
+	MaxStagnantRounds          int
+	MaxConcurrentTools         int
 }
 
 func (r *AgentRuntime) defaults() {
@@ -501,9 +505,31 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		}
 		candidate := packet
 		packet = budgetContext(packet, state, r.MaxContextCharacters-utf8.RuneCountInString(prompt))
+		packet, window, tokenLimit, reserve, measurement, measureErr := r.tokenProjection(state, packet, prompt)
+		if tokenLimit != nil {
+			packet.MaxModelInputTokens = *tokenLimit
+		}
 		state.ContextTelemetry = measureContext(state, prompt, candidate, packet, r.MaxContextCharacters)
+		c := state.ContextTelemetry
+		c.ModelContextWindowTokens = window
+		c.EffectiveInputTokenLimit = tokenLimit
+		c.ReservedOutputTokens = reserve
+		if measureErr != nil {
+			state.Status = "failed"
+			state.ErrorCode = strptr(ErrorCode(measureErr))
+			return nil
+		}
+		c.InputTokens = &measurement.Tokens
+		c.TokenMeasurementSource = measurement.Source
+		if tokenLimit != nil {
+			remaining := max(int64(0), *tokenLimit-measurement.Tokens)
+			ratio := float64(measurement.Tokens) / float64(*tokenLimit)
+			c.TokensRemaining = &remaining
+			c.TokenUtilization = &ratio
+			c.OverLimit = c.OverLimit || measurement.Tokens > *tokenLimit
+		}
 		raw, _ := CanonicalJSON(packet)
-		if utf8.RuneCountInString(prompt)+utf8.RuneCount(raw) > r.MaxContextCharacters {
+		if state.ContextTelemetry.OverLimit {
 			state.Status = "failed"
 			state.ErrorCode = strptr("context_too_large")
 			return nil
@@ -532,6 +558,10 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		metrics.Round = state.RoundsUsed
 		metrics.Purpose = "decision"
 		metrics.Reservation = false
+		if metrics.UsageAvailable && state.ContextTelemetry != nil {
+			n := metrics.InputTokens
+			state.ContextTelemetry.ReportedInputTokens = &n
+		}
 		if err != nil {
 			metrics.ErrorCode = strptr(ErrorCode(err))
 		}

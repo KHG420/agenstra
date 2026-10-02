@@ -56,6 +56,13 @@ func (m *HTTPJSONDecisionModel) ExtractMemoriesMeasured(ctx context.Context, req
 		return nil, metrics, err
 	}
 	model := *m
+	if request.ContextWindowTokens > 0 && (model.ContextWindowTokens == 0 || request.ContextWindowTokens < model.ContextWindowTokens) {
+		model.ContextWindowTokens = request.ContextWindowTokens
+	}
+	if request.MaxInputTokens > 0 && (model.MaxInputTokens == 0 || request.MaxInputTokens < model.MaxInputTokens) {
+		model.MaxInputTokens = request.MaxInputTokens
+	}
+	model.ProtocolReserveTokens = max(model.ProtocolReserveTokens, request.ProtocolReserveTokens)
 	if request.MaxOutputTokens > 0 && (model.MaxOutputTokens <= 0 || request.MaxOutputTokens < model.MaxOutputTokens) {
 		model.MaxOutputTokens = request.MaxOutputTokens
 	}

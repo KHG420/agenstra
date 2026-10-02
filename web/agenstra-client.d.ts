@@ -75,14 +75,17 @@ export class AgenstraClient {
 export function createAgenstraClient(options: ClientOptions): AgenstraClient;
 
 export interface HostSettings {
+ model_context_window_tokens?: number; max_model_input_tokens?: number; model_output_reserve_tokens?: number; model_protocol_reserve_tokens?: number;
  lease_seconds: number; max_model_rounds: number; max_tool_calls: number; max_poll_calls: number; max_run_seconds: number;
  max_context_characters: number; max_artifact_bytes: number; max_active_artifact_bytes: number; max_state_bytes: number;
  model_timeout_seconds: number; invocation_timeout_seconds: number; max_invocation_attempts: number; retry_interval_seconds: number;
  approval_seconds: number; max_concurrent_runs: number; max_model_tokens?: number; max_model_output_tokens?: number;
  model_token_limit_field?: "" | "max_tokens" | "max_completion_tokens"; max_stagnant_rounds?: number; max_concurrent_tools?: number;
 }
-export interface EffectiveRunConfig { version: 1; source: "run_snapshot" | "current_host"; settings: HostSettings }
+export interface EffectiveRunConfig { version: 1; source: "run_snapshot" | "current_host"; settings: HostSettings; model: ModelInfo }
+export interface ModelInfo { name?: string; context_window_tokens: number | null; max_input_tokens: number | null; max_output_tokens: number | null }
 export interface ContextTelemetry {
+ input_tokens: number | null; reported_input_tokens: number | null; token_measurement_source?: "tokenizer" | "utf8_bytes_estimate"; model_context_window_tokens: number | null; effective_input_token_limit: number | null; reserved_output_tokens: number | null; tokens_remaining: number | null; token_utilization: number | null;
  schema: "agenstra.context-telemetry.v1"; projection_id: string; round: number; measured_at: number;
  input_characters: number; character_limit: number; characters_remaining: number; character_utilization: number; over_limit: boolean;
  candidate_characters: number; components: Record<string, number>;

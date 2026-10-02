@@ -19,3 +19,9 @@ const stop = client.watchRun(runId, ({ run, telemetry, events }) => {
   console.log(run.status, telemetry?.context?.characters_remaining);
 });
 ```
+
+## 模型容量
+
+`model_context_window_tokens`、`max_model_input_tokens`、`model_output_reserve_tokens` 和 `model_protocol_reserve_tokens` 可显式配置。容量未知为 null。窗口已知时必须提供输出预留或已知输出上限；有效输入上限取宿主/模型输入限制与窗口扣除输出和协议预留的较小值。超限投影继续裁剪，必需内容仍超限则禁止模型 IO。
+
+自定义模型可实现可选 `ModelInfoProvider` 与 `ModelInputMeasurer`，现有 `DecisionModel` 不变。HTTP 模型支持 `CountInputTokens` 回调，接收实际序列化协议正文；未提供时以 UTF-8 字节加 framing 估计并明确标注，不能等同供应商账单。响应报告值另存 `reported_input_tokens`。

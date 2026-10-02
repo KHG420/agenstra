@@ -40,6 +40,12 @@ func (h *AgentHost) extractRunMemories(ctx context.Context, run StoredRun, reque
 	}
 	request.ModelTokensRemaining = remaining
 	request.MaxOutputTokens = s.MaxModelOutputTokens
+	if s.ModelOutputReserveTokens > 0 && (request.MaxOutputTokens == 0 || s.ModelOutputReserveTokens < request.MaxOutputTokens) {
+		request.MaxOutputTokens = s.ModelOutputReserveTokens
+	}
+	request.ContextWindowTokens = s.ModelContextWindowTokens
+	request.MaxInputTokens = s.MaxModelInputTokens
+	request.ProtocolReserveTokens = s.ModelProtocolReserveTokens
 	extractCtx, cancel := context.WithTimeout(ctx, time.Duration(s.ModelTimeoutSeconds*1e9))
 	defer cancel()
 	started := time.Now()

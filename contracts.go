@@ -307,6 +307,7 @@ type Observation struct {
 	ArgumentsOmitted bool    `json:"arguments_omitted"`
 }
 type ContextPacket struct {
+	MaxModelInputTokens  int64             `json:"max_model_input_tokens,omitempty"`
 	OriginPackID         string            `json:"origin_pack_id,omitempty"`
 	Schema               string            `json:"schema"`
 	Instruction          string            `json:"instruction"`
