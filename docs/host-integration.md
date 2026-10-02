@@ -50,3 +50,11 @@ SDK 在 `web/agenstra-client.js`，导出命令和完整配置见 [Web integrati
 文件上传仍需要用户选择文件；Agent 可以执行后续检查、模式选择、审批和导入。下载 handler 确认“下载已发起”，不能假定用户电脑的保存位置。聊天 UI 和动作 handler 都应等待可核对的结果后再显示完成。
 
 跨项目任务可通过可选 `sources` 明确选择目标能力，并按发起项目委派、目标验证权限和任务范围取交集。目标身份、实际凭据、版本固定、项目记忆和各入口的完整接入说明见[跨项目任务、身份与授权](cross-project-tasks.md)。所有读取与轮询也必须明确授权。
+
+## 运行进度与运行中补充指令
+
+`GET /runs/{id}/events?after=SEQUENCE&limit=100` 按递增 sequence 返回持久事件。模型决定事件包含 decision_kind 和模型指标；调用结束、等待和停止等事件包含当前状态以及有界 progress。Web 集成沿用 `/web/v1/runs/{id}/events`，保持原有 owner 与 integration 校验。
+
+`POST /runs/{id}/steer` 接收 `{ "request_id": "UUID", "revision": 12, "text": "先完成当前写操作，然后只汇报结果" }`，成功返回 202。request_id 支持响应丢失后的原请求重试，重复 ID 改写文本会冲突；revision 必须是提交时的当前版本。队列最多保留 32 条未处理指令，每条最多 30,000 字符。
+
+指令存入现有事件日志，在安全边界一次性加入 followups。已发出的写操作先记录实际结果；未发出且尚无尝试的调用会标记 steering_superseded，已有审批失效，模型依据新输入重新决定。异步任务继续跟踪，结果不明确的操作继续要求对账。模型返回 final 时的事务检查保证已接受的指令不会被完成检查点覆盖。排队、运行、等待和待审批支持补充；needs_input 使用原有 input 接口，needs_reconciliation 先完成对账。取消与预算仍优先。

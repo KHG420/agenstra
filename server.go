@@ -158,7 +158,7 @@ func serverError(w http.ResponseWriter, e error) {
 			status = 403
 		case "authorization_unavailable", "connection_unavailable":
 			status = 503
-		case "source_scope_invalid", "schedule_invalid", "invalid_limit", "invalid_page", "memory_invalid":
+		case "source_scope_invalid", "schedule_invalid", "invalid_limit", "invalid_page", "memory_invalid", "steering_invalid":
 			status = 422
 		}
 		apiError(w, status, host.Code, false)
@@ -343,6 +343,26 @@ func (s *HTTPServer) runHTTP(w http.ResponseWriter, r *http.Request, owner strin
 		return
 	}
 	switch parts[1] {
+	case "steer":
+		if len(parts) != 2 || r.Method != "POST" {
+			w.WriteHeader(405)
+			return
+		}
+		var b struct {
+			RequestID string `json:"request_id"`
+			Text      string `json:"text"`
+			Revision  *int   `json:"revision"`
+		}
+		if decodeBody(r, &b) != nil || b.Revision == nil {
+			apiError(w, 422, "invalid_request", true)
+			return
+		}
+		run, err := s.Host.Steer(ctx, id, owner, b.RequestID, b.Text, *b.Revision)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, 202, runView(run))
 	case "input":
 		if len(parts) != 2 || r.Method != "POST" {
 			w.WriteHeader(405)

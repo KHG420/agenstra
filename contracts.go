@@ -511,6 +511,7 @@ type RuntimeState struct {
 	ModelCalls          []ModelCallMetrics `json:"model_calls,omitempty"`
 	ModelUsage          ModelUsage         `json:"model_usage"`
 	Progress            *ProgressTracker   `json:"progress_tracker,omitempty"`
+	SteeringCursor      int                `json:"steering_cursor,omitempty"`
 }
 type RunResult struct {
 	Status         string             `json:"status"`

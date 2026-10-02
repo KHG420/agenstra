@@ -290,6 +290,20 @@ func (s *SQLiteStore) Checkpoint(runID, ownerID, token string, state map[string]
 		if _, e := s.leased(tx, runID, ownerID, token); e != nil {
 			return e
 		}
+		sequence, steeringErr := latestSteering(tx, runID)
+		if steeringErr != nil {
+			return steeringErr
+		}
+		if sequence > steeringCursor(state) {
+			if status == "completed" || status == "needs_input" {
+				return errSteeringPending
+			}
+			if status == "waiting" || status == "needs_approval" {
+				status = "queued"
+				v := s.now()
+				wake = &v
+			}
+		}
 		now := s.now()
 		if _, e := tx.Exec("UPDATE runs SET state_json=?,status=?,next_wake_at=?,revision=revision+1,updated_at=? WHERE run_id=?", string(payload), status, wake, now, runID); e != nil {
 			return e

@@ -253,3 +253,20 @@ npm test
 Go 回归覆盖消息并发、取消发布、去重、授权与审批、代际隔离、契约固定、票据范围，以及浏览器契约升级、跨会话排队任务、执行中/不确定动作与并发恢复重试；Go 上下文回归还覆盖会话隔离、补充输入、检查点恢复及宿主上下文注入拒绝；Node 测试覆盖 handler 不重跑、ACK 丢失、恢复重试、网关错误、旧连接迟到响应、受阻时读取历史与取消、心跳、页面变化、会话选择竞态和卸载。示例的固定模型验证执行协议，不评估真实模型理解任务的能力。
 
 跨项目任务可通过可选 `sources` 明确选择目标能力，并按发起项目委派、目标验证权限和任务范围取交集。目标身份、实际凭据、版本固定、项目记忆和各入口的完整接入说明见[跨项目任务、身份与授权](cross-project-tasks.md)。所有读取与轮询也必须明确授权。
+
+## 进度订阅与补充指令
+
+```javascript
+const stop = client.watchRun(run.run_id, ({ run, events, cursor }) => {
+  renderRunStatus(run.status);
+  for (const item of events) renderProgress(item.event);
+  // 保存 cursor 可用于重新订阅时的 { after: cursor }。
+});
+await client.steerRun(run.run_id, "完成当前操作后改用中文汇报", run.revision, {
+  requestId: crypto.randomUUID()
+});
+// 页面卸载或组件退出时停止订阅。
+stop();
+```
+
+`getRunEvents(id, { after, limit })` 可手动读取事件。`watchRun` 使用现有认证与轮询连接，按游标去重、故障后重试、排空终态事件后停止；取消订阅会屏蔽迟到结果，destroy 会清理订阅并中止请求。补充指令返回 202 表示已持久接收，`steering_applied` 事件表示已进入运行上下文。响应丢失时使用相同 requestId 重试；错误对象也保留 requestId。指令在安全边界生效，不中断已发出的动作。
