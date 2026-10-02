@@ -253,6 +253,19 @@ func (s *HTTPServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.schedulesHTTP(w, r, owner)
 		return
 	}
+	if p == "/runtime-info" {
+		if r.Method != "GET" {
+			w.WriteHeader(405)
+			return
+		}
+		info, err := s.Host.GetRuntimeInfo(r.Context(), owner, r.URL.Query().Get("pack_id"))
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, 200, info)
+		return
+	}
 	if p == "/runs" {
 		s.runsHTTP(w, r, owner)
 		return

@@ -29,3 +29,17 @@ func TestEffectiveSettingsSurviveHostChangeAndCheckpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestOlderSettingsSnapshotDoesNotInheritNewHostPolicy(t *testing.T) {
+	h := testHost(t, testStore(t), &hostProvider{}, &hostModel{})
+	run := createTestHostRun(t, h)
+	config, _ := objectOf(run.State["effective_config"])
+	settings := config["settings"].(JSON)
+	delete(settings, "context_policy")
+	run.State["effective_config"] = config
+	h.Settings.ContextPolicy = ContextPolicy{.8, .6}
+	c, err := h.effectiveRunConfig(run)
+	if err != nil || c.Settings.ContextPolicy != (ContextPolicy{}) {
+		t.Fatalf("%+v %v", c, err)
+	}
+}

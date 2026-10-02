@@ -32,6 +32,8 @@ func (h *AgentHost) extractRunMemories(ctx context.Context, run StoredRun, reque
 		reservation.EstimatedInputTokens = remaining
 		reservation.EstimatedOutputTokens = 0
 	}
+	// Extraction is active model work even before the decision loop starts.
+	state.Status = "running"
 	recordModelCall(state, reservation)
 	index := len(state.ModelCalls) - 1
 	run, err = h.save(run, state, "", nil, JSON{"kind": "memory_requested", "source_id": sourceID})
@@ -48,6 +50,11 @@ func (h *AgentHost) extractRunMemories(ctx context.Context, run StoredRun, reque
 	request.ProtocolReserveTokens = s.ModelProtocolReserveTokens
 	extractCtx, cancel := context.WithTimeout(ctx, time.Duration(s.ModelTimeoutSeconds*1e9))
 	defer cancel()
+	extractCtx = WithModelRequestObserver(extractCtx, func(progress ModelRequestProgress) error {
+		var e error
+		run, e = h.save(run, state, "", nil, JSON{"kind": progress.Kind, "purpose": "memory_extraction", "attempt": progress.Attempt, "error_code": progress.ErrorCode, "retry_at": progress.RetryAt})
+		return e
+	})
 	started := time.Now()
 	var proposals []MemoryProposal
 	metrics := ModelCallMetrics{Attempts: 1, EstimatedInputTokens: int64(len(input) + len(memoryExtractionPrompt) + 128)}

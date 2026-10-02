@@ -3,11 +3,11 @@ export interface BrowserCommand { id: string; run_id: string; session_id: string
 export interface RunSource { pack_id: string; capabilities: string[] }
 export interface ProjectBinding extends RunSource { release: string; subject: string }
 export interface Run { run_id: string; status: string; revision: number; state: JSONObject & { runtime: RuntimeState; project_sources?: ProjectBinding[] }; telemetry?: RunTelemetry }
-export interface RunEvent { sequence: number; created_at: number; event: JSONObject & { kind: string; metrics?: ModelCallMetrics; context?: ContextTelemetry | null; budget?: RunBudget; progress?: RunProgress } }
+export interface RunEvent { sequence: number; created_at: number; event: JSONObject & { kind: string; metrics?: ModelCallMetrics; context?: ContextTelemetry | null; budget?: RunBudget; progress?: RunProgress; attempt?: number; retry_at?: number } }
 export interface RunProgressSnapshot { run: Run; telemetry: RunTelemetry | null; events: RunEvent[]; cursor: number }
 export interface ChatConversation { id: string; integration_id: string; created_at: number }
 export interface ChatInput { field?: string; prompt?: string; text: string }
-export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; sources?: RunSource[]; run_id: string; status: string; answer_markdown?: string; input_history?: ChatInput[]; run?: Run }
+export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; sources?: RunSource[]; run_id: string; status: string; answer_markdown?: string; input_history?: ChatInput[]; context_selection?: ConversationContextSelection; run?: Run }
 export interface ConversationSnapshot { conversation: ChatConversation; messages: ChatMessage[] }
 export interface Memory {
   id: string; scope: "user" | "pack"; pack_id: string; key: string; value: string;
@@ -59,6 +59,10 @@ export class AgenstraClient {
   watchConversation(callback: (snapshot: ConversationSnapshot) => void): () => void;
   getRun(id: string): Promise<Run>;
   setContextPolicy(id: string, policy: ContextPolicy, revision: number, options?: { requestId?: string }): Promise<Run>;
+  getRuntimeInfo(): Promise<RuntimeInfo>;
+  cancelRun(id: string): Promise<Run>;
+  resumeRun(id: string): Promise<Run>;
+  getArtifact(id: string, artifactId: string): Promise<JSONObject>;
   getRunTelemetry(id: string): Promise<RunTelemetry>;
   getRunEvents(id: string, options?: { after?: number; limit?: number }): Promise<RunEvent[]>;
   /** Applied at a safe boundary; reuse requestId when retrying a lost response. */
@@ -77,6 +81,7 @@ export function createAgenstraClient(options: ClientOptions): AgenstraClient;
 
 export interface ContextPolicy { trigger_ratio: number; target_ratio: number }
 export interface HostSettings {
+ max_conversation_history_messages?: number; max_conversation_history_characters?: number; max_conversation_messages?: number;
  context_policy: ContextPolicy;
  model_context_window_tokens?: number; max_model_input_tokens?: number; model_output_reserve_tokens?: number; model_protocol_reserve_tokens?: number;
  lease_seconds: number; max_model_rounds: number; max_tool_calls: number; max_poll_calls: number; max_run_seconds: number;
@@ -86,7 +91,7 @@ export interface HostSettings {
  model_token_limit_field?: "" | "max_tokens" | "max_completion_tokens"; max_stagnant_rounds?: number; max_concurrent_tools?: number;
 }
 export interface EffectiveRunConfig { version: 1; source: "run_snapshot" | "current_host"; settings: HostSettings; model: ModelInfo }
-export interface ModelInfo { name?: string; context_window_tokens: number | null; max_input_tokens: number | null; max_output_tokens: number | null }
+export interface ModelInfo { protocol_reserve_tokens: number; name?: string; context_window_tokens: number | null; max_input_tokens: number | null; max_output_tokens: number | null }
 export interface ContextTelemetry {
  policy: ContextPolicy; strategy: "projection"; policy_unit: "characters" | "tokens"; projection_reason: "none" | "soft_threshold" | "hard_limit"; target_met: boolean;
  input_tokens: number | null; reported_input_tokens: number | null; token_measurement_source?: "tokenizer" | "utf8_bytes_estimate"; model_context_window_tokens: number | null; effective_input_token_limit: number | null; reserved_output_tokens: number | null; tokens_remaining: number | null; token_utilization: number | null;
@@ -108,8 +113,12 @@ export interface RunBudget {
  tokens: { limit: number | null; remaining: number | null; reported_tokens: number; estimated_tokens: number; reserved_tokens: number; unknown_tokens: number; charged_tokens: number };
  usage: ModelUsage; usage_by_purpose: Record<string, ModelUsage>; deadline: number; seconds_remaining: number;
 }
-export interface RunTelemetry { context_policy: ContextPolicy; schema: "agenstra.run-telemetry.v1"; run_id: string; run_revision: number; observed_at: number; context: ContextTelemetry | null; effective_config: EffectiveRunConfig; budget: RunBudget }
+export interface RunTelemetry { execution: ExecutionTelemetry; host_operations: { lease_seconds: number; max_concurrent_runs: number }; context_policy: ContextPolicy; schema: "agenstra.run-telemetry.v1"; run_id: string; run_revision: number; observed_at: number; context: ContextTelemetry | null; effective_config: EffectiveRunConfig; budget: RunBudget }
 export interface ProgressItem { capability: string; call_ref?: string; status: string; fact_id?: string | null; error_code?: string | null }
 export interface RunProgress { completed?: ProgressItem[]; pending?: ProgressItem[]; blocked?: ProgressItem[]; completed_count: number; blocked_count: number; omitted_items: number; no_progress_rounds: number; stagnation_warning?: boolean }
 export interface Invocation { invocation_id: string; call: { call_ref: string; capability: string; arguments: JSONObject; reason: string }; status: string; arguments_sha256: string; attempts: number; error_code: string | null; fact_id: string | null; approval_expires_at: number | null; operation: JSONObject | null }
 export interface RuntimeState extends JSONObject { run_id: string; status: string; rounds_used: number; tool_calls_used: number; poll_calls_used: number; pending: Invocation[]; model_usage: ModelUsage; model_calls?: ModelCallMetrics[]; context_telemetry?: ContextTelemetry }
+
+export interface ExecutionTelemetry { stage: string; started_at: number | null; retry_at: number | null; wait_reason: string | null; next_wake_at: number | null; cancel_requested: boolean; active: { invocation_id: string; capability: string; status: string; attempts: number; approval_expires_at: number | null; operation_deadline: number | null }[] }
+export interface RuntimeInfo { schema: "agenstra.runtime-info.v1"; settings: HostSettings; model: ModelInfo; features: Record<string, boolean>; granted_capabilities: string[] }
+export interface ConversationContextSelection { history_limit: number; part_character_limit: number; included_messages: number; omitted_messages: number; truncated_parts: number; input_characters: number }

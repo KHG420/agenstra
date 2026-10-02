@@ -15,6 +15,15 @@ func normalizedRunSettings(s HostSettings) HostSettings {
 	if s == (HostSettings{}) {
 		s = DefaultHostSettings()
 	}
+	if s.MaxConversationHistoryMessages == 0 {
+		s.MaxConversationHistoryMessages = 6
+	}
+	if s.MaxConversationHistoryCharacters == 0 {
+		s.MaxConversationHistoryCharacters = 1500
+	}
+	if s.MaxConversationMessages == 0 {
+		s.MaxConversationMessages = 500
+	}
 	if s.MaxStagnantRounds == 0 {
 		s.MaxStagnantRounds = 8
 	}
@@ -31,9 +40,12 @@ func (h *AgentHost) effectiveRunConfig(run StoredRun) (EffectiveRunConfig, error
 		if err != nil {
 			return c, hostError("run_state_invalid")
 		}
-		if err = json.Unmarshal(raw, &c); err != nil || c.Version != 1 || c.Source != "run_snapshot" {
+		var snapshot EffectiveRunConfig
+		if err = json.Unmarshal(raw, &snapshot); err != nil || snapshot.Version != 1 || snapshot.Source != "run_snapshot" {
 			return c, hostError("run_state_invalid")
 		}
+		c = snapshot
+		c.Settings = normalizedRunSettings(c.Settings)
 	}
 	if err := c.Settings.Validate(); err != nil {
 		return c, hostError("run_state_invalid")
