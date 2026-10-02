@@ -802,7 +802,7 @@ func (h *AgentHost) operation(state *RuntimeState, item *Invocation, fact Fact, 
 	case containsString(binding.FailureStates, s):
 		item.Status = "failed"
 		item.ErrorCode = strptr("operation_failed")
-		Reject(state, item.Call.CallRef, item.Call.Capability, "operation_failed", nil, "")
+		Reject(state, item.Call.CallRef, item.Call.Capability, "operation_failed", nil, fact.FactID)
 	case containsString(binding.ReconciliationStates, s):
 		if item.Operation == nil {
 			args := JSON{}

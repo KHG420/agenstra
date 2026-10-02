@@ -1,0 +1,558 @@
+{
+  "date": "2026-10-03",
+  "framework_baseline": "dea90c5",
+  "requested_model": "deepseek-v4-flash",
+  "response_model": "deepseek-flash",
+  "notes": [
+    "Parameter experiments changed only the private loopback proxy, not production model defaults.",
+    "Each profile has one fresh four-scenario fixture, except all-off which failed the finish assertion before UI navigation.",
+    "Absence of reasoning usage in disabled responses is represented as zero; their response messages contained no reasoning_content.",
+    "receipt-current uses the final failed operation Fact citation fix; it does not include the exploratory feedback text prototype."
+  ],
+  "earlier_optimized_eight_runs": {
+    "requests": 47,
+    "input_tokens": 238868,
+    "cached_input_tokens": 193146,
+    "output_tokens": 26048,
+    "reasoning_output_tokens": 21828,
+    "model_elapsed_ms": 144564,
+    "memory": {
+      "requests": 8,
+      "input_tokens": 4226,
+      "cached_input_tokens": 2810,
+      "output_tokens": 7030,
+      "reasoning_output_tokens": 6808,
+      "model_elapsed_ms": 35912
+    }
+  },
+  "variants": [
+    {
+      "variant": "audit-current",
+      "profile": "default",
+      "business_acceptance_passed": true,
+      "completed_scenarios_recorded": 4,
+      "wall_elapsed_ms": 88910,
+      "usage_by_purpose": {
+        "memory_extraction": {
+          "requests": 4,
+          "input_tokens": 2115,
+          "cached_input_tokens": 1405,
+          "output_tokens": 4648,
+          "reasoning_output_tokens": 4492,
+          "model_elapsed_ms": 22699
+        },
+        "decision": {
+          "requests": 20,
+          "input_tokens": 122296,
+          "cached_input_tokens": 95360,
+          "output_tokens": 7616,
+          "reasoning_output_tokens": 5518,
+          "model_elapsed_ms": 44789
+        }
+      },
+      "runs": [
+        {
+          "scenario": "read activity",
+          "run_id": "cca55111-5573-5548-82d2-b6546f199dcb",
+          "status": "completed",
+          "requests": 4,
+          "approvals": 0,
+          "elapsed_ms": 21450,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.read_activity",
+            "final"
+          ]
+        },
+        {
+          "scenario": "start round",
+          "run_id": "2fe1ab67-08a3-5f3a-b960-129b0fe8a878",
+          "status": "completed",
+          "requests": 5,
+          "approvals": 1,
+          "elapsed_ms": 20160,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.read_activity",
+            "ui.start_round",
+            "final"
+          ]
+        },
+        {
+          "scenario": "finish round",
+          "run_id": "189f4d38-d069-50d4-a799-fb77e85d5191",
+          "status": "completed",
+          "requests": 9,
+          "approvals": 1,
+          "elapsed_ms": 31647,
+          "invalid_decisions": 1,
+          "errors": {
+            "operation_failed": 2
+          },
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.read_activity",
+            "ui.finish_round",
+            "ui.read_winners+ui.read_activity",
+            "ui.get_context",
+            "ui.read_winners",
+            "final"
+          ]
+        },
+        {
+          "scenario": "UI navigation",
+          "run_id": "b9a60347-7890-5cb3-b20b-ddd5de328377",
+          "status": "completed",
+          "requests": 6,
+          "approvals": 0,
+          "elapsed_ms": 15653,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.open_panel",
+            "ui.get_context",
+            "ui.set_theme",
+            "final"
+          ]
+        }
+      ]
+    },
+    {
+      "variant": "audit-memory-off",
+      "profile": "memory-off",
+      "business_acceptance_passed": true,
+      "completed_scenarios_recorded": 4,
+      "wall_elapsed_ms": 77228,
+      "usage_by_purpose": {
+        "memory_extraction": {
+          "requests": 4,
+          "input_tokens": 2013,
+          "cached_input_tokens": 896,
+          "output_tokens": 24,
+          "reasoning_output_tokens": 0,
+          "model_elapsed_ms": 3071
+        },
+        "decision": {
+          "requests": 22,
+          "input_tokens": 131977,
+          "cached_input_tokens": 110720,
+          "output_tokens": 9398,
+          "reasoning_output_tokens": 7145,
+          "model_elapsed_ms": 54947
+        }
+      },
+      "runs": [
+        {
+          "scenario": "read activity",
+          "run_id": "603d8aab-8b0e-55ce-adb7-1cda49bfe2f5",
+          "status": "completed",
+          "requests": 5,
+          "approvals": 0,
+          "elapsed_ms": 8249,
+          "invalid_decisions": 0,
+          "errors": {
+            "browser_context_required": 1
+          },
+          "decision_sequence": [
+            "ui.read_activity",
+            "ui.get_context",
+            "ui.read_activity",
+            "final"
+          ]
+        },
+        {
+          "scenario": "start round",
+          "run_id": "a15a4c70-f67f-59af-adc0-3cbb2256abe9",
+          "status": "completed",
+          "requests": 5,
+          "approvals": 1,
+          "elapsed_ms": 17375,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.read_activity",
+            "ui.start_round",
+            "final"
+          ]
+        },
+        {
+          "scenario": "finish round",
+          "run_id": "70670c2d-5f6d-52f7-a382-704fe63096dd",
+          "status": "completed",
+          "requests": 10,
+          "approvals": 1,
+          "elapsed_ms": 35529,
+          "invalid_decisions": 1,
+          "errors": {
+            "operation_failed": 1
+          },
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.read_activity",
+            "ui.get_context",
+            "ui.finish_round",
+            "ui.read_winners",
+            "ui.get_context",
+            "ui.read_winners",
+            "final"
+          ]
+        },
+        {
+          "scenario": "UI navigation",
+          "run_id": "5946658b-6674-5d41-915f-79957a471c70",
+          "status": "completed",
+          "requests": 6,
+          "approvals": 0,
+          "elapsed_ms": 16075,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.open_panel",
+            "ui.get_context",
+            "ui.set_theme",
+            "final"
+          ]
+        }
+      ]
+    },
+    {
+      "variant": "audit-low",
+      "profile": "memory-off + decision-low",
+      "business_acceptance_passed": true,
+      "completed_scenarios_recorded": 4,
+      "wall_elapsed_ms": 64963,
+      "usage_by_purpose": {
+        "memory_extraction": {
+          "requests": 4,
+          "input_tokens": 2015,
+          "cached_input_tokens": 1152,
+          "output_tokens": 24,
+          "reasoning_output_tokens": 0,
+          "model_elapsed_ms": 2805
+        },
+        "decision": {
+          "requests": 18,
+          "input_tokens": 105557,
+          "cached_input_tokens": 80768,
+          "output_tokens": 7261,
+          "reasoning_output_tokens": 5320,
+          "model_elapsed_ms": 45039
+        }
+      },
+      "runs": [
+        {
+          "scenario": "read activity",
+          "run_id": "88404b87-1171-5166-a47e-53cbfff6b9a3",
+          "status": "completed",
+          "requests": 4,
+          "approvals": 0,
+          "elapsed_ms": 8671,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.read_activity",
+            "final"
+          ]
+        },
+        {
+          "scenario": "start round",
+          "run_id": "153ef91e-f2d6-5f0c-8ba7-e2001ced6ef8",
+          "status": "completed",
+          "requests": 5,
+          "approvals": 1,
+          "elapsed_ms": 13568,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.read_activity",
+            "ui.start_round",
+            "final"
+          ]
+        },
+        {
+          "scenario": "finish round",
+          "run_id": "7ef08919-76c7-5ae6-b7f8-96859ffccabc",
+          "status": "completed",
+          "requests": 7,
+          "approvals": 1,
+          "elapsed_ms": 26612,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.read_activity",
+            "ui.finish_round",
+            "ui.get_context",
+            "ui.read_winners",
+            "final"
+          ]
+        },
+        {
+          "scenario": "UI navigation",
+          "run_id": "c24e7daf-5748-577f-9449-17317e73c074",
+          "status": "completed",
+          "requests": 6,
+          "approvals": 0,
+          "elapsed_ms": 16112,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.open_panel",
+            "ui.get_context",
+            "ui.set_theme",
+            "final"
+          ]
+        }
+      ]
+    },
+    {
+      "variant": "audit-all-off",
+      "profile": "all-off",
+      "business_acceptance_passed": false,
+      "completed_scenarios_recorded": 3,
+      "wall_elapsed_ms": 24388,
+      "usage_by_purpose": {
+        "memory_extraction": {
+          "requests": 3,
+          "input_tokens": 1705,
+          "cached_input_tokens": 1024,
+          "output_tokens": 87,
+          "reasoning_output_tokens": 0,
+          "model_elapsed_ms": 2545
+        },
+        "decision": {
+          "requests": 9,
+          "input_tokens": 51244,
+          "cached_input_tokens": 34816,
+          "output_tokens": 941,
+          "reasoning_output_tokens": 0,
+          "model_elapsed_ms": 10950
+        }
+      },
+      "runs": [
+        {
+          "scenario": "read activity",
+          "run_id": "1ce440fe-6835-5246-9b6f-02a299acde11",
+          "status": "completed",
+          "requests": 5,
+          "approvals": 0,
+          "elapsed_ms": 8685,
+          "invalid_decisions": 0,
+          "errors": {
+            "browser_context_required": 1
+          },
+          "decision_sequence": [
+            "ui.read_activity",
+            "ui.get_context",
+            "ui.read_activity",
+            "final"
+          ]
+        },
+        {
+          "scenario": "start round",
+          "run_id": "394f9538-8c1f-5f01-b4bc-4acfccda8ffd",
+          "status": "completed",
+          "requests": 4,
+          "approvals": 1,
+          "elapsed_ms": 9498,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context+ui.read_activity",
+            "ui.start_round",
+            "final"
+          ]
+        },
+        {
+          "scenario": "finish round",
+          "run_id": "ad8a49b5-77ea-530e-ab53-08fc6425dbb3",
+          "status": "completed",
+          "requests": 3,
+          "approvals": 0,
+          "elapsed_ms": 6205,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context+ui.read_activity",
+            "final"
+          ]
+        }
+      ]
+    },
+    {
+      "variant": "receipt-current",
+      "profile": "default + failure receipt citation",
+      "business_acceptance_passed": true,
+      "completed_scenarios_recorded": 4,
+      "wall_elapsed_ms": 91596,
+      "usage_by_purpose": {
+        "memory_extraction": {
+          "requests": 4,
+          "input_tokens": 2115,
+          "cached_input_tokens": 1405,
+          "output_tokens": 2619,
+          "reasoning_output_tokens": 2515,
+          "model_elapsed_ms": 13832
+        },
+        "decision": {
+          "requests": 21,
+          "input_tokens": 129014,
+          "cached_input_tokens": 106112,
+          "output_tokens": 10219,
+          "reasoning_output_tokens": 7970,
+          "model_elapsed_ms": 56305
+        }
+      },
+      "runs": [
+        {
+          "scenario": "read activity",
+          "run_id": "1e9a0908-e62f-5ccc-a099-9af8cbd05097",
+          "status": "completed",
+          "requests": 4,
+          "approvals": 0,
+          "elapsed_ms": 17708,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.read_activity",
+            "final"
+          ]
+        },
+        {
+          "scenario": "start round",
+          "run_id": "1025428b-922b-5dff-8fd6-513c75ae0cfd",
+          "status": "completed",
+          "requests": 5,
+          "approvals": 1,
+          "elapsed_ms": 20239,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.read_activity",
+            "ui.start_round",
+            "final"
+          ]
+        },
+        {
+          "scenario": "finish round",
+          "run_id": "810dc650-cb99-51c2-b0a5-efaf6bc67842",
+          "status": "completed",
+          "requests": 10,
+          "approvals": 1,
+          "elapsed_ms": 37542,
+          "invalid_decisions": 1,
+          "errors": {
+            "operation_failed": 1
+          },
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.read_activity",
+            "ui.get_context",
+            "ui.finish_round",
+            "ui.read_winners",
+            "ui.get_context",
+            "ui.read_winners",
+            "final"
+          ]
+        },
+        {
+          "scenario": "UI navigation",
+          "run_id": "0487274e-e7df-5b70-8d7f-ad45a9bfca52",
+          "status": "completed",
+          "requests": 6,
+          "approvals": 0,
+          "elapsed_ms": 16107,
+          "invalid_decisions": 0,
+          "errors": {},
+          "decision_sequence": [
+            "ui.get_context",
+            "ui.open_panel",
+            "ui.get_context",
+            "ui.set_theme",
+            "final"
+          ]
+        }
+      ]
+    }
+  ],
+  "memory_non_thinking_contrast_cases": [
+    {
+      "name": "one_off_read",
+      "passed": true,
+      "expected_mode": null,
+      "returned_modes": [],
+      "elapsed_ms": 634,
+      "output_tokens": 6
+    },
+    {
+      "name": "one_off_start",
+      "passed": true,
+      "expected_mode": null,
+      "returned_modes": [],
+      "elapsed_ms": 914,
+      "output_tokens": 6
+    },
+    {
+      "name": "habit_language",
+      "passed": true,
+      "expected_mode": "habit",
+      "returned_modes": [
+        "habit"
+      ],
+      "elapsed_ms": 915,
+      "output_tokens": 41
+    },
+    {
+      "name": "explicit_language",
+      "passed": true,
+      "expected_mode": "explicit",
+      "returned_modes": [
+        "explicit"
+      ],
+      "elapsed_ms": 1099,
+      "output_tokens": 43
+    },
+    {
+      "name": "project_convention",
+      "passed": true,
+      "expected_mode": "explicit",
+      "returned_modes": [
+        "explicit"
+      ],
+      "elapsed_ms": 1097,
+      "output_tokens": 44
+    },
+    {
+      "name": "forget_language",
+      "passed": true,
+      "expected_mode": "forget",
+      "returned_modes": [
+        "forget"
+      ],
+      "elapsed_ms": 1012,
+      "output_tokens": 37
+    },
+    {
+      "name": "temporary_language",
+      "passed": true,
+      "expected_mode": null,
+      "returned_modes": [
+        "temporary"
+      ],
+      "elapsed_ms": 1005,
+      "output_tokens": 38
+    }
+  ]
+}
