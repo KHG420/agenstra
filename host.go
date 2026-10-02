@@ -47,12 +47,16 @@ type HostSettings struct {
 	MaxModelOutputTokens     int     `json:"max_model_output_tokens,omitempty"`
 	ModelTokenLimitField     string  `json:"model_token_limit_field,omitempty"`
 	MaxStagnantRounds        int     `json:"max_stagnant_rounds,omitempty"`
+	MaxConcurrentTools       int     `json:"max_concurrent_tools,omitempty"`
 }
 
 func DefaultHostSettings() HostSettings {
-	return HostSettings{60, 30, 80, 720, 86400, 80000, 8000000, 64000000, 8000000, 60, 300, 3, 5, 900, 4, 0, 0, "", 8}
+	return HostSettings{60, 30, 80, 720, 86400, 80000, 8000000, 64000000, 8000000, 60, 300, 3, 5, 900, 4, 0, 0, "", 8, 4}
 }
 func (s HostSettings) Validate() error {
+	if s.MaxConcurrentTools < 0 || s.MaxConcurrentTools > 4 {
+		return errors.New("host_settings_invalid")
+	}
 	if s.MaxStagnantRounds < 0 || s.MaxStagnantRounds > 1000 {
 		return errors.New("host_settings_invalid")
 	}
@@ -438,24 +442,42 @@ func pollAccess(provider CapabilityProvider, policy ExecutionPolicy, binding Ope
 	return nil
 }
 func (h *AgentHost) execute(ctx context.Context, run StoredRun, state *RuntimeState, item *Invocation, provider CapabilityProvider, runtime *AgentRuntime) (StoredRun, error) {
+	run, prepared, err := h.prepareInvocation(ctx, run, state, item, provider, runtime)
+	if err != nil || prepared == nil {
+		return run, err
+	}
+	callCtx, cancel := context.WithTimeout(ctx, time.Duration(h.Settings.InvocationTimeoutSeconds*1e9))
+	outcome, err := ExecuteCall(callCtx, provider, prepared.grants, item.Call, &prepared.inv)
+	cancel()
+	if ctx.Err() != nil {
+		return run, ctx.Err()
+	}
+	if err != nil {
+		outcome = CallOutcome{ErrorCode: "provider_outcome_unknown"}
+	}
+	return h.settleInvocation(run, state, item, *prepared, outcome)
+}
+func (h *AgentHost) prepareInvocation(ctx context.Context, run StoredRun, state *RuntimeState, item *Invocation, provider CapabilityProvider, runtime *AgentRuntime) (StoredRun, *preparedInvocation, error) {
 	cap, ok := provider.Capabilities()[item.Call.Capability]
 	policy, e := h.projectPolicy(ctx, run)
 	if e != nil {
-		return run, e
+		return run, nil, e
 	}
 	if !ok {
 		Observe(state, item, CallOutcome{ErrorCode: "capability_unknown"})
-		return h.save(run, state, "", nil, nil)
+		saved, err := h.save(run, state, "", nil, nil)
+		return saved, nil, err
 	}
 	if cap.Operation != nil {
 		if e = pollAccess(provider, policy, *cap.Operation); e != nil {
-			return run, e
+			return run, nil, e
 		}
 	}
 	if !policy.GrantedCapabilities[cap.Name] {
 		state.Status = "needs_authorization"
 		state.ErrorCode = strptr("capability_not_granted")
-		return h.save(run, state, "", nil, map[string]any{"kind": "call_denied", "invocation_id": item.InvocationID})
+		saved, err := h.save(run, state, "", nil, map[string]any{"kind": "call_denied", "invocation_id": item.InvocationID})
+		return saved, nil, err
 	}
 	inv := invocationContext(run, item, runtime.ConnectionID)
 	identifyInvocation(&inv, run, provider, item.Call.Capability, policy)
@@ -476,7 +498,8 @@ func (h *AgentHost) execute(ctx context.Context, run StoredRun, state *RuntimeSt
 			} else {
 				Observe(state, item, CallOutcome{ErrorCode: code})
 			}
-			return h.save(run, state, "", nil, map[string]any{"kind": "reference_unavailable", "invocation_id": item.InvocationID})
+			saved, err := h.save(run, state, "", nil, map[string]any{"kind": "reference_unavailable", "invocation_id": item.InvocationID})
+			return saved, nil, err
 		}
 		resolved[key] = v
 	}
@@ -485,11 +508,12 @@ func (h *AgentHost) execute(ctx context.Context, run StoredRun, state *RuntimeSt
 	normalized, e = BindIdempotency(normalized, cap, inv)
 	if e != nil {
 		Observe(state, item, CallOutcome{ErrorCode: "capability_input_invalid"})
-		return h.save(run, state, "", nil, nil)
+		saved, err := h.save(run, state, "", nil, nil)
+		return saved, nil, err
 	}
 	digest := ArgumentsDigest(normalized)
 	if item.ArgumentsSHA256 != "" && item.ArgumentsSHA256 != digest {
-		return run, hostError("invocation_arguments_changed")
+		return run, nil, hostError("invocation_arguments_changed")
 	}
 	item.Call = normalized
 	item.ArgumentsSHA256 = digest
@@ -498,7 +522,8 @@ func (h *AgentHost) execute(ctx context.Context, run StoredRun, state *RuntimeSt
 			item.Status = "unknown"
 			state.Status = "needs_reconciliation"
 			state.ErrorCode = strptr("provider_outcome_unknown")
-			return h.save(run, state, "", nil, map[string]any{"kind": "reconciliation_required", "invocation_id": item.InvocationID})
+			saved, err := h.save(run, state, "", nil, map[string]any{"kind": "reconciliation_required", "invocation_id": item.InvocationID})
+			return saved, nil, err
 		}
 		item.Status = "prepared"
 	}
@@ -510,7 +535,8 @@ func (h *AgentHost) execute(ctx context.Context, run StoredRun, state *RuntimeSt
 		item.ApprovedHash = nil
 		item.ApprovedUntil = nil
 		state.Status = "needs_approval"
-		return h.save(run, state, "", nil, map[string]any{"kind": "approval_requested", "invocation_id": item.InvocationID, "arguments_sha256": digest})
+		saved, err := h.save(run, state, "", nil, map[string]any{"kind": "approval_requested", "invocation_id": item.InvocationID, "arguments_sha256": digest})
+		return saved, nil, err
 	}
 	item.Status = "in_flight"
 	item.Attempts++
@@ -518,17 +544,13 @@ func (h *AgentHost) execute(ctx context.Context, run StoredRun, state *RuntimeSt
 	audit["capability"], audit["arguments_sha256"] = cap.Name, digest
 	run, e = h.save(run, state, "", nil, audit)
 	if e != nil {
-		return run, e
+		return run, nil, e
 	}
-	callCtx, cancel := context.WithTimeout(ctx, time.Duration(h.Settings.InvocationTimeoutSeconds*1e9))
-	outcome, e := ExecuteCall(callCtx, provider, policy.GrantedCapabilities, item.Call, &inv)
-	cancel()
-	if ctx.Err() != nil {
-		return run, ctx.Err()
-	}
-	if e != nil {
-		outcome = CallOutcome{ErrorCode: "provider_outcome_unknown"}
-	}
+	return run, &preparedInvocation{cap: cap, inv: inv, grants: policy.GrantedCapabilities}, nil
+}
+func (h *AgentHost) settleInvocation(run StoredRun, state *RuntimeState, item *Invocation, prepared preparedInvocation, outcome CallOutcome) (StoredRun, error) {
+	cap, inv := prepared.cap, prepared.inv
+	var e error
 	if definiteAuth(outcome.ErrorCode) {
 		item.Status = "prepared"
 		item.ErrorCode = strptr(outcome.ErrorCode)
@@ -583,7 +605,7 @@ func (h *AgentHost) execute(ctx context.Context, run StoredRun, state *RuntimeSt
 	if outcome.Fact != nil {
 		factID = outcome.Fact.FactID
 	}
-	audit = invocationAudit("call_finished", inv)
+	audit := invocationAudit("call_finished", inv)
 	audit["fact_id"], audit["error_code"] = factID, strptr(outcome.ErrorCode)
 	return h.save(run, state, "", nil, audit)
 }
@@ -924,6 +946,7 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 	runtime.MaxModelTokens = h.Settings.MaxModelTokens
 	runtime.MaxModelOutputTokens = h.Settings.MaxModelOutputTokens
 	runtime.MaxStagnantRounds = h.Settings.MaxStagnantRounds
+	runtime.MaxConcurrentTools = h.Settings.MaxConcurrentTools
 	run, e = h.prepareMemories(ctx, run)
 	if e != nil {
 		return run, e
@@ -964,6 +987,17 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 			return run, e
 		}
 		if len(state.Pending) > 0 {
+			parallel, err := h.parallelBatch(ctx, run, state, provider)
+			if err != nil {
+				return run, err
+			}
+			if parallel {
+				run, e = h.executeParallel(ctx, run, state, provider, runtime)
+				if e != nil || state.Status != "running" {
+					return run, e
+				}
+				continue
+			}
 			steered := false
 			for i := range state.Pending {
 				item := &state.Pending[i]

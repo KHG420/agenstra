@@ -105,3 +105,11 @@ REST v2 清单支持嵌套 JSON Schema、路径/查询/请求头/请求体绑定
 接入过程见[从零接入教程](tutorial.md)，具体部署与状态处理见[部署与运维](deployment.md)。
 
 跨项目任务可通过可选 `sources` 明确选择目标能力，并按发起项目委派、目标验证权限和任务范围取交集。目标身份、实际凭据、版本固定、项目记忆和各入口的完整接入说明见[跨项目任务、身份与授权](cross-project-tasks.md)。所有读取与轮询也必须明确授权。
+
+## 独立工具并发
+
+Host 与临时 Runtime 对同一 tool_batch 内符合条件的调用并发执行，默认最多 4 个（Host `max_concurrent_tools`，CLI `--max-concurrent-tools`；1 表示串行，Host 0 使用默认值）。Provider 通过可选的 `ConcurrentCapabilityProvider.ConcurrentInvocation(name)` 显式声明 Invoke 及请求校验可并发；REST v2 支持，跨项目路由转发源 Provider 的声明，当前 MCP 传输保持串行。
+
+整个未完成批次必须是尚无执行尝试的独立 read/compute，具备 safe/idempotent 重放契约，无审批要求且未绑定异步 Operation。混合写操作、审批、运行中的作业、不支持并发的 Provider 和恢复中的调用沿用串行路径。Fact 参数在准备阶段从已有完整证据解析，不能依赖同批结果。
+
+Host 先按调用顺序完成权限、引用、参数摘要与幂等绑定检查，并保存每个 in_flight 日志；IO 工作协程只写独立结果槽，全部退出后按原调用顺序保存观察与产物。取消会等待工作协程退出后关闭 Provider。响应或检查点丢失时，恢复沿用既有调用 ID、重放策略和租约校验；部分响应不明确时保留其他结果以及下一次唤醒时间。并发额度是每个运行的额度，总吞吐还受 max_concurrent_runs 限制。

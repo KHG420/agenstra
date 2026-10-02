@@ -29,11 +29,15 @@ func run() (int, error) {
 	inspect := flag.Bool("inspect", false, "inspect catalog")
 	maxTokens := flag.Int64("max-model-tokens", 0, "run model token budget (0 disables)")
 	maxOutput := flag.Int("max-output-tokens", 0, "maximum model output tokens per request (0 omits)")
+	concurrentTools := flag.Int("max-concurrent-tools", 4, "maximum independent tool calls in flight (1-4)")
 	var g grants
 	flag.Var(&g, "grant-capability", "grant exact capability name (repeatable)")
 	flag.Parse()
 	if *maxTokens < 0 || *maxOutput < 0 {
 		return 2, errors.New("token limits must be nonnegative")
+	}
+	if *concurrentTools < 1 || *concurrentTools > 4 {
+		return 2, errors.New("max-concurrent-tools must be between 1 and 4")
 	}
 	if *pack == "" {
 		return 2, errors.New("--pack is required")
@@ -69,6 +73,7 @@ func run() (int, error) {
 	}
 	runtime := &agenstra.AgentRuntime{Provider: provider, Model: model, Grants: grantMap}
 	runtime.MaxModelTokens = *maxTokens
+	runtime.MaxConcurrentTools = *concurrentTools
 	result, e := runtime.Run(context.Background(), *instruction)
 	if e != nil {
 		return 2, e

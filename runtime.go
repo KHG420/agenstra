@@ -30,6 +30,7 @@ type AgentRuntime struct {
 	MaxModelTokens       int64
 	MaxModelOutputTokens int
 	MaxStagnantRounds    int
+	MaxConcurrentTools   int
 }
 
 func (r *AgentRuntime) defaults() {
@@ -50,6 +51,9 @@ func (r *AgentRuntime) defaults() {
 	}
 	if r.MaxStagnantRounds == 0 {
 		r.MaxStagnantRounds = 8
+	}
+	if r.MaxConcurrentTools == 0 {
+		r.MaxConcurrentTools = 4
 	}
 	if r.Grants == nil {
 		r.Grants = map[string]bool{}
@@ -777,6 +781,25 @@ func (r *AgentRuntime) Run(ctx context.Context, instruction string) (RunResult, 
 				state.Status = "needs_approval"
 				state.ErrorCode = strptr("durable_host_required")
 				break
+			}
+			if independentBatch(r.Provider, state.Pending, ExecutionPolicy{GrantedCapabilities: r.Grants}, r.MaxConcurrentTools) {
+				tasks := make([]parallelInvocation, len(state.Pending))
+				for i, item := range state.Pending {
+					tasks[i] = parallelInvocation{call: item.Call, grants: r.Grants, inv: InvocationContext{RunID: state.RunID, InvocationID: item.InvocationID, IdempotencyKey: item.InvocationID, OwnerID: "transient", ConnectionID: r.ConnectionID}}
+				}
+				outcomes := invokeParallel(ctx, r.Provider, tasks, r.MaxConcurrentTools, 0)
+				if ctx.Err() != nil {
+					return r.Result(state), ctx.Err()
+				}
+				for i, outcome := range outcomes {
+					Observe(state, &state.Pending[i], outcome)
+					if outcome.ErrorCode == "provider_outcome_unknown" {
+						state.Status = "needs_reconciliation"
+						state.ErrorCode = strptr("provider_outcome_unknown")
+					}
+				}
+				state.Pending = []Invocation{}
+				continue
 			}
 			for i := range state.Pending {
 				item := &state.Pending[i]
