@@ -332,6 +332,8 @@ type ContextPacket struct {
 	ModelTokensRemaining    int64             `json:"model_tokens_remaining,omitempty"`
 	MaxModelOutputTokens    int               `json:"max_model_output_tokens,omitempty"`
 	Progress                *RunProgress      `json:"progress,omitempty"`
+	ActionOutcomes          []ActionOutcome   `json:"action_outcomes,omitempty"`
+	CompletionReview        *Decision         `json:"completion_review,omitempty"`
 }
 type ToolCall struct {
 	CallRef    string `json:"call_ref"`

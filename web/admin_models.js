@@ -153,7 +153,7 @@
     for (const [purpose, usage] of entries) {
       const item = document.createElement("tr");
       const reported = usage.usage_available !== false && usage.reported_requests !== 0;
-      const values = [purpose === "total" ? "合计" : purpose === "memory_extraction" ? "记忆提取" : "业务决策", usage.requests, reported ? `${usage.input_tokens ?? "未知"} / ${usage.output_tokens ?? "未知"}` : "未知 / 未知", usage.cached_input_tokens ?? "未知", usage.reasoning_output_tokens ?? "未知", `${usage.invalid_responses ?? (usage.format_error ? 1 : 0)} / ${usage.format_recovery_requests || 0}`, usage.retry_attempts || 0, `${((usage.elapsed_ms || 0) / 1000).toFixed(1)} 秒`, usage.cost_available ? Number(usage.estimated_cost_usd).toFixed(6) : "未知"];
+      const values = [purpose === "total" ? "合计" : purpose === "memory_extraction" ? "记忆提取" : purpose === "completion_review" ? "回答复核" : "业务决策", usage.requests, reported ? `${usage.input_tokens ?? "未知"} / ${usage.output_tokens ?? "未知"}` : "未知 / 未知", usage.cached_input_tokens ?? "未知", usage.reasoning_output_tokens ?? "未知", `${usage.invalid_responses ?? (usage.format_error ? 1 : 0)} / ${usage.format_recovery_requests || 0}`, usage.retry_attempts || 0, `${((usage.elapsed_ms || 0) / 1000).toFixed(1)} 秒`, usage.cost_available ? Number(usage.estimated_cost_usd).toFixed(6) : "未知"];
       for (const value of values) { const td = document.createElement("td"); td.textContent = String(value); item.append(td); } body.append(item);
     }
     table.append(body); wrap.append(table); container.append(wrap);

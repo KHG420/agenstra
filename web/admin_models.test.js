@@ -70,3 +70,12 @@ test("changing the edited profile clears an earlier validation result", async ()
   assert.equal(get("model-check-result").children.length, 0);
   assert.equal(get("model-reasoning").value, "disabled");
 });
+
+test("completion review usage has its own label", () => {
+  const { editor } = fixture();
+  const container = new Node();
+  editor.renderUsage(container, { completion_review: { requests: 1, reported_requests: 1, input_tokens: 20, output_tokens: 8 } });
+  const row = container.children[0].children[0].children[1].children[0];
+  assert.equal(row.children[0].textContent, "回答复核");
+  assert.equal(row.children[1].textContent, "1");
+});

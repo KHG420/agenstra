@@ -3,6 +3,44 @@ import assert from "node:assert/strict";
 import { appendAnswer, AgenstraChat } from "./agenstra-chat.js";
 import { AgenstraClient } from "./agenstra-client.js";
 
+test("write receipts remain visible when a task fails and accepted is never success", () => {
+  const previous = globalThis.document;
+  class Element {
+    constructor() { this.children = []; this.dataset = {}; this.textContent = ""; }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    querySelectorAll() { return []; }
+    set innerHTML(value) { assert.fail("receipt reached an HTML parser: " + value); }
+  }
+  globalThis.document = { createElement: () => new Element() };
+  try {
+    for (const locale of ["en", "zh-CN"]) {
+      const chat = Object.create(AgenstraChat.prototype);
+      chat.log = Object.assign(new Element(), { scrollHeight: 0, scrollTop: 0, clientHeight: 100 });
+      chat.input = { value: "" };
+      const nodes = new Map();
+      chat.shadowRoot = { querySelector: name => { if (!nodes.has(name)) nodes.set(name, new Element()); return nodes.get(name); } };
+      chat.getAttribute = () => locale;
+      chat.text = { statuses: { failed: "Incomplete" }, placeholder: "Message", send: "Send" };
+      chat.button = () => new Element();
+      const receipt = (id, status) => ({ invocation_id: id, capability: id, effect: "write", status });
+      chat.render({ conversation: { id: "conversation" }, messages: [{ id: "message", status: "failed", error_code: "model_unavailable", text: "Start", run: { run_id: "run", status: "failed", state: { runtime: {
+        invocation_receipts: [receipt("finished", "unknown"), receipt("submitted", "accepted"), receipt("failed", "failed"), receipt("unknown", "unknown"), { ...receipt("read", "succeeded"), effect: "read" }, { ...receipt("stored", "succeeded"), result_error_code: "result_too_large" }],
+        pending: [{ invocation_id: "finished", status: "succeeded", receipt: receipt("finished", "succeeded") }]
+      } } } }] });
+      const notices = chat.log.children[0].children.filter(node => node.className === "notice action-outcome").map(node => node.textContent);
+      assert.equal(notices.length, 5, "pending receipt must replace the checkpoint receipt without duplication");
+      assert.match(notices[0], locale === "en" ? /^Action succeeded:/ : /^业务操作已成功：/);
+      assert.match(notices[1], locale === "en" ? /accepted; final outcome unconfirmed/ : /已受理，最终结果尚未确认/);
+      assert.match(notices[2], locale === "en" ? /^Action failed:/ : /^业务操作失败：/);
+      assert.match(notices[3], locale === "en" ? /outcome unconfirmed/ : /结果尚未确认/);
+      assert.equal(notices.some(text => text.endsWith(": read") || text.endsWith("：read")), false);
+      assert.equal(chat.log.children[0].children.some(node => /could not be saved|结果详情未能保存/.test(node.textContent)), true);
+      assert.equal(chat.log.children[0].children.some(node => /avoid resubmitting actions that succeeded|避免重复提交已成功的操作/.test(node.textContent)), true);
+    }
+  } finally { globalThis.document = previous; }
+});
+
 test("model HTML and code fence content remain text", () => {
   const previous = globalThis.document;
   class Element {
