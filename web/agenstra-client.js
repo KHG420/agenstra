@@ -243,8 +243,8 @@ export class AgenstraClient {
       this.emit("action", { command, status: "running" });
       const handler = this.actions.get(command.action);
       if (!handler) throw new AgenstraError("browser_handler_unavailable");
-      const result = await handler(structuredClone(command.arguments), { commandId: command.id, runId: command.run_id });
-      receipt.status = "succeeded"; receipt.result = result ?? {};
+      const result = structuredClone((await handler(structuredClone(command.arguments), { commandId: command.id, runId: command.run_id })) ?? {});
+      receipt.status = "succeeded"; receipt.result = result;
       this.save("receipts", this.receipts);
       try {
         const latest = this.options.getPageObservation ? await this.options.getPageObservation() : this.pageObservation;

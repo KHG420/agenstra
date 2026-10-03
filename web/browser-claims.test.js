@@ -69,3 +69,35 @@ test("receipt retry failures are reported without rejecting dispatched execution
   assert.deepEqual(errors, [failure]);
   assert.equal(c.receipts[command.id].status, "succeeded");
 });
+
+test("lost ACK retries keep the handler's original result when host state changes", async t => {
+  const result = { page: "orders" }, submitted = [];
+  let handlers = 0;
+  const c = client(t, async (path, options) => {
+    if (path.endsWith("/begin")) return response({ accepted: true });
+    if (path.endsWith("/result")) {
+      submitted.push(JSON.parse(options.body).result);
+      if (submitted.length === 1) { result.page = "home";throw new Error("ACK lost after host state changed"); }
+      return response({ status: "succeeded" });
+    }
+    return response({ status: "completed" });
+  });
+  c.registerActions({ "ui.navigate": () => { handlers++;return result; } });
+  await c.executeCommand(command);await c.executeCommand(command);
+  assert.equal(handlers, 1);
+  assert.deepEqual(submitted, [{ page: "orders" }, { page: "orders" }]);
+  assert.equal(c.receipts[command.id].status, "acked");
+});
+
+test("a result that cannot be captured remains unknown after the handler ran", async t => {
+  const statuses = [];
+  const c = client(t, async (path, options) => {
+    if (path.endsWith("/begin")) return response({ accepted: true });
+    if (path.endsWith("/result")) { statuses.push(JSON.parse(options.body).status);return response({ status: "unknown" }); }
+    return response({ status: "needs_reconciliation" });
+  });
+  c.registerActions({ "ui.navigate": () => ({ callback() {} }) });
+  await c.executeCommand(command);
+  assert.deepEqual(statuses, ["unknown"]);
+  assert.equal(c.receipts[command.id].status, "unknown");
+});
