@@ -30,7 +30,7 @@ export interface ClientOptions {
   fetch?: typeof fetch; storage?: Storage | null; pollInterval?: number;
   onListenerError?(error: unknown): void;
 }
-export class AgenstraError extends Error { code: string; status: number; clientId?: string; requestId?: string }
+export class AgenstraError extends Error { constructor(code: string, status?: number); code: string; status: number; clientId?: string; requestId?: string }
 /** Only for a failure whose lack of committed side effects the host can prove. */
 export class AgenstraActionError extends Error { constructor(code: string, message?: string); code: string }
 export class AgenstraClient {

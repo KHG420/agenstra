@@ -290,3 +290,98 @@ func TestEvaluationValidatesAllCasesBeforeCreatingAndCancelsOnlyOwnedTimeouts(t 
 		}
 	}
 }
+
+type persistedFactProvider struct{}
+
+func (persistedFactProvider) Capabilities() map[string]agenstra.CapabilityDescription {
+	return map[string]agenstra.CapabilityDescription{"records.get": {Name: "records.get", Version: "1", Description: "Read a record", InputSchema: agenstra.JSON{"type": "object"}, Effect: "read", Replay: "safe", ReferenceScope: "durable"}}
+}
+func (persistedFactProvider) Skills() map[string]agenstra.Skill { return map[string]agenstra.Skill{} }
+func (persistedFactProvider) SystemPrompt() string              { return "Query records" }
+func (persistedFactProvider) Close() error                      { return nil }
+func (persistedFactProvider) Invoke(context.Context, string, agenstra.JSON, *agenstra.InvocationContext) (agenstra.CapabilityResult, error) {
+	return agenstra.CapabilityResult{Data: agenstra.JSON{"id": "R-1"}}, nil
+}
+
+type persistedFactModel struct{}
+
+func (persistedFactModel) Decide(_ context.Context, packet agenstra.ContextPacket, _ string) (agenstra.Decision, error) {
+	if len(packet.Facts) == 0 {
+		return agenstra.Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []agenstra.ToolCall{{CallRef: "read-1", Capability: "records.get", Arguments: agenstra.JSON{}, Reason: "Query record"}}}, nil
+	}
+	return agenstra.Decision{Schema: "agenstra.decision.v1", Kind: "final", AnswerMarkdown: "Found", FactIDs: []string{packet.Facts[0].FactID}}, nil
+}
+func TestEvaluationLoadsActualHostArtifactsOverHTTP(t *testing.T) {
+	store, err := agenstra.NewSQLiteStore(filepath.Join(t.TempDir(), "runs.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := store.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	host := agenstra.NewAgentHost(store, func(context.Context, string, string) (agenstra.CapabilityProvider, error) {
+		return persistedFactProvider{}, nil
+	}, persistedFactModel{}, func(context.Context, string, string) (agenstra.ExecutionPolicy, error) {
+		return agenstra.ExecutionPolicy{AllowModelData: true, GrantedCapabilities: map[string]bool{"records.get": true}}, nil
+	})
+	run, err := host.Create(t.Context(), "alice", "records", "Read R-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = host.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "completed" {
+		t.Fatal(run.Status, err)
+	}
+	if facts, ok := run.State["runtime"].(map[string]any)["facts"]; ok && facts != nil {
+		t.Fatal("fixture has inline facts", facts)
+	}
+	deployment := &agenstra.Deployment{Config: agenstra.DeploymentConfig{Users: map[string]agenstra.UserConfig{"alice": {APIKeyEnv: "ALICE_KEY"}}}, Environment: map[string]string{"ALICE_KEY": "local-user-key"}}
+	httpServer, err := agenstra.NewHTTPServer(host, deployment, false, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := httpServer.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	server := httptest.NewServer(httpServer.Handler())
+	t.Cleanup(server.Close)
+	client := evaluationClient{server.URL, "local-user-key", server.Client()}
+	result := client.evaluate(t.Context(), agenstra.EvaluationCase{Name: "persistent record", RunID: run.RunID, Facts: []agenstra.FactRequirement{{Capability: "records.get", Path: []any{"data", "id"}, Value: "R-1"}}}, time.Second)
+	if !result.Passed || result.ErrorCode != "" {
+		t.Fatal(result)
+	}
+}
+
+func TestEvaluationDoesNotPassWithUnavailableOrMismatchedArtifacts(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusOK} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			id, factID := agenstra.NewID(), agenstra.NewID()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.Contains(r.URL.Path, "/artifacts/") {
+					w.WriteHeader(status)
+					if err := json.NewEncoder(w).Encode(agenstra.Fact{FactID: "different", SourceCapability: "records.get", Value: agenstra.JSON{"id": "R-1"}}); err != nil {
+						t.Error(err)
+					}
+					return
+				}
+				snapshot := agenstra.StoredRun{RunID: id, Status: "completed", State: agenstra.JSON{"artifact_ids": []string{factID}, "runtime": agenstra.RuntimeState{RunID: id, Status: "completed", Decisions: []agenstra.JSON{{"kind": "final", "fact_ids": []string{factID}}}}}}
+				if err := json.NewEncoder(w).Encode(snapshot); err != nil {
+					t.Error(err)
+				}
+			}))
+			t.Cleanup(server.Close)
+			client := evaluationClient{server.URL, "key", server.Client()}
+			result := client.evaluate(t.Context(), agenstra.EvaluationCase{Name: "missing evidence", RunID: id, Facts: []agenstra.FactRequirement{{Capability: "records.get", Path: []any{"id"}, Value: "R-1"}}}, time.Second)
+			if result.Passed || result.ErrorCode == "" {
+				t.Fatal(result)
+			}
+		})
+	}
+}

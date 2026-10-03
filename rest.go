@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -695,15 +696,13 @@ func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any,
 		if err != nil {
 			return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
 		}
-		actual, err := CanonicalJSON(value)
+		schema, err := validateLocalSchema(JSON{"const": check.Value}, false)
 		if err != nil {
 			return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
 		}
-		expected, err := CanonicalJSON(check.Value)
-		if err != nil {
-			return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
-		}
-		if !bytes.Equal(actual, expected) {
+		// Responses already use JSON types and json.Number. Validate directly
+		// so canonical float formatting cannot round the business status value.
+		if schema.Validate(value) != nil {
 			return CapabilityResult{ErrorCode: check.ErrorCode}, nil
 		}
 	}
@@ -829,7 +828,13 @@ func (p *LegacyRestPack) Close() error { return nil }
 func fieldsSchema(fields map[string]RestField, forOutput bool, method string) (JSON, error) {
 	properties := JSON{}
 	required := []any{}
-	for name, f := range fields {
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		f := fields[name]
 		if !fieldPattern.MatchString(name) {
 			return nil, errors.New("invalid field name")
 		}

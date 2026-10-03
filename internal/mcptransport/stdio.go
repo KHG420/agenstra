@@ -74,7 +74,7 @@ func (c *Stdio) request(ctx context.Context, method string, params map[string]an
 	}
 	for {
 		read := make(chan readResult, 1)
-		go func() { line, err := c.stdout.ReadBytes('\n'); read <- readResult{line, err} }()
+		go func() { line, err := readStdioFrame(c.stdout, 16<<20); read <- readResult{line, err} }()
 		var got readResult
 		select {
 		case <-ctx.Done():
@@ -85,7 +85,8 @@ func (c *Stdio) request(ctx context.Context, method string, params map[string]an
 		}
 		line, err := got.line, got.err
 		if err != nil {
-			return nil, err
+			// An incomplete or oversized frame cannot be reused by another request.
+			return nil, errors.Join(err, c.Close())
 		}
 		var reply map[string]any
 		dec := json.NewDecoder(bytes.NewReader(line))
@@ -114,6 +115,21 @@ func (c *Stdio) request(ctx context.Context, method string, params map[string]an
 			return nil, errors.New("invalid MCP result")
 		}
 		return result, nil
+	}
+}
+
+func readStdioFrame(reader *bufio.Reader, limit int) ([]byte, error) {
+	var line []byte
+	for {
+		part, err := reader.ReadSlice('\n')
+		if len(part) > limit-len(line) {
+			return nil, errors.New("MCP stdio response too large")
+		}
+		line = append(line, part...)
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		return line, err
 	}
 }
 

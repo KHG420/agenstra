@@ -84,10 +84,12 @@ AGENSTRA_LIVE_EVAL=1 go test -run TestLiveWriteCompletionConsistencyReplay -v -c
 
 参数映射的键必须符合核对能力输入契约。`/query/request_id` 是 JSON pointer，生成 REST 的 `{query: {request_id: 原幂等键}}`；`request_id` 等普通键生成 MCP 的平坦参数。映射值从 `{arguments, invocation_id, idempotency_key}` 读取，其中 arguments 是原业务调用参数。规则必须至少将原 `idempotency_key` 或 `invocation_id` 传入一个参数，不能以无关联查询结果确认操作。没有合适的查询契约时使用宿主 Go `InvocationReconciler`。
 
-核对能力必须是 `read`、被当前用户授权且无需额外审批。框架使用原运行绑定与契约、检查当前权限，执行只读查询；`success_path` 从查询 CapabilityResult.Data 开始，`result_path` 必须选出原操作完整结果对象。结果还会通过原操作输出契约、作业 ID 和终态检查。查询失败、权限撤销或证据不足时保持暂停，不重放原操作。业务接口须以传入的原请求标识查询权威记录，框架无法替业务系统证明查询实现的正确性。
+核对能力必须是 `read`、被当前用户授权且无需额外审批。框架使用原运行绑定与契约、检查当前权限，以保存的 owner/run 和核对能力的项目路由身份执行独立只读查询；`success_path` 从查询 CapabilityResult.Data 开始，`result_path` 必须选出原操作完整结果对象。结果还会通过原操作输出契约、作业 ID 和终态检查。查询失败、权限撤销或证据不足时保持暂停，不重放原操作。业务接口须以传入的原请求标识查询权威记录，框架无法替业务系统证明查询实现的正确性。
 
 已有 Go 核验回调优先。浏览器动作仍使用原浏览器回执核对接口。
 
 ## 通过服务验收真实接入
 
 [快速接入指南](quick-integration.md)提供 `agenstra-evaluate` 的案例格式和运行命令。它分别验证状态、成功能力、禁止能力与最新被引用的字段值，生成带诊断和预算的 JSON 报告；不自动批准写操作。`run_id` 可用于在用户处理审批或追问后只读复验同一任务。
+
+评测 CLI 对完成任务的字段断言会按运行快照中的 `artifact_ids`，通过带用户认证的 `/runs/{run_id}/artifacts/{id}` 读取完整 Fact，再交给 `EvaluateRun`。产物读取失败或 Fact ID 不匹配会使评测失败。嵌入式直接调用 `EvaluateRun` 时，调用方须提供含完整 Facts 的运行快照；该函数不拥有 Store，也不会自行访问数据库。

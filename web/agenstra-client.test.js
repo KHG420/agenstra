@@ -523,3 +523,26 @@ test("transient browser polling failure recovers its connected state", async t =
   fail = false; await c.pollBrowser();
   assert.deepEqual(states, ["disconnected", "connected"]);
 });
+
+for (const status of ["cancelled", "failed"]) test(`late receipts for ${status} runs are settled before cleanup and survive a lost response`, async t => {
+ const store = storage(); let attempts = 0, settled = false;
+ const fetch = async path => {
+  if (path.endsWith("/reconcile")) {
+   attempts++; settled = true;
+   if (attempts === 1) throw new Error("lost settlement response");
+   return response({ status });
+  }
+  return response({ status, revision: 5, state: { runtime: { pending: [{ invocation_id: command.id, status: settled ? "succeeded" : "waiting", operation: {} }] } } });
+ };
+ const first = client(fetch, store);
+ t.after(() => first.destroy({ closeSession: false }));
+ first.receipts[command.id] = { command, status: "confirmed" }; first.save("receipts", first.receipts);
+ await assert.rejects(first.flushReceipts(), /lost settlement/);
+ assert.equal(first.receipts[command.id].status, "confirmed");
+ await first.destroy({ closeSession: false });
+ const resumed = client(fetch, store);
+ t.after(() => resumed.destroy({ closeSession: false }));
+ await resumed.flushReceipts();
+ assert.equal(resumed.receipts[command.id].status, "acked");
+ assert.equal(attempts, 1);
+});

@@ -392,6 +392,15 @@ func (w *WebIntegration) wrap(base CapabilityProvider, id string, p *compiledFro
 // Capabilities returns the read-only capability catalog; callers must not mutate it.
 func (p *browserProvider) Capabilities() map[string]CapabilityDescription { return p.caps }
 
+// ConcurrentInvocation forwards business capabilities; browser calls share page state.
+func (p *browserProvider) ConcurrentInvocation(name string) bool {
+	if strings.HasPrefix(name, "ui.") {
+		return false
+	}
+	provider, ok := p.base.(ConcurrentCapabilityProvider)
+	return ok && provider.ConcurrentInvocation(name)
+}
+
 // Skills returns read-only pinned usage guides; callers must not mutate the map.
 func (p *browserProvider) Skills() map[string]Skill {
 	if p.base != nil {

@@ -336,7 +336,9 @@ export class AgenstraClient {
     // Keep the recovery work durable after ACK. A lost get/reconcile response,
     // or the Host entering reconciliation later, must be retried on reload.
     const run = await this.getRun(receipt.command.run_id);
-    if (run.status === "needs_reconciliation") await this.reconcile(receipt.command.id, run.revision);
+    const pending = run.state?.runtime?.pending?.find(item => item.invocation_id === receipt.command.id);
+    const unsettled = pending && (["unknown", "in_flight"].includes(pending.status) || pending.poll_in_flight || (pending.status === "waiting" && pending.operation));
+    if (run.status === "needs_reconciliation" || (["failed", "cancelled"].includes(run.status) && unsettled)) await this.reconcile(receipt.command.id, run.revision);
     if (["completed", "failed", "cancelled"].includes(run.status)) {
       receipt.status = "acked"; this.save("receipts", this.receipts);
     }

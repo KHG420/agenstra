@@ -250,12 +250,28 @@ func (r *CapabilityRegistry) Publish(packID, version string, manifest map[string
 	if e != nil {
 		return nil, e
 	}
+	// The immediate SQLite transaction serializes publishers, including other
+	// registry instances, before either the immutable version or files change.
+	tx, e := r.db.Begin()
+	if e != nil {
+		return nil, e
+	}
+	defer func() {
+		if rollbackErr := tx.Rollback(); !errors.Is(rollbackErr, sql.ErrTxDone) {
+			resultErr = errors.Join(resultErr, rollbackErr)
+		}
+	}()
 	var old string
-	e = r.db.QueryRow(`SELECT digest FROM releases WHERE pack_id=? AND version=?`, packID, version).Scan(&old)
+	var created float64
+	e = tx.QueryRow(`SELECT digest,created_at FROM releases WHERE pack_id=? AND version=?`, packID, version).Scan(&old, &created)
 	if e == nil && old != digest {
 		return nil, registryError("version_already_published")
 	}
 	if e != nil && !errors.Is(e, sql.ErrNoRows) {
+		return nil, e
+	}
+	mb, e := registryCanonical(manifest)
+	if e != nil {
 		return nil, e
 	}
 	parent := filepath.Join(r.PackageDir, packID)
@@ -267,10 +283,9 @@ func (r *CapabilityRegistry) Publish(packID, version string, manifest map[string
 	}
 	target := filepath.Join(parent, digest)
 	if _, e := os.Lstat(target); e == nil {
-		if old == "" {
-			return nil, registryError("release_path_conflict")
-		}
-		if _, e = r.ReleasePath(packID, digest); e != nil {
+		// A previous failed commit may have left a complete directory. Accept
+		// only the exact validated content, never an arbitrary existing path.
+		if _, e = r.verifyReleaseFiles(packID, digest, version, string(mb)); e != nil {
 			return nil, e
 		}
 	} else if errors.Is(e, os.ErrNotExist) {
@@ -279,10 +294,6 @@ func (r *CapabilityRegistry) Publish(packID, version string, manifest map[string
 			return nil, e
 		}
 		defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(stage)) }()
-		mb, err := registryCanonical(manifest)
-		if err != nil {
-			return nil, err
-		}
 		if e := os.WriteFile(filepath.Join(stage, "pack.json"), mb, 0644); e != nil {
 			return nil, e
 		}
@@ -298,29 +309,11 @@ func (r *CapabilityRegistry) Publish(packID, version string, manifest map[string
 		if e := os.Rename(stage, target); e != nil {
 			return nil, e
 		}
-	}
-	tx, e := r.db.Begin()
-	if e != nil {
+	} else {
 		return nil, e
 	}
-	defer func() {
-		// A committed transaction is already closed; other rollback failures remain visible.
-		if rollbackErr := tx.Rollback(); !errors.Is(rollbackErr, sql.ErrTxDone) {
-			resultErr = errors.Join(resultErr, rollbackErr)
-		}
-	}()
-	now := float64(time.Now().UnixNano()) / 1e9
-	var created float64
-	e = tx.QueryRow(`SELECT digest,created_at FROM releases WHERE pack_id=? AND version=?`, packID, version).Scan(&old, &created)
-	if e == nil {
-		if old != digest {
-			return nil, registryError("version_already_published")
-		}
-	} else if errors.Is(e, sql.ErrNoRows) {
-		mb, err := registryCanonical(manifest)
-		if err != nil {
-			return nil, err
-		}
+	if old == "" {
+		now := float64(time.Now().UnixNano()) / 1e9
 		cb, err := registryCanonical(caps)
 		if err != nil {
 			return nil, err
@@ -332,8 +325,6 @@ func (r *CapabilityRegistry) Publish(packID, version string, manifest map[string
 			return nil, e
 		}
 		created = now
-	} else {
-		return nil, e
 	}
 	if e = tx.Commit(); e != nil {
 		return nil, e
@@ -370,13 +361,20 @@ func (r *CapabilityRegistry) ReleasePath(packID, digest string) (string, error) 
 	if e != nil {
 		return "", e
 	}
+	return r.verifyReleaseFiles(packID, digest, version, mj)
+}
+
+func (r *CapabilityRegistry) verifyReleaseFiles(packID, digest, version, mj string) (string, error) {
 	dir := filepath.Join(r.PackageDir, packID, digest)
 	path := filepath.Join(dir, "pack.json")
-	for _, p := range []string{filepath.Join(r.PackageDir, packID), dir, path} {
-		info, e := os.Lstat(p)
-		if e != nil || info.Mode()&os.ModeSymlink != 0 {
+	for _, p := range []string{filepath.Join(r.PackageDir, packID), dir} {
+		info, err := os.Lstat(p)
+		if err != nil || !info.IsDir() {
 			return "", registryError("release_tampered")
 		}
+	}
+	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+		return "", registryError("release_tampered")
 	}
 	mb, e := os.ReadFile(path)
 	if e != nil {
@@ -409,23 +407,15 @@ func (r *CapabilityRegistry) ReleasePath(packID, digest string) (string, error) 
 		return "", registryError("release_tampered")
 	}
 	allowed := map[string]bool{"pack.json": true}
-	skills := map[string]string{}
-	for p, want := range entries {
+	for p := range entries {
 		allowed[p] = true
 		parts := strings.Split(p, "/")
 		for i := 1; i < len(parts); i++ {
 			allowed[strings.Join(parts[:i], "/")] = true
 		}
-		data, e := os.ReadFile(filepath.Join(dir, filepath.FromSlash(p)))
-		if e != nil {
-			return "", registryError("release_tampered")
-		}
-		h := sha256.Sum256(data)
-		if hex.EncodeToString(h[:]) != want {
-			return "", registryError("release_tampered")
-		}
-		skills[p] = string(data)
 	}
+	// Check entry types before reading skills, so recovery does not follow
+	// symlinks or read special files from an uncommitted directory.
 	e = filepath.WalkDir(dir, func(p string, d fs.DirEntry, e error) error {
 		if e != nil {
 			return e
@@ -438,13 +428,31 @@ func (r *CapabilityRegistry) ReleasePath(packID, digest string) (string, error) 
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		if !allowed[rel] || d.Type()&os.ModeSymlink != 0 {
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		_, file := entries[rel]
+		file = file || rel == "pack.json"
+		if !allowed[rel] || (file && !info.Mode().IsRegular()) || (!file && !info.IsDir()) {
 			return registryError("release_tampered")
 		}
 		return nil
 	})
 	if e != nil {
 		return "", registryError("release_tampered")
+	}
+	skills := map[string]string{}
+	for p, want := range entries {
+		data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(p)))
+		if err != nil {
+			return "", registryError("release_tampered")
+		}
+		hash := sha256.Sum256(data)
+		if hex.EncodeToString(hash[:]) != want {
+			return "", registryError("release_tampered")
+		}
+		skills[p] = string(data)
 	}
 	actual, err := registryHash(map[string]any{"pack_id": packID, "version": version, "manifest": manifest, "skills": skills})
 	if err != nil {

@@ -125,7 +125,7 @@ REST v2 清单支持嵌套 JSON Schema、路径/查询/请求头/请求体绑定
 
 ## 独立工具并发
 
-Host 与临时 Runtime 对同一 tool_batch 内符合条件的调用并发执行，默认最多 4 个（Host `max_concurrent_tools`，CLI `--max-concurrent-tools`；1 表示串行，Host 0 使用默认值）。Provider 通过可选的 `ConcurrentCapabilityProvider.ConcurrentInvocation(name)` 显式声明 Invoke 及请求校验可并发；REST v2 支持，跨项目路由转发源 Provider 的声明，当前 MCP 传输保持串行。
+Host 与临时 Runtime 对同一 tool_batch 内符合条件的调用并发执行，默认最多 4 个（Host `max_concurrent_tools`，CLI `--max-concurrent-tools`；1 表示串行，Host 0 使用默认值）。Provider 通过可选的 `ConcurrentCapabilityProvider.ConcurrentInvocation(name)` 显式声明 Invoke 及请求校验可并发；REST v2 支持，跨项目路由转发源 Provider 的声明，部署连接包装和浏览器包装保留业务 Provider 的并发声明；浏览器能力共享页面状态，保持串行。当前 MCP 传输保持串行。
 
 整个未完成批次必须是尚无执行尝试的独立 read/compute，具备 safe/idempotent 重放契约，无审批要求且未绑定异步 Operation。混合写操作、审批、运行中的作业、不支持并发的 Provider 和恢复中的调用沿用串行路径。Fact 参数在准备阶段从已有完整证据解析，不能依赖同批结果。
 

@@ -169,7 +169,7 @@ test("completed messages keep diagnostics and late reports cannot cross clients"
   } finally { globalThis.document = previous; }
 });
 
-test("cancelled runs expose verification only for unknown non-browser calls", async () => {
+test("cancelled runs expose evidence verification for all unsettled calls", async () => {
   const previous = globalThis.document;
   class Element {
     constructor() { this.children = []; this.dataset = {}; this.textContent = ""; }
@@ -187,18 +187,20 @@ test("cancelled runs expose verification only for unknown non-browser calls", as
     chat.getAttribute = () => "en";
     chat.text = { statuses: { cancelled: "Stopped" }, placeholder: "Message", send: "Send", unknown: "Verify outcome", unknownStopped: "Verification only updates the result; this task stays stopped.", reconcile: "Verify" };
     const calls = [];
-    chat._client = { reconcileInvocation: (...args) => { calls.push(args); } };
+    chat._client = { reconcileInvocation: (...args) => { calls.push(args); }, reconcile: (...args) => { calls.push(args); } };
     const actions = new Map();
     chat.button = (label, key, action) => { actions.set(key, action); return new Element(); };
     chat.render({ conversation: { id: "conversation" }, messages: [{ id: "message", run_id: "run", status: "cancelled", text: "Submit", run: { run_id: "run", status: "cancelled", revision: 8, state: { runtime: { pending: [{ invocation_id: "write", status: "unknown" }, { invocation_id: "polling", status: "waiting", operation: { binding: { poll_capability: "orders.status" } } }, { invocation_id: "poll-started", status: "prepared", poll_in_flight: true }, { invocation_id: "browser", status: "waiting", operation: { binding: { poll_capability: "ui.command_status" } } }] } } } }] });
     assert.equal(actions.has("write:reconcile"), true);
     assert.equal(actions.has("polling:reconcile"), true);
     assert.equal(actions.has("poll-started:reconcile"), true);
-    assert.equal(actions.has("browser:reconcile"), false);
+    assert.equal(actions.has("browser:reconcile"), true);
     assert.equal(chat.log.children[0].children.some(child => child.textContent === chat.text.unknownStopped), true);
     actions.get("write:reconcile")();
     assert.deepEqual(calls[0].slice(0, 2), ["run", { invocation_id: "write", status: "unknown" }]);
     assert.equal(calls[0][2], 8);
+    actions.get("browser:reconcile")();
+    assert.deepEqual(calls[1], ["browser", 8]);
   } finally { globalThis.document = previous; }
 });
 

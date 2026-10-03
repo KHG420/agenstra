@@ -375,3 +375,116 @@ func TestBrowserRecoveryHTTPRequiresTicketAndBrowserKey(t *testing.T) {
 		}
 	}
 }
+
+func TestBrowserReconciliationSettlesStoppedEvidenceWithoutReplay(t *testing.T) {
+	for _, stopped := range []string{"cancelled", "failed"} {
+		for _, receiptStatus := range []string{"succeeded", "failed"} {
+			t.Run(stopped+"/"+receiptStatus, func(t *testing.T) {
+				f := newWebFixture(t, &hostModel{decisions: browserDecisions()}, false)
+				run := f.run(t)
+				command := f.dispatch(t)
+				accepted, _, err := f.w.BeginBrowserCommand(t.Context(), "alice", command.ID, f.key, f.session.Generation)
+				if err != nil || !accepted {
+					t.Fatalf("begin: %v %v", accepted, err)
+				}
+				if stopped == "cancelled" {
+					if _, err = f.h.Cancel(t.Context(), run.RunID, "alice"); err != nil {
+						t.Fatal(err)
+					}
+					run, err = f.h.Drive(t.Context(), run.RunID, "alice")
+				} else {
+					run, err = f.h.Store.Claim(run.RunID, "alice", f.h.Settings.LeaseSeconds)
+					if err != nil {
+						t.Fatal(err)
+					}
+					token := run.LeaseToken
+					state, restoreErr := f.h.restore(run)
+					if restoreErr != nil {
+						t.Fatal(restoreErr)
+					}
+					state.Status, state.ErrorCode = "failed", strptr("model_error")
+					run, err = f.h.save(run, state, "", nil, JSON{"kind": "run_failed"})
+					if releaseErr := f.h.Store.Release(run.RunID, "alice", token); releaseErr != nil {
+						t.Fatal(releaseErr)
+					}
+				}
+				if err != nil || run.Status != stopped {
+					t.Fatalf("stop: %s %v", run.Status, err)
+				}
+				var result JSON
+				code := "handler_rejected"
+				if receiptStatus == "succeeded" {
+					result, code = JSON{"page": "orders"}, ""
+				}
+				if _, err = f.w.CompleteBrowserCommand("alice", command.ID, f.key, f.session.Generation, receiptStatus, result, code); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = f.w.ReconcileBrowserCommand(t.Context(), "alice", command.ID, run.Revision+1); ErrorCode(err) != "revision_conflict" {
+					t.Fatal(err)
+				}
+				originalRevision := run.Revision
+				settled, err := f.w.ReconcileBrowserCommand(t.Context(), "alice", command.ID, originalRevision)
+				if err != nil || settled.Status != stopped || settled.NextWakeAt != nil {
+					t.Fatal(settled, err)
+				}
+				state, err := f.h.restore(settled)
+				if err != nil {
+					t.Fatal(err)
+				}
+				found := false
+				for _, item := range state.Pending {
+					if item.InvocationID == command.ID {
+						found = item.Reconciled && item.Status == receiptStatus && item.Receipt != nil && item.Receipt.Reconciled && item.Receipt.OperationStatus == receiptStatus && item.Receipt.FactID != ""
+					}
+				}
+				if !found {
+					t.Fatal("verified receipt missing from invocation evidence", state.Pending)
+				}
+				latest := state.Facts[len(state.Facts)-1]
+				if latest.SourceCapability != "ui.command_status" || latest.Quality != "verified_reconciliation" {
+					t.Fatal("completion evidence changed source", latest)
+				}
+				retry, err := f.w.ReconcileBrowserCommand(t.Context(), "alice", command.ID, originalRevision)
+				if err != nil || retry.Revision != settled.Revision {
+					t.Fatal("lost acknowledgement retry changed evidence", retry, err)
+				}
+				if ok, _, beginErr := f.w.BeginBrowserCommand(t.Context(), "alice", command.ID, f.key, f.session.Generation); ok || ErrorCode(beginErr) != "browser_run_cancelled" {
+					t.Fatal(ok, beginErr)
+				}
+				driven, err := f.h.Drive(t.Context(), run.RunID, "alice")
+				if err != nil || driven.Status != stopped {
+					t.Fatal("settlement resumed stopped run", driven.Status, err)
+				}
+				var count int
+				if err := f.w.Store.store.DB.QueryRow("SELECT count(*) FROM web_commands").Scan(&count); err != nil || count != 1 {
+					t.Fatal(count, err)
+				}
+			})
+		}
+	}
+}
+
+func TestBrowserReconciliationRechecksGrants(t *testing.T) {
+	f := newWebFixture(t, &hostModel{decisions: browserDecisions()}, false)
+	run := f.run(t)
+	command := f.dispatch(t)
+	if ok, _, err := f.w.BeginBrowserCommand(t.Context(), "alice", command.ID, f.key, 1); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if _, err := f.h.Cancel(t.Context(), run.RunID, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	run, err := f.h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.w.CompleteBrowserCommand("alice", command.ID, f.key, 1, "succeeded", JSON{"page": "orders"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	user := f.d.Config.Users["alice"]
+	user.BrowserActions = nil
+	f.d.Config.Users["alice"] = user
+	if _, err := f.w.ReconcileBrowserCommand(t.Context(), "alice", command.ID, run.Revision); ErrorCode(err) != "capability_not_granted" {
+		t.Fatal(err)
+	}
+}

@@ -746,3 +746,57 @@ func TestProjectCredentialAttestationUsesLoadedProvider(t *testing.T) {
 		t.Fatal("unverifiable stdio identity accepted", subject)
 	}
 }
+
+func TestConfiguredReconcilerWithSources(t *testing.T) {
+	for _, verifier := range []string{"records.verify", "weather::query"} {
+		t.Run(verifier, func(t *testing.T) {
+			h, providers, policies := projectTestHost(t, &hostModel{decisions: []Decision{callDecision("job.submit")}})
+			read := CapabilityDescription{Name: "records.verify", Version: "1", Effect: "read", InputSchema: JSON{"type": "object"}}
+			providers["home"].caps[read.Name] = read
+			providers["home"].caps["job.submit"] = CapabilityDescription{Name: "job.submit", Version: "1", Effect: "write", Replay: "never", InputSchema: JSON{"type": "object"}, OutputSchema: JSON{"type": "object", "properties": JSON{"id": JSON{"type": "string"}}}}
+			policies["home"].GrantedCapabilities[read.Name], policies["home"].GrantedCapabilities["job.submit"] = true, true
+			writes, reads := 0, 0
+			originalID := ""
+			check := func(target string) func(context.Context, string, JSON, *InvocationContext) (CapabilityResult, error) {
+				return func(_ context.Context, name string, args JSON, inv *InvocationContext) (CapabilityResult, error) {
+					if name == "job.submit" {
+						writes++
+						return CapabilityResult{}, errors.New("response lost")
+					}
+					reads++
+					if inv == nil || inv.OwnerID != "alice" || inv.RunID == "" || inv.OriginPackID != "home" || inv.TargetPackID != target || inv.TargetSubject != "alice-"+target || inv.InvocationID == originalID || args["request_id"] != originalID {
+						t.Error("verifier identity or original request binding lost", inv, args)
+					}
+					return CapabilityResult{Data: JSON{"status": "done", "result": JSON{"id": "R-1"}}}, nil
+				}
+			}
+			providers["home"].hook, providers["weather"].hook = check("home"), check("weather")
+			d := &Deployment{Config: DeploymentConfig{ReconciliationChecks: map[string]map[string]ReconciliationRule{"home": {"job.submit": {VerifyCapability: verifier, Arguments: map[string][]any{"request_id": {"invocation_id"}}, SuccessPath: []any{"status"}, SuccessValue: "done", ResultPath: []any{"result"}}}}}}
+			if err := configureDeploymentChecks(h, d); err != nil {
+				t.Fatal(err)
+			}
+			run, err := h.CreateWithSources(t.Context(), "alice", "home", "verify the original operation", "", []RunSource{source("weather", "query")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err = h.Drive(t.Context(), run.RunID, "alice")
+			if err != nil || run.Status != "needs_reconciliation" {
+				t.Fatal(run.Status, err)
+			}
+			state, err := h.restore(run)
+			if err != nil || len(state.Pending) != 1 {
+				t.Fatal(state, err)
+			}
+			item := state.Pending[0]
+			originalID = item.InvocationID
+			settled, err := h.Reconcile(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, run.Revision)
+			if err != nil || settled.Status != "queued" || writes != 1 || reads != 1 {
+				t.Fatal(settled.Status, err, writes, reads)
+			}
+			retry, err := h.Reconcile(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, run.Revision)
+			if err != nil || retry.Revision != settled.Revision || writes != 1 || reads != 1 {
+				t.Fatal("reconciliation replayed work", retry, err, writes, reads)
+			}
+		})
+	}
+}

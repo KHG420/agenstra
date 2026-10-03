@@ -2,6 +2,7 @@ package agenstra
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -203,6 +204,153 @@ func TestRegistryRejectsUnreadableStoredJSON(t *testing.T) {
 			var revision int
 			if err := r.db.QueryRow("SELECT revision FROM active WHERE pack_id='records'").Scan(&revision); err != nil || revision != 1 {
 				t.Fatalf("activation changed state: revision=%d, err=%v", revision, err)
+			}
+		})
+	}
+}
+
+func TestRegistryRetryAfterDBFailure(t *testing.T) {
+	dir := t.TempDir()
+	r := NewCapabilityRegistry(filepath.Join(dir, "registry.sqlite3"), filepath.Join(dir, "packages"))
+	if err := r.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := r.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := r.db.Exec(`CREATE TRIGGER review_fail_publish BEFORE INSERT ON releases BEGIN SELECT RAISE(ABORT, 'simulated publication DB failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	m := testRegistryManifest("records.get")
+	if _, err := r.Publish("records", "1.0.0", m, map[string]string{}); err == nil {
+		t.Fatal("fault injection did not reject DB insert")
+	} else {
+		t.Logf("injected DB failure: %v", err)
+	}
+	if _, err := r.db.Exec(`DROP TRIGGER review_fail_publish`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Publish("records", "1.0.0", m, map[string]string{}); err != nil {
+		t.Fatalf("same valid publication cannot retry after DB recovered: %v", err)
+	}
+}
+
+func TestRegistryRecoveryRejectsChangedOrUntrustedDirectories(t *testing.T) {
+	for _, change := range []string{"manifest", "extra", "symlink"} {
+		t.Run(change, func(t *testing.T) {
+			dir := t.TempDir()
+			registry := NewCapabilityRegistry(filepath.Join(dir, "registry.sqlite3"), filepath.Join(dir, "packages"))
+			if err := registry.Initialize(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := registry.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			if _, err := registry.db.Exec(`CREATE TRIGGER fail_publish BEFORE INSERT ON releases BEGIN SELECT RAISE(ABORT, 'simulated DB failure'); END`); err != nil {
+				t.Fatal(err)
+			}
+			manifest := testRegistryManifest("records.get")
+			if _, err := registry.Publish("records", "1.0.0", manifest, map[string]string{}); err == nil {
+				t.Fatal("fault injection failed")
+			}
+			digest, err := registryHash(JSON{"pack_id": "records", "version": "1.0.0", "manifest": manifest, "skills": map[string]string{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			release := filepath.Join(registry.PackageDir, "records", digest)
+			path := filepath.Join(release, "pack.json")
+			switch change {
+			case "manifest":
+				err = os.WriteFile(path, []byte(`{}`), 0644)
+			case "extra":
+				err = os.WriteFile(filepath.Join(release, "extra"), []byte("extra"), 0644)
+			case "symlink":
+				backup := filepath.Join(dir, "manifest.json")
+				err = os.Rename(path, backup)
+				if err == nil {
+					err = os.Symlink(backup, path)
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := registry.db.Exec(`DROP TRIGGER fail_publish`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := registry.Publish("records", "1.0.0", manifest, map[string]string{}); !registryHasCode(err, "release_tampered") {
+				t.Fatal(err)
+			}
+			var count int
+			if err := registry.db.QueryRow(`SELECT count(*) FROM releases`).Scan(&count); err != nil || count != 0 {
+				t.Fatal(count, err)
+			}
+			if _, err := os.Lstat(release); err != nil {
+				t.Fatal("recovery deleted untrusted content", err)
+			}
+		})
+	}
+}
+
+func TestRegistryConcurrentInstancesPreserveImmutableVersions(t *testing.T) {
+	for _, identical := range []bool{true, false} {
+		t.Run(fmt.Sprint(identical), func(t *testing.T) {
+			dir := t.TempDir()
+			registries := []*CapabilityRegistry{
+				NewCapabilityRegistry(filepath.Join(dir, "registry.sqlite3"), filepath.Join(dir, "packages")),
+				NewCapabilityRegistry(filepath.Join(dir, "registry.sqlite3"), filepath.Join(dir, "packages")),
+			}
+			for _, r := range registries {
+				if err := r.Initialize(); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := r.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+			}
+			start := make(chan struct{})
+			results := make(chan error, 2)
+			for i, r := range registries {
+				name := "records.get"
+				if i == 1 && !identical {
+					name = "records.other"
+				}
+				go func() {
+					<-start
+					_, err := r.Publish("records", "1.0.0", testRegistryManifest(name), map[string]string{})
+					results <- err
+				}()
+			}
+			close(start)
+			success, conflict := 0, 0
+			for range 2 {
+				err := <-results
+				if err == nil {
+					success++
+				} else if registryHasCode(err, "version_already_published") {
+					conflict++
+				} else {
+					t.Fatal(err)
+				}
+			}
+			if (identical && (success != 2 || conflict != 0)) || (!identical && (success != 1 || conflict != 1)) {
+				t.Fatal(success, conflict)
+			}
+			var digest string
+			if err := registries[0].db.QueryRow(`SELECT digest FROM releases`).Scan(&digest); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := registries[0].ReleasePath("records", digest); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := os.ReadDir(filepath.Join(dir, "packages", "records"))
+			if err != nil || len(entries) != 1 {
+				t.Fatal(entries, err)
 			}
 		})
 	}

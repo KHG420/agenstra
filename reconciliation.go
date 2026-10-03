@@ -37,6 +37,10 @@ func (p verifiedResultProvider) Invoke(context.Context, string, JSON, *Invocatio
 // Reconcile rechecks identity, authorization, revision and arguments before verifying an uncertain outcome.
 // It retains the original invocation and never accepts client-authored success evidence.
 func (h *AgentHost) Reconcile(ctx context.Context, id, owner, invocationID, argsSHA string, revision int) (StoredRun, error) {
+	return h.reconcile(ctx, id, owner, invocationID, argsSHA, revision, h.Reconciler, false)
+}
+
+func (h *AgentHost) reconcile(ctx context.Context, id, owner, invocationID, argsSHA string, revision int, verifier InvocationReconciler, browser bool) (StoredRun, error) {
 	h.InitializeDefaults()
 	current, err := h.Get(ctx, id, owner)
 	if err != nil {
@@ -101,10 +105,10 @@ func (h *AgentHost) Reconcile(ctx context.Context, id, owner, invocationID, args
 	if item.ArgumentsSHA256 != argsSHA || ArgumentsDigest(item.Call) != argsSHA {
 		return run, hostError("reconciliation_arguments_changed")
 	}
-	if item.Operation != nil && item.Operation.Binding.PollCapability == "ui.command_status" {
+	if item.Operation != nil && item.Operation.Binding.PollCapability == "ui.command_status" && !browser {
 		return run, hostError("reconciliation_use_browser_endpoint")
 	}
-	if h.Reconciler == nil {
+	if verifier == nil {
 		return run, hostError("reconciliation_unavailable")
 	}
 	provider, err := h.openRunProvider(ctx, run)
@@ -148,7 +152,7 @@ func (h *AgentHost) Reconcile(ctx context.Context, id, owner, invocationID, args
 		return run, hostError("run_state_invalid")
 	}
 	verificationCtx, cancel := context.WithTimeout(ctx, time.Duration(min(h.runSettings(run).InvocationTimeoutSeconds, h.Settings.LeaseSeconds/2)*1e9))
-	result, err := h.Reconciler(verificationCtx, verification)
+	result, err := verifier(verificationCtx, verification)
 	expired := verificationCtx.Err() != nil
 	cancel()
 	if ctx.Err() != nil {
@@ -168,7 +172,17 @@ func (h *AgentHost) Reconcile(ctx context.Context, id, owner, invocationID, args
 	if !policy.GrantedCapabilities[cap.Name] {
 		return run, hostError("capability_not_granted")
 	}
-	outcome, err := ExecuteCall(ctx, verifiedResultProvider{CapabilityProvider: provider, result: result}, policy.GrantedCapabilities, item.Call, &inv)
+	call, evidenceIdentity := item.Call, inv
+	if browser {
+		// Browser completion evidence keeps the same ui.command_status source
+		// as normal polling, while settlement remains bound to the original action.
+		if item.Operation == nil || pollAccess(provider, policy, item.Operation.Binding) != nil {
+			return run, hostError("reconciliation_binding_mismatch")
+		}
+		call = ToolCall{CallRef: item.Call.CallRef, Capability: item.Operation.Binding.PollCapability, Arguments: item.Operation.PollArguments, Reason: "Read verified browser receipt"}
+		identifyInvocation(&evidenceIdentity, run, provider, call.Capability, policy)
+	}
+	outcome, err := ExecuteCall(ctx, verifiedResultProvider{CapabilityProvider: provider, result: result}, policy.GrantedCapabilities, call, &evidenceIdentity)
 	if err != nil {
 		return run, err
 	}

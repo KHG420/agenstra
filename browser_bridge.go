@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"errors"
-	"log"
 )
 
 func (w *WebIntegration) browserRegistration(ctx context.Context, owner, integration, handlerVersion string, handlers []string) (*compiledFrontend, error) {
@@ -622,57 +621,36 @@ func (w *WebIntegration) cancelCommands(owner, run string) error {
 	})
 }
 
-// ReconcileBrowserCommand re-polls only the existing operation after a verified
-// original browser result arrives. It never creates or executes a new command.
+// ReconcileBrowserCommand settles the original operation from its verified browser
+// receipt. A cancelled or failed run retains its status; no handler is replayed.
 func (w *WebIntegration) ReconcileBrowserCommand(ctx context.Context, owner, id string, revision int) (StoredRun, error) {
-	c, e := w.command(owner, id)
-	if e != nil {
-		return StoredRun{}, e
+	c, err := w.command(owner, id)
+	if err != nil {
+		return StoredRun{}, err
 	}
 	if c.Status != "succeeded" && c.Status != "failed" {
 		return StoredRun{}, hostError("browser_result_not_verified")
 	}
-	current, e := w.Host.Get(ctx, c.RunID, owner)
-	if e != nil {
-		return current, e
+	binding, err := w.Store.binding(owner, c.RunID)
+	if err != nil {
+		return StoredRun{}, err
 	}
-	if current.Status != "needs_reconciliation" {
-		return current, hostError("reconciliation_not_required")
+	if binding.SessionID != c.SessionID || binding.ProfileDigest != c.ProfileDigest {
+		return StoredRun{}, hostError("browser_binding_mismatch")
 	}
-	run, e := w.Host.Store.Claim(c.RunID, owner, w.Host.Settings.LeaseSeconds)
-	if e != nil {
-		return run, e
+	journal, err := w.Host.Store.GetInvocation(c.RunID, id, owner)
+	if err != nil {
+		return StoredRun{}, err
 	}
-	defer func() {
-		// The lease expires if release fails; keep the committed run outcome.
-		if err := w.Host.Store.Release(c.RunID, owner, run.LeaseToken); err != nil {
-			log.Print("run lease release failed")
+	argsSHA, _ := journal["arguments_sha256"].(string)
+	verify := func(_ context.Context, verification ReconciliationContext) (CapabilityResult, error) {
+		item := verification.Invocation
+		if item.Call.Capability != c.Action || webHash(item.Call.Arguments) != c.ArgumentsSHA256 || item.Operation == nil || item.Operation.OperationID != c.ID || item.Operation.Binding.PollCapability != "ui.command_status" {
+			return CapabilityResult{}, hostError("reconciliation_binding_mismatch")
 		}
-	}()
-	if run.Revision != revision {
-		return run, hostError("revision_conflict")
+		return CapabilityResult{Data: commandReceipt(c), ReferenceScope: "durable"}, nil
 	}
-	state, e := w.Host.restore(run)
-	if e != nil {
-		return run, e
-	}
-	found := false
-	for i := range state.Pending {
-		item := &state.Pending[i]
-		if item.InvocationID == c.ID && item.Status == "unknown" && item.Operation != nil && item.Operation.OperationID == c.ID && containsString(item.Operation.Binding.ReconciliationStates, "unknown") {
-			item.Status = "waiting"
-			item.ErrorCode = nil
-			item.Operation.NextPollAt = w.Host.now()
-			item.Operation.Deadline = w.Host.now() + 10
-			found = true
-		}
-	}
-	if !found {
-		return run, hostError("reconciliation_binding_mismatch")
-	}
-	state.Status = "queued"
-	state.ErrorCode = nil
-	return w.Host.save(run, state, "", nil, map[string]any{"kind": "browser_result_reconciled", "invocation_id": c.ID})
+	return w.Host.reconcile(ctx, c.RunID, owner, id, argsSHA, revision, verify, true)
 }
 func (w *WebIntegration) bindRun(tx *sql.Tx, owner, run, request, integration, session string) error {
 	p := w.profiles[integration]

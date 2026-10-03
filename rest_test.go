@@ -250,3 +250,53 @@ func TestRESTRejectsUnsafeResponseMapping(t *testing.T) {
 		t.Fatal("accepted unknown response mode")
 	}
 }
+
+func TestLegacyFingerprintStability(t *testing.T) {
+	manifest := `{"schema":"agenstra.capability-pack.v1","name":"review","guidance":"query records","capabilities":[{"name":"records.query","version":"1","description":"query","method":"GET","url_env":"REVIEW_URL","inputs":{"alpha":{"type":"string","description":"alpha"},"beta":{"type":"string","description":"beta"},"gamma":{"type":"string","description":"gamma"}},"outputs":{"alpha":{"type":"string","description":"alpha"},"beta":{"type":"string","description":"beta"},"gamma":{"type":"string","description":"gamma"}}}]}`
+	path := filepath.Join(t.TempDir(), "pack.json")
+	if err := os.WriteFile(path, []byte(manifest), 0600); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for range 60 {
+		p, err := LoadLegacyPack(path, map[string]string{"REVIEW_URL": "http://localhost/query"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen[fingerprint(p)] = true
+	}
+	if len(seen) != 1 {
+		t.Fatalf("same legacy manifest produced %d fingerprints", len(seen))
+	}
+}
+
+func TestRESTBusinessSuccessUsesJSONValueEquality(t *testing.T) {
+	for _, tc := range []struct {
+		raw      string
+		code     string
+		expected any
+	}{
+		{"1", "", 1}, {"1.0", "", 1}, {"1e0", "", 1}, {"2", "business_rejected", 1}, {`"1"`, "business_rejected", 1}, {"true", "business_rejected", 1},
+		{"9007199254740993.0", "", json.Number("9007199254740993")},
+		{"1.0000000000000001", "business_rejected", 1},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if _, err := w.Write([]byte(`{"code":` + tc.raw + `,"id":"R1"}`)); err != nil {
+					t.Error(err)
+				}
+			}))
+			t.Cleanup(s.Close)
+			m := JSON{"schema": "agenstra.rest-pack.v2", "name": "records", "version": "1.0.0", "guidance": "read records", "base_url_env": "REVIEW_URL", "capabilities": []any{JSON{"name": "records.get", "description": "read", "method": "GET", "path": "/records", "effect": "read", "input_schema": JSON{"type": "object", "properties": JSON{}, "additionalProperties": false}, "output_schema": JSON{"type": "object", "properties": JSON{"code": JSON{"type": []any{"number", "string", "boolean"}}, "id": JSON{"type": "string"}}, "additionalProperties": false}, "business_success": JSON{"path": []any{"code"}, "value": tc.expected, "error_code": "business_rejected"}}}}
+			p, err := LoadRestPack(writeTestManifest(t, m), map[string]string{"REVIEW_URL": s.URL}, s.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := p.Invoke(t.Context(), "records.get", JSON{}, nil)
+			if err != nil || result.ErrorCode != tc.code {
+				t.Fatalf("numerically equal success field classified as failure: %v %v", result.ErrorCode, err)
+			}
+
+		})
+	}
+}

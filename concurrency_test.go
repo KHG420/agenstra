@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type parallelTestProvider struct{ *hostProvider }
@@ -255,5 +256,53 @@ func TestConcurrencyExcludesWritesApprovalsJobsAndUnsafeReplay(t *testing.T) {
 				t.Fatal("unsafe parallel batch")
 			}
 		})
+	}
+}
+
+func TestBoundProviderRetainsConcurrency(t *testing.T) {
+	var provider CapabilityProvider = &boundProvider{CapabilityProvider: &RestPack{}}
+	concurrent, ok := provider.(ConcurrentCapabilityProvider)
+	if !ok || !concurrent.ConcurrentInvocation("records.query") {
+		t.Fatal("deployment wrapper removed the REST provider's concurrency capability")
+	}
+}
+
+func TestHostConcurrencySurvivesDeploymentAndBrowserWrappers(t *testing.T) {
+	started, release := make(chan struct{}, 4), make(chan struct{})
+	p := &parallelTestProvider{&hostProvider{hook: func(ctx context.Context, _ string, args JSON, _ *InvocationContext) (CapabilityResult, error) {
+		started <- struct{}{}
+		select {
+		case <-release:
+			return CapabilityResult{Data: args}, nil
+		case <-ctx.Done():
+			return CapabilityResult{}, ctx.Err()
+		}
+	}}}
+	h := concurrentHost(t, p)
+	wrapped := &boundProvider{CapabilityProvider: &browserProvider{base: &boundProvider{CapabilityProvider: p}, caps: p.Capabilities()}}
+	h.ProviderFactory = func(context.Context, string, string) (CapabilityProvider, error) { return wrapped, nil }
+	if wrapped.ConcurrentInvocation("ui.get_context") || wrapped.ConcurrentInvocation("ui.navigate") {
+		t.Fatal("browser state became concurrent")
+	}
+	if (&boundProvider{CapabilityProvider: &hostProvider{}}).ConcurrentInvocation("records.get") {
+		t.Fatal("serial provider gained concurrency")
+	}
+	run := createTestHostRun(t, h)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := h.Drive(ctx, run.RunID, "alice"); done <- err }()
+	concurrent := true
+	for range 2 {
+		select {
+		case <-started:
+		case <-ctx.Done():
+			concurrent = false
+		}
+	}
+	close(release)
+	err := <-done
+	if !concurrent || err != nil {
+		t.Fatal("wrapped business reads did not start concurrently", err)
 	}
 }

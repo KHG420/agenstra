@@ -614,6 +614,12 @@ type boundProvider struct {
 	subject string
 }
 
+// ConcurrentInvocation preserves the underlying provider's concurrency guarantee.
+func (p *boundProvider) ConcurrentInvocation(name string) bool {
+	provider, ok := p.CapabilityProvider.(ConcurrentCapabilityProvider)
+	return ok && provider.ConcurrentInvocation(name)
+}
+
 // BindingID returns the stable connection identity used to detect configuration changes.
 func (p *boundProvider) BindingID() string { return p.binding }
 

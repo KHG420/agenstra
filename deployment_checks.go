@@ -231,7 +231,12 @@ func configureDeploymentChecks(h *AgentHost, d *Deployment) error {
 					return CapabilityResult{}, hostError("reconciliation_argument_invalid")
 				}
 			}
-			result, err := provider.Invoke(ctx, cap.Name, args, nil)
+			// The verifier is a separate read, identified from the saved run rather
+			// than reusing the original write's identity or passing a nil context.
+			inv := InvocationContext{RunID: run.RunID, OwnerID: run.OwnerID, InvocationID: NewID(), ConnectionID: NewID()}
+			inv.IdempotencyKey = inv.InvocationID
+			identifyInvocation(&inv, run, provider, cap.Name, policy)
+			result, err := provider.Invoke(ctx, cap.Name, args, &inv)
 			if err != nil || result.ErrorCode != "" {
 				return CapabilityResult{}, hostError("reconciliation_verification_failed")
 			}

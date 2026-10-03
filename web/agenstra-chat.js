@@ -277,11 +277,10 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
         turn.append(request);
       }
       const unknownItems = (runtime?.pending || []).filter(item => item.status === "unknown" || item.status === "in_flight" || item.poll_in_flight || (item.status === "waiting" && item.operation));
-      if (state === "needs_reconciliation" || (["cancelled", "failed"].includes(state) && unknownItems.some(item => item.operation?.binding?.poll_capability !== "ui.command_status"))) {
+      if (state === "needs_reconciliation" || (["cancelled", "failed"].includes(state) && unknownItems.length > 0)) {
         const p = document.createElement("p");p.className = "notice";p.textContent = ["cancelled", "failed"].includes(state) ? t.unknownStopped : t.unknown;turn.append(p);
         for (const item of unknownItems) {
           const browser = item.operation?.binding?.poll_capability === "ui.command_status";
-          if (browser && state !== "needs_reconciliation") continue;
           turn.append(this.button(t.reconcile, item.invocation_id + ":reconcile", () => browser
             ? this.client.reconcile(item.invocation_id, run.revision)
             : this.client.reconcileInvocation(run.run_id, item, run.revision)));

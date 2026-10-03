@@ -106,6 +106,49 @@ func stopped(status string) bool {
 	}
 	return false
 }
+
+func (c evaluationClient) loadFacts(ctx context.Context, run *agenstra.StoredRun) error {
+	ids, stored := run.State["artifact_ids"]
+	if !stored {
+		return nil
+	}
+	items, ok := ids.([]any)
+	if !ok {
+		return errors.New("evaluation_response_invalid")
+	}
+	raw, err := agenstra.CanonicalJSON(run.State["runtime"])
+	if err != nil {
+		return errors.New("evaluation_response_invalid")
+	}
+	var runtime map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if decoder.Decode(&runtime) != nil || runtime == nil {
+		return errors.New("evaluation_response_invalid")
+	}
+	facts := make([]agenstra.Fact, 0, len(items))
+	seen := map[string]bool{}
+	for _, value := range items {
+		id, ok := value.(string)
+		if !ok || id == "" || seen[id] {
+			return errors.New("evaluation_response_invalid")
+		}
+		seen[id] = true
+		var fact agenstra.Fact
+		path := "/runs/" + url.PathEscape(run.RunID) + "/artifacts/" + url.PathEscape(id)
+		if err := c.request(ctx, "GET", path, nil, &fact); err != nil {
+			return err
+		}
+		if fact.FactID != id || fact.SourceCapability == "" || fact.Value == nil {
+			return errors.New("evaluation_response_invalid")
+		}
+		facts = append(facts, fact)
+	}
+	runtime["facts"] = facts
+	run.State["runtime"] = runtime
+	return nil
+}
+
 func (c evaluationClient) evaluate(ctx context.Context, test agenstra.EvaluationCase, timeout time.Duration) agenstra.EvaluationResult {
 	result := agenstra.EvaluationResult{Name: test.Name, Checks: []agenstra.EvaluationCheck{}}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -163,6 +206,12 @@ func (c evaluationClient) evaluate(ctx context.Context, test agenstra.Evaluation
 		case <-ctx.Done():
 			timer.Stop()
 		case <-timer.C:
+		}
+	}
+	if run.Status == "completed" && len(test.Facts) > 0 {
+		if err := c.loadFacts(ctx, &run); err != nil {
+			result.Status, result.ErrorCode = run.Status, err.Error()
+			return result
 		}
 	}
 	checked, err := agenstra.EvaluateRun(ctx, run, test)

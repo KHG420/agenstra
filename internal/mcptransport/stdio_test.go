@@ -204,3 +204,64 @@ func TestMCPStdioCancellationReapsProcess(t *testing.T) {
 		t.Fatalf("idempotent close: %v", err)
 	}
 }
+
+func TestStdioFrameBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, input string
+		limit       int
+		want        string
+		failed      bool
+	}{
+		{"exact", "1234\n", 5, "1234\n", false},
+		{"oversize", "12345\n", 5, "", true},
+		{"no newline", "123456", 5, "", true},
+		{"partial EOF", "1234", 5, "1234", true},
+		{"multiple buffer fragments", strings.Repeat("x", 64) + "\n", 65, strings.Repeat("x", 64) + "\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			line, err := readStdioFrame(bufio.NewReaderSize(strings.NewReader(tc.input), 16), tc.limit)
+			if string(line) != tc.want || (err != nil) != tc.failed {
+				t.Fatal(string(line), err)
+			}
+		})
+	}
+}
+
+func TestStdioOversizeClosesAndReapsConnection(t *testing.T) {
+	if os.Getenv("AGENSTRA_MCP_OVERSIZE_HELPER") == "1" {
+		if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err != nil {
+			t.Fatal(err)
+		}
+		// A bounded invalid frame, without a delimiter; the client must stop reading.
+		chunk := strings.Repeat("x", 4096)
+		for range (16<<20)/len(chunk) + 1 {
+			if _, err := fmt.Fprint(os.Stdout, chunk); err != nil {
+				return
+			}
+		}
+		time.Sleep(30 * time.Second)
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestStdioOversizeClosesAndReapsConnection$")
+	cmd.Env = append(os.Environ(), "AGENSTRA_MCP_OVERSIZE_HELPER=1")
+	client, err := StartStdio(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	if _, err := client.Request(ctx, "tools/call", map[string]any{}); err == nil || !strings.Contains(err.Error(), "response too large") {
+		t.Fatal(err)
+	}
+	if cmd.ProcessState == nil {
+		t.Fatal("oversized response subprocess was not reaped")
+	}
+	if _, err := client.Request(ctx, "tools/call", map[string]any{}); err == nil {
+		t.Fatal("broken stream reused")
+	}
+}
