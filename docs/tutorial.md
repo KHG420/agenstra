@@ -188,6 +188,8 @@ go run ./cmd/agenstra-import-openapi \
 
 这条命令会覆盖上面手写的 `pack.json`，因此**选择手写或导入其中一种路径**。替换 `records.get` 为真实 `operationId`。导入器保留嵌套 JSON Schema 和本地引用，支持显式 bearer token；不支持的认证、参数序列化和外部引用会报错。请逐项审查生成的 `effect`、路径、类型和响应，再补 `skills`、`approval_required`、`idempotency_header` / `idempotency_argument` 与 `operation`。不要把导入结果当作自动授权清单。
 
+响应契约允许 `null`、数组、标量或混合类型时，导入器使用已有的 `response_mode: "wrap"`，将业务结果放在 `result` 字段中，并继续校验原始响应 Schema。只有契约保证结果为对象时才保留原有结构；本地引用及 `allOf` / `anyOf` / `oneOf` 组合也按这一规则处理。已有已发布能力包不会因导入器更新而改写，新草稿仍需审查后发布。
+
 ## 6. 把多个已有能力交给 Agent 组合
 
 再接入两个接口时，在同一包的 `capabilities` 中增加两项经过审查的声明，并在部署配置的 `granted_capabilities` 中授权对应名称。可以给每项绑定不同的技能；无需修改 `AgentRuntime`。模型观察到第一项的 Fact 后，下一轮可用 `$fact_value` 引用字段：
