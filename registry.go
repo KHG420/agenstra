@@ -346,6 +346,9 @@ func (r *CapabilityRegistry) ReleasePath(packID, digest string) (string, error) 
 	if e != nil {
 		return "", registryError("release_tampered")
 	}
+	if !json.Valid(mb) || !json.Valid([]byte(mj)) {
+		return "", registryError("release_tampered")
+	}
 	var manifest, stored map[string]any
 	manifestDecoder := json.NewDecoder(strings.NewReader(string(mb)))
 	manifestDecoder.UseNumber()

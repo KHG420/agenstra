@@ -69,6 +69,69 @@ func TestRegistryImmutableRevisionsAndGrants(t *testing.T) {
 		t.Fatalf("expected tamper detection: %v", e)
 	}
 }
+
+func TestRegistryReleaseRequiresCompleteJSONBeforeActivation(t *testing.T) {
+	for _, location := range []string{"package file", "stored manifest"} {
+		for _, tc := range []struct {
+			name, suffix string
+			wantError    bool
+		}{
+			{"whitespace", " \n\t", false},
+			{"second document", " {}", true},
+			{"trailing garbage", " incomplete", true},
+		} {
+			t.Run(location+"/"+tc.name, func(t *testing.T) {
+				dir := t.TempDir()
+				r := NewCapabilityRegistry(filepath.Join(dir, "registry.sqlite3"), filepath.Join(dir, "packages"))
+				if err := r.Initialize(); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = r.Close() })
+				published, err := r.Publish("records", "1.0.0", testRegistryManifest("records.get"), map[string]string{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				digest := published["digest"].(string)
+				path, err := r.ReleasePath("records", digest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if location == "package file" {
+					raw, err := os.ReadFile(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, append(raw, tc.suffix...), 0644); err != nil {
+						t.Fatal(err)
+					}
+				} else if _, err := r.db.Exec("UPDATE releases SET manifest_json=manifest_json || ? WHERE pack_id=? AND digest=?", tc.suffix, "records", digest); err != nil {
+					t.Fatal(err)
+				}
+				_, err = r.ReleasePath("records", digest)
+				if tc.wantError && !registryHasCode(err, "release_tampered") || !tc.wantError && err != nil {
+					t.Errorf("release completeness not checked: %v", err)
+				}
+				zero := 0
+				_, err = r.Activate("records", digest, &zero)
+				if tc.wantError && !registryHasCode(err, "release_tampered") || !tc.wantError && err != nil {
+					t.Errorf("activation completeness not checked: %v", err)
+				}
+				var revision int
+				if err := r.db.QueryRow("SELECT COALESCE(MAX(revision),0) FROM active WHERE pack_id=?", "records").Scan(&revision); err != nil {
+					t.Fatal(err)
+				}
+				wantRevision := 1
+				if tc.wantError {
+					wantRevision = 0
+				}
+				if revision != wantRevision {
+					t.Fatalf("unexpected activation revision: got %d, want %d", revision, wantRevision)
+				}
+			})
+		}
+	}
+}
+
 func registryHasCode(err error, code string) bool {
 	var r *RegistryError
 	return errors.As(err, &r) && r.Code == code
