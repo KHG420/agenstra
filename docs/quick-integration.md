@@ -152,4 +152,4 @@ go run ./cmd/agenstra-evaluate --server http://127.0.0.1:8091 \
 | Web 页面已有函数 | 纯浏览器 SDK + profile，或与后端能力组合 | 原页面函数、当前页面观察数据、明确用户授权；纯浏览器无需占位后端包 |
 | 只有桌面 GUI、没有 API 或绑定点 | 需专门适配 | 可调用的自动化或业务接口 |
 
-OpenAPI 当前支持 JSON 文档、本地引用、path/query 参数和规定的序列化方式、JSON object 输出，以及受支持的 bearer 认证；复杂文档会报告导入失败，需对照[能力管理指南](capability-management.md)和导入器限制适配。框架尚未内置通用桌面 GUI 驱动或完整 OAuth 登录流程。
+OpenAPI 当前支持 JSON 文档、本地引用、path/query 参数和规定的序列化方式、JSON Schema 输出，以及受支持的 bearer 认证。纯对象结果保留原结构，允许 `null` 或其他类型的结果放在 `result` 字段中；复杂文档会报告导入失败，需对照[能力管理指南](capability-management.md)和导入器限制适配。框架尚未内置通用桌面 GUI 驱动或完整 OAuth 登录流程。

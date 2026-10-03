@@ -227,20 +227,56 @@ func jsonMedia(doc JSON, parent JSON, label string) (JSON, error) {
 }
 
 func openAPIOutputSchema(schema JSON) (JSON, bool) {
-	root := schema
-	for depth := 0; depth < 16; depth++ {
-		ref, ok := root["$ref"].(string)
-		if !ok || !strings.HasPrefix(ref, "#/$defs/") {
-			break
+	defs, _ := schema["$defs"].(map[string]any)
+	// Provider results must be objects. Preserve their shape only when the
+	// contract requires an object; nullable and mixed results need the existing
+	// result wrapper even when their type is expressed through a composition.
+	var objectOnly func(JSON, int) bool
+	objectOnly = func(root JSON, depth int) bool {
+		if root == nil || depth >= 16 {
+			return false
 		}
-		defs, _ := schema["$defs"].(map[string]any)
-		name := strings.TrimPrefix(ref, "#/$defs/")
-		root, _ = defs[name].(map[string]any)
-		if root == nil {
-			return schema, false
+		if root["type"] == "object" {
+			return true
 		}
+		if types, ok := root["type"].([]any); ok && len(types) > 0 {
+			onlyObjects := true
+			for _, kind := range types {
+				onlyObjects = onlyObjects && kind == "object"
+			}
+			if onlyObjects {
+				return true
+			}
+		}
+		if ref, ok := root["$ref"].(string); ok && strings.HasPrefix(ref, "#/$defs/") {
+			target, _ := defs[strings.TrimPrefix(ref, "#/$defs/")].(map[string]any)
+			if objectOnly(target, depth+1) {
+				return true
+			}
+		}
+		if branches, ok := root["allOf"].([]any); ok {
+			for _, branch := range branches {
+				child, _ := branch.(map[string]any)
+				if objectOnly(child, depth+1) {
+					return true
+				}
+			}
+		}
+		for _, keyword := range []string{"anyOf", "oneOf"} {
+			if branches, ok := root[keyword].([]any); ok && len(branches) > 0 {
+				onlyObjects := true
+				for _, branch := range branches {
+					child, _ := branch.(map[string]any)
+					onlyObjects = onlyObjects && objectOnly(child, depth+1)
+				}
+				if onlyObjects {
+					return true
+				}
+			}
+		}
+		return false
 	}
-	if kind, ok := root["type"].(string); !ok || kind == "object" {
+	if objectOnly(schema, 0) {
 		return schema, false
 	}
 	inner := JSON{}
