@@ -28,12 +28,13 @@ func captureInvocationReceipt(item *Invocation, cap CapabilityDescription, outco
 		sum := sha256.Sum256(result)
 		r.ResultSHA256, r.ResultBytes = hex.EncodeToString(sum[:]), len(result)
 		if cap.Operation != nil {
-			id, idErr := operationValue(outcome.Fact.Value["data"], cap.Operation.IDPath)
+			id, valueErr := operationValue(outcome.Fact.Value["data"], cap.Operation.IDPath)
 			status, statusErr := operationValue(outcome.Fact.Value["data"], cap.Operation.StatusPath)
+			var idErr error
 			r.OperationID, idErr = scalarValue(id)
 			r.OperationStatus, _ = status.(string)
 			switch {
-			case idErr != nil || statusErr != nil || r.OperationStatus == "" || len(r.OperationID) > 256 || len(r.OperationStatus) > 128:
+			case valueErr != nil || idErr != nil || statusErr != nil || r.OperationStatus == "" || len(r.OperationID) > 256 || len(r.OperationStatus) > 128:
 				r.OperationID, r.OperationStatus = "", ""
 				r.Status, r.ErrorCode = "unknown", "operation_contract_invalid"
 			case containsString(cap.Operation.PendingStates, r.OperationStatus):

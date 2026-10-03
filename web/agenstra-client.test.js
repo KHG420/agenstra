@@ -92,7 +92,6 @@ test("initial publication and explicit updates share the page revision queue", a
 });
 test("an unchanged explicit page update cannot invalidate a dispatched command", async t => {
   let revision = 1, uploads = 0, handlers = 0;
-  let dispatched;
   const c = client(async (path, options) => {
     if (path.endsWith("/observation")) {
       uploads++;
@@ -106,7 +105,7 @@ test("an unchanged explicit page update cannot invalidate a dispatched command",
   t.after(() => c.destroy({ closeSession: false }));
   c.registerActions({ "ui.navigate": () => { handlers++;return { page: "orders" }; } });
   await c.updatePageObservation({ page: "home" });
-  dispatched = { ...command, context_revision: revision };
+  const dispatched = { ...command, context_revision: revision };
   await c.updatePageObservation({ page: "home" });
   await c.executeCommand(dispatched);
   assert.equal(handlers, 1);assert.equal(uploads, 1);

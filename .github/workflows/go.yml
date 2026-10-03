@@ -11,11 +11,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: test -z "$(gofmt -l .)"
+      - run: make fmt-check
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
       - run: go test -race ./...
       - run: go vet ./...
       - run: go build ./cmd/...
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - run: npm run lint --prefix web
       - run: npm test --prefix web

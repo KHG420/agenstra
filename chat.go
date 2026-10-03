@@ -450,7 +450,9 @@ func (w *WebIntegration) CancelMessage(ctx context.Context, owner, id string) (C
 			if e = webLoad(w.Store.store.DB, "web_conversations", m.ConversationID, owner, &c); e != nil {
 				return m, e
 			}
-			e = w.cancelUnpublishedChatRun(owner, c.IntegrationID, m)
+			if e = w.cancelUnpublishedChatRun(owner, c.IntegrationID, m); e != nil {
+				return m, e
+			}
 		} else if e != nil {
 			return m, e
 		}

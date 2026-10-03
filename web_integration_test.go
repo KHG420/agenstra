@@ -460,6 +460,34 @@ func TestChatConcurrentCreateFailureKeepsActiveSlot(t *testing.T) {
 	}
 }
 
+func TestChatCancellationReportsUnpublishedRunStorageFailure(t *testing.T) {
+	f := newWebFixture(t, &hostModel{}, false)
+	c, err := f.w.CreateConversation(t.Context(), "alice", "records")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := f.w.SubmitMessage(t.Context(), "alice", c.ID, "first", "Do not execute", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A creator has reserved the message but has not published a run yet.
+	m.Status, m.Instruction = "creating", "Do not execute"
+	if err = f.w.Store.store.write(func(tx *sql.Tx) error {
+		return webSave(tx, "web_messages", m.ID, m)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.h.Store.DB.Exec(`CREATE TRIGGER reject_unpublished_cancel BEFORE INSERT ON runs BEGIN SELECT RAISE(FAIL, 'cannot persist cancellation'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.w.CancelMessage(t.Context(), "alice", m.ID); err == nil {
+		t.Fatal("cancellation must report failure to persist the unpublished run fence")
+	}
+	if _, err = f.h.Store.GetRun(m.RunID, "alice"); !errors.Is(err, ErrRunNotFound) {
+		t.Fatal("failed cancellation created a run", err)
+	}
+}
+
 func TestChatCancellationFencesConcurrentUnpublishedCreate(t *testing.T) {
 	f := newWebFixture(t, &hostModel{}, false)
 	c, _ := f.w.CreateConversation(t.Context(), "alice", "records")

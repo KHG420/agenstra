@@ -192,7 +192,7 @@ test("structured controls keep the right draft, label and keyboard submission", 
     const calls = [];
     let failure = false;
     let current = inputSnapshot("conversation-a", 2, "destination", { type: "enum", enum: ["A", "B"] });
-    chat._client = { supplyInput: async (...args) => { calls.push(args); if (failure) throw { status: 422, code: "input_invalid" }; }, snapshot: async () => current };
+    chat._client = { supplyInput: async (...args) => { calls.push(args); if (failure) throw Object.assign(new Error("input_invalid"), { status: 422, code: "input_invalid" }); }, snapshot: async () => current };
     chat.epoch = 1;
     chat.render(current);
     assert.equal(chat.choice.hidden, false);

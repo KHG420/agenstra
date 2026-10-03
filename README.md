@@ -210,11 +210,15 @@ Back up the database, stop the Python worker, and start the Go server using the 
 
 ## Development and validation
 
+Follow the repository [agent instructions](AGENTS.md) and [coding standards (Chinese)](docs/coding-standards.md). Install the pinned development tools, then run the same checks used by CI:
+
 ```sh
-go test -race ./...
-go vet ./...
-go build ./cmd/...
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+npm ci --prefix web
+make check
 ```
+
+Use the Go version in `go.mod` and Node.js 22.13+ on the 22 release line or 24+. Ensure `$(go env GOPATH)/bin` is on PATH. The checks include Go formatting, static analysis, race tests, command builds, and JavaScript lint/tests for the SDK and host example. Lint dependencies are development-only and are not shipped with the SDK.
 
 The tests generate temporary REST/MCP contracts, model doubles, and SQLite databases. They need no domain pack or live external service. Before production use, validate real identities, model decisions, API contracts, long-running tasks, and operating conditions in the target environment. Current trade-offs and pre-launch checks are in the [architecture guide (Chinese)](docs/architecture.md) and [deployment guide (Chinese)](docs/deployment.md).
 

@@ -208,11 +208,15 @@ Go 版本保留部署 JSON 格式、能力包清单、HTTP 路由与响应格式
 
 ## 开发验证
 
+修改前遵守仓库的 [Agent 指令](AGENTS.md)与[编码规范](docs/coding-standards.md)。安装固定版本的开发工具后，执行与 CI 相同的检查：
+
 ```sh
-go test -race ./...
-go vet ./...
-go build ./cmd/...
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+npm ci --prefix web
+make check
 ```
+
+Go 版本按 `go.mod`，Node.js 使用 22.13+ 的 22 系列或 24+；确保 `$(go env GOPATH)/bin` 在 PATH 中。检查包括 Go 格式、静态分析、竞态测试、命令构建，以及 SDK 和宿主示例的 JavaScript 静态检查与 Web 测试。lint 依赖仅用于开发，不随 SDK 分发给宿主。
 
 测试使用临时生成的 REST/MCP 契约、模型替身和 SQLite；不需要场景能力包或真实外部服务。发布前仍应在目标环境验收真实身份、模型决策、接口契约、长任务以及运维条件。当前实现的取舍和上线前检查见[架构说明](docs/architecture.md)与[部署与运维](docs/deployment.md)。
 
