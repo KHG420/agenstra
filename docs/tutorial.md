@@ -247,6 +247,8 @@ go run ./cmd/agenstra-import-openapi \
 
 已有 MCP 服务时，用 `agenstra.mcp-pack.v1` 清单声明 stdio 或 streamable HTTP 连接，只暴露审查过的工具。对每个工具保存 `contract_sha256`；它覆盖完整工具契约，而不是只覆盖工具名。`mcp.go` 的 `MCPContractDigest` 接受工具契约的 JSON 映射并计算哈希。MCP 连接所需 URL、token 或 stdio 环境变量仍由部署配置绑定，不能写明文到包中。
 
+Streamable HTTP 的 SSE 响应按事件边界组装多行 `data:`，收到当前请求的完整回执即可继续执行，不等待流关闭。通知、服务端请求和其他请求的回执不会被误认成当前业务结果；服务端请求的处理能力仍以初始化时声明的客户端能力为准。普通 JSON 响应要求单个完整值且不超过 16 MiB，事件未结束或内容无效时按不确定结果处理，写操作没有安全重放保证时暂停核对。
+
 特殊 SDK 可实现 `CapabilityProvider`：提供 `Capabilities()`、`Skills()`、`SystemPrompt()`、`Invoke(ctx, name, arguments, invocationContext)` 和 `Close()`，由调用方应用构造按用户隔离的 `ProviderFactory` 传给 `AgentHost`。Provider 负责对输入和返回做验证，返回结构化 `CapabilityResult` 或安全错误码；不要让原始异常、密钥或不可信响应正文进入模型或审计文本。具体协议类型见 [`providers.go`](../providers.go)，持久 Host 接入见 [`host.go`](../host.go)。
 
 完成接入后，用真实 API 和模型验证授权、结果字段、错误情况、数据是否允许送模型、提交幂等、等待恢复与最终回答；自动化测试只能证明框架边界，不能代替具体场景验收。

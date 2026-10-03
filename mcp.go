@@ -246,22 +246,72 @@ func (c *httpMCP) request(ctx context.Context, method string, params JSON, notif
 	if strings.HasPrefix(res.Header.Get("Content-Type"), "text/event-stream") {
 		scanner := bufio.NewScanner(io.LimitReader(res.Body, 16<<20))
 		scanner.Buffer(make([]byte, 4096), 16<<20)
+		scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+			if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+				if data[i] == '\r' && i+1 == len(data) && !atEOF {
+					return 0, nil, nil
+				}
+				advance := i + 1
+				if data[i] == '\r' && advance < len(data) && data[advance] == '\n' {
+					advance++
+				}
+				return advance, data[:i], nil
+			}
+			if atEOF && len(data) > 0 {
+				return len(data), data, nil
+			}
+			return 0, nil, nil
+		})
+		var eventData strings.Builder
+		firstLine := true
 		for scanner.Scan() {
 			line := scanner.Text()
-			if strings.HasPrefix(line, "data:") {
-				payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-				dec := json.NewDecoder(strings.NewReader(payload))
-				dec.UseNumber()
-				if dec.Decode(&reply) == nil && reply["id"] != nil {
-					break
-				}
+			if firstLine {
+				line = strings.TrimPrefix(line, "\ufeff")
+				firstLine = false
 			}
+			if line == "data" || strings.HasPrefix(line, "data:") {
+				payload := strings.TrimPrefix(strings.TrimPrefix(line, "data"), ":")
+				eventData.WriteString(strings.TrimPrefix(payload, " "))
+				eventData.WriteByte('\n')
+				continue
+			}
+			if line != "" || eventData.Len() == 0 {
+				continue
+			}
+			payload := eventData.String()
+			eventData.Reset()
+			if strings.TrimSpace(payload) == "" {
+				continue
+			}
+			if !json.Valid([]byte(payload)) {
+				return nil, errors.New("invalid MCP SSE event")
+			}
+			var event JSON
+			dec := json.NewDecoder(strings.NewReader(payload))
+			dec.UseNumber()
+			if err := dec.Decode(&event); err != nil {
+				return nil, err
+			}
+			id, ok := pathIndex(event["id"])
+			if event["method"] != nil || !ok || id != c.nextID {
+				continue
+			}
+			reply = event
+			break
 		}
 		if err := scanner.Err(); err != nil {
 			return nil, err
 		}
 	} else {
-		dec := json.NewDecoder(io.LimitReader(res.Body, 16<<20))
+		raw, err := io.ReadAll(io.LimitReader(res.Body, (16<<20)+1))
+		if err != nil {
+			return nil, err
+		}
+		if len(raw) > 16<<20 || !json.Valid(raw) {
+			return nil, errors.New("invalid MCP JSON response")
+		}
+		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.UseNumber()
 		if err := dec.Decode(&reply); err != nil {
 			return nil, err
