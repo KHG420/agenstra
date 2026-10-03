@@ -109,6 +109,9 @@ type stdioMCP struct {
 func (c *stdioMCP) request(ctx context.Context, method string, params JSON, notification bool) (JSON, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	msg := JSON{"jsonrpc": "2.0", "method": method, "params": params}
 	if !notification {
 		c.nextID++
@@ -119,8 +122,19 @@ func (c *stdioMCP) request(ctx context.Context, method string, params JSON, noti
 		return nil, err
 	}
 	raw = append(raw, '\n')
-	if _, err = c.stdin.Write(raw); err != nil {
-		return nil, err
+	written := make(chan error, 1)
+	go func() {
+		_, err := c.stdin.Write(raw)
+		written <- err
+	}()
+	select {
+	case <-ctx.Done():
+		_ = c.Close()
+		return nil, ctx.Err()
+	case err := <-written:
+		if err != nil {
+			return nil, err
+		}
 	}
 	if notification {
 		return nil, nil
@@ -146,10 +160,10 @@ func (c *stdioMCP) request(ctx context.Context, method string, params JSON, noti
 		var reply JSON
 		dec := json.NewDecoder(bytes.NewReader(line))
 		dec.UseNumber()
-		if dec.Decode(&reply) != nil {
-			continue
+		if !json.Valid(line) || dec.Decode(&reply) != nil {
+			return nil, errors.New("invalid MCP stdio response")
 		}
-		if reply["id"] == nil {
+		if reply["method"] != nil || reply["id"] == nil {
 			continue
 		}
 		id, ok := pathIndex(reply["id"])
