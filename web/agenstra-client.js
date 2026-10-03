@@ -217,9 +217,13 @@ export class AgenstraClient {
   async executeCommand(command) {
     if (this.executing) return;
     const cached = this.receipts[command.id];
-    if (cached) { await this.flushReceipts(); return; }
+    if (cached) {
+      try { await this.flushReceipts(); } catch (error) { this.emit("error", error); }
+      return;
+    }
     this.executing = true;
     this.activeCommand = command.id;
+    let beginRequested = false;
     try {
       // Persist before claiming. A crash cannot cause the handler to be rerun.
       const receipt = { command, status: "starting" };
@@ -230,6 +234,7 @@ export class AgenstraClient {
         const latest = await this.options.getPageObservation();
         if (JSON.stringify(latest) !== JSON.stringify(this.pageObservation)) await this.updatePageObservation(latest);
       }
+      beginRequested = true;
       const begun = await this.request("/browser/v1/commands/" + command.id + "/begin", { method: "POST", browserKey: this.browser.key, body: { generation: command.generation } });
       if (!begun.accepted) {
         receipt.status = "acked"; this.save("receipts", this.receipts); return;
@@ -251,7 +256,11 @@ export class AgenstraClient {
       const receipt = this.receipts[command.id];
       // A server-confirmed result stays confirmed when the following run read
       // or reconciliation fails. Retry that recovery work, not the result.
-      if (receipt && !["succeeded", "confirmed", "acked"].includes(receipt.status)) {
+      if (receipt?.status === "starting" && !beginRequested) {
+        // No claim was sent and no handler ran. Leave the original command
+        // available for dispatch after page synchronization recovers.
+        delete this.receipts[command.id]; this.save("receipts", this.receipts);
+      } else if (receipt && !["succeeded", "confirmed", "acked"].includes(receipt.status)) {
         const definite = receipt.status === "running" && error instanceof AgenstraActionError;
         receipt.status = definite ? "failed" : "unknown";
         receipt.error_code = definite ? error.code : "browser_handler_outcome_unknown";
