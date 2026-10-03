@@ -17,9 +17,7 @@ func ImportOpenAPI(path, name, baseURLEnv string, operations []string, effects m
 		return nil, err
 	}
 	var doc JSON
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	if err := dec.Decode(&doc); err != nil {
+	if err := strictUnmarshal(raw, &doc); err != nil {
 		return nil, err
 	}
 	return ImportOpenAPIDocument(doc, name, baseURLEnv, operations, effects, tokenEnv)
