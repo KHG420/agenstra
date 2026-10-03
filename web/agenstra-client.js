@@ -54,18 +54,30 @@ export class AgenstraClient {
   }
   async request(path, { method = "GET", body, browserKey, retry = true } = {}) {
     if (this.closed) throw new AgenstraError("client_closed");
-    if (!this.token) { const session = await this.options.getSession(); this.token = typeof session === "string" ? session : session.token; }
+    if (!this.token) {
+      if (!this.sessionPromise) {
+        this.sessionPromise = Promise.resolve().then(() => this.options.getSession()).then(session => {
+          this.token = typeof session === "string" ? session : session.token;
+        }).finally(() => { this.sessionPromise = null; });
+      }
+      await this.sessionPromise;
+    }
     if (this.closed) throw new AgenstraError("client_closed");
+    const token = this.token;
     const aborter = new AbortController();
     this.aborters.add(aborter);
     try {
-      const headers = { Authorization: "Bearer " + this.token };
+      const headers = { Authorization: "Bearer " + token };
       if (body !== undefined) headers["Content-Type"] = "application/json";
       if (browserKey) headers["X-Agenstra-Browser-Key"] = browserKey;
       const response = await this.fetch(this.endpoint + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: aborter.signal, credentials: "same-origin" });
       const data = await response.json();
       const code = data.code || data.detail?.code;
-      if (response.status === 401 && retry && code === "unauthorized") { this.token = null; return await this.request(path, { method, body, browserKey, retry: false }); }
+      if (response.status === 401 && retry && code === "unauthorized") {
+        // A late rejection only invalidates the credential used by this request.
+        if (this.token === token) this.token = null;
+        return await this.request(path, { method, body, browserKey, retry: false });
+      }
       if (!response.ok) throw new AgenstraError(data.code || data.detail?.code || "request_failed", response.status);
       return data;
     } finally { this.aborters.delete(aborter); }
