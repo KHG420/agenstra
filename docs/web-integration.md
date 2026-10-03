@@ -253,6 +253,8 @@ stateDiagram-v2
 
 SDK 执行前保存 command，执行后保存结果，再提交 ACK。ACK 丢失时重发原结果，不重跑 handler。服务端以 invocation ID 去重。刷新递增 generation，旧 queued/dispatched 动作取消，旧 running 变 unknown；原 generation 的缓存结果可确认原动作，并恢复同一个 operation。确认 ACK 后的恢复待办也会持久保留，以便重试网络和 revision 错误。
 
+页面读取或同步在发送 begin 请求前失败时，SDK 报告错误并移除本次尚未认领的本地记录，允许同步恢复后继续投递原命令；此时没有执行 handler，也不提交 unknown 业务结果。begin 请求一旦尝试发送，丢失响应仍保留 unknown，不能自动重跑。已缓存回执的重试错误通过 SDK 的 error 事件报告，并保留回执。
+
 没有原结果证据时，run 停在 `needs_reconciliation`，同浏览器会话不再投递动作。示例 UI 的“读取已确认的回执”只能读取已有成功/失败结果，不将人工猜测记为成功，不重执行旧动作。无法恢复原结果时，先核对真实业务状态，停止绑定该浏览器会话的所有旧任务，并等待它们进入结束状态；这包括其他聊天会话的任务及尚未执行的排队消息。
 
 宿主可在原 client 上调用统一的恢复入口，无需销毁 client 或丢弃聊天选择、订阅与回执：
