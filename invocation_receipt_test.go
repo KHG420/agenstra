@@ -176,6 +176,176 @@ func asyncReceiptHost(t *testing.T, poll func(JSON) JSON, projection *ModelOutpu
 	return h, p, &now
 }
 
+func TestExpiredOperationChecksPersistedStatusBeforeReconciliation(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, id, wantRun, wantItem string
+	}{
+		{"succeeded", "succeeded", "private-job-token", "completed", "succeeded"},
+		{"failed", "failed", "private-job-token", "completed", "failed"},
+		{"pending", "running", "private-job-token", "needs_reconciliation", "unknown"},
+		{"different operation", "succeeded", "other-job", "needs_reconciliation", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, p, now := asyncReceiptHost(t, func(JSON) JSON {
+				return JSON{"id": tc.id, "status": tc.status}
+			}, nil)
+			p.caps["job.submit"].Operation.ReconcileOnTimeout = true
+			h.Settings.MaxRunSeconds = 300
+			run := createTestHostRun(t, h)
+			run, err := h.Drive(t.Context(), run.RunID, "alice")
+			if err != nil || run.Status != "waiting" {
+				t.Fatal(run.Status, err)
+			}
+			// A new host must settle the persisted operation without replaying submit.
+			restarted := NewAgentHost(h.Store, h.ProviderFactory, h.Model, h.PolicyResolver)
+			restarted.Settings, restarted.Clock = h.Settings, h.Clock
+			h = restarted
+			*now += 61
+			run, err = h.Drive(t.Context(), run.RunID, "alice")
+			if err != nil || run.Status != tc.wantRun {
+				t.Fatal(run.Status, err)
+			}
+			state, err := h.restore(run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			journal, err := h.Store.GetInvocation(run.RunID, state.InvocationReceipts[0].InvocationID, "alice")
+			if err != nil || journal["status"] != tc.wantItem {
+				t.Fatal(journal, err)
+			}
+			if p.calls != 2 {
+				t.Fatal("unexpected submit or poll count", p.calls)
+			}
+			if _, err = h.Drive(t.Context(), run.RunID, "alice"); err != nil || p.calls != 2 {
+				t.Fatal("replayed submitted operation", err, p.calls)
+			}
+		})
+	}
+}
+
+func TestExpiredOperationKeepsUnknownWhenPollUnavailable(t *testing.T) {
+	for _, reason := range []string{"budget", "authorization"} {
+		t.Run(reason, func(t *testing.T) {
+			h, p, now := asyncReceiptHost(t, func(JSON) JSON {
+				return JSON{"id": "private-job-token", "status": "running"}
+			}, nil)
+			p.caps["job.submit"].Operation.ReconcileOnTimeout = true
+			h.Settings.MaxRunSeconds = 300
+			h.Settings.MaxPollCalls = 1
+			run := createTestHostRun(t, h)
+			run, err := h.Drive(t.Context(), run.RunID, "alice")
+			if err != nil || run.Status != "waiting" {
+				t.Fatal(run.Status, err)
+			}
+			if reason == "budget" {
+				*now += 2
+				run, err = h.Drive(t.Context(), run.RunID, "alice")
+				if err != nil || run.Status != "waiting" || p.calls != 2 {
+					t.Fatal(run.Status, err, p.calls)
+				}
+			} else {
+				h.PolicyResolver = func(context.Context, string, string) (ExecutionPolicy, error) {
+					return ExecutionPolicy{GrantedCapabilities: map[string]bool{"job.submit": true}, AllowModelData: true}, nil
+				}
+			}
+			*now += 61
+			run, err = h.Drive(t.Context(), run.RunID, "alice")
+			if reason == "budget" && err != nil || reason == "authorization" && ErrorCode(err) != "capability_not_granted" {
+				t.Fatal(err)
+			}
+			want := "needs_reconciliation"
+			if reason == "authorization" {
+				want = "needs_authorization"
+			}
+			state, err := h.restore(run)
+			if err != nil || run.Status != want || state.Pending[0].Status == "failed" {
+				t.Fatal(run.Status, state, err)
+			}
+			wantCalls := 2
+			if reason == "authorization" {
+				wantCalls = 1
+			}
+			if p.calls != wantCalls {
+				t.Fatal("unsafe or over-budget poll", p.calls)
+			}
+		})
+	}
+}
+
+func TestExpiredOperationResumesPersistedPollIdentity(t *testing.T) {
+	h, p, now := asyncReceiptHost(t, func(JSON) JSON {
+		return JSON{"id": "private-job-token", "status": "succeeded"}
+	}, nil)
+	p.caps["job.submit"].Operation.ReconcileOnTimeout = true
+	h.Settings.MaxRunSeconds, h.Settings.MaxPollCalls = 300, 1
+	run := createTestHostRun(t, h)
+	run, err := h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "waiting" {
+		t.Fatal(run.Status, err)
+	}
+	run, err = h.Store.Claim(run.RunID, "alice", h.Settings.LeaseSeconds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := h.restore(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := &state.Pending[0]
+	pollID := item.InvocationID + ":poll:1"
+	item.PollInFlight = true
+	item.Operation.Polls = 1
+	state.PollCallsUsed = 1
+	run, err = h.save(run, state, "", run.NextWakeAt, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = h.Store.Release(run.RunID, "alice", run.LeaseToken); err != nil {
+		t.Fatal(err)
+	}
+	p.hook = func(_ context.Context, name string, _ JSON, inv *InvocationContext) (CapabilityResult, error) {
+		if name != "job.status" || inv.InvocationID != pollID || inv.IdempotencyKey != pollID {
+			t.Fatal("poll identity changed", name, inv.InvocationID, inv.IdempotencyKey)
+		}
+		return CapabilityResult{Data: JSON{"id": "private-job-token", "status": "succeeded"}}, nil
+	}
+	*now += 61
+	run, err = h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "completed" || p.calls != 2 {
+		t.Fatal(run.Status, err, p.calls)
+	}
+	state, err = h.restore(run)
+	if err != nil || state.PollCallsUsed != 1 {
+		t.Fatal(state, err)
+	}
+}
+
+func TestAcceptedOperationPollBudgetExhaustionNeedsReconciliation(t *testing.T) {
+	h, p, now := asyncReceiptHost(t, func(JSON) JSON {
+		return JSON{"id": "private-job-token", "status": "running"}
+	}, nil)
+	h.Settings.MaxRunSeconds, h.Settings.MaxPollCalls = 300, 1
+	run := createTestHostRun(t, h)
+	run, err := h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "waiting" {
+		t.Fatal(run.Status, err)
+	}
+	*now += 2
+	run, err = h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "waiting" || p.calls != 2 {
+		t.Fatal(run.Status, err, p.calls)
+	}
+	*now += 2 // Still before the 60-second operation deadline.
+	run, err = h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "needs_reconciliation" {
+		t.Fatal(run.Status, err)
+	}
+	state, err := h.restore(run)
+	if err != nil || state.Pending[0].Status != "unknown" || state.Pending[0].Receipt.Status != "accepted" || p.calls != 2 {
+		t.Fatal(state, err, p.calls)
+	}
+}
+
 func TestPollValidatesOperationBeforeReplacingEvidence(t *testing.T) {
 	for _, oversized := range []bool{false, true} {
 		for _, invalid := range []string{"identity", "status"} {
@@ -244,7 +414,11 @@ func TestTerminalAsyncRunCanBeVerifiedAfterBudgetOrDeadline(t *testing.T) {
 				*now += 2
 			}
 			run, err = h.Drive(t.Context(), run.RunID, "alice")
-			if err != nil || run.Status != "failed" {
+			wantStatus := "failed"
+			if stop == "poll_budget" {
+				wantStatus = "needs_reconciliation"
+			}
+			if err != nil || run.Status != wantStatus {
 				t.Fatal(run.Status, err)
 			}
 			state, callErr5 := h.restore(run)
@@ -256,8 +430,11 @@ func TestTerminalAsyncRunCanBeVerifiedAfterBudgetOrDeadline(t *testing.T) {
 				return CapabilityResult{Data: JSON{"id": "private-job-token", "status": "succeeded"}}, nil
 			}
 			run, err = h.Reconcile(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, run.Revision)
-			if err != nil || run.Status != "failed" || p.calls != calls {
-				t.Fatal("terminal run must be verified without resuming", run.Status, err, p.calls)
+			if stop == "poll_budget" {
+				wantStatus = "queued"
+			}
+			if err != nil || run.Status != wantStatus || p.calls != calls {
+				t.Fatal("reconciliation changed execution unexpectedly", run.Status, err, p.calls)
 			}
 			var callErr6 error
 			state, callErr6 = h.restore(run)
@@ -267,8 +444,13 @@ func TestTerminalAsyncRunCanBeVerifiedAfterBudgetOrDeadline(t *testing.T) {
 			if state.InvocationReceipts[0].Status != "succeeded" || !state.InvocationReceipts[0].Reconciled {
 				t.Fatal(state.InvocationReceipts)
 			}
-			if _, err = h.Drive(t.Context(), run.RunID, "alice"); err != nil || p.calls != calls {
-				t.Fatal("stopped task resumed", err)
+			journal, err := h.Store.GetInvocation(run.RunID, item.InvocationID, "alice")
+			if err != nil || journal["error_code"] != nil {
+				t.Fatal("verified operation retained the previous uncertainty error", journal["error_code"], err)
+			}
+			resumed, err := h.Drive(t.Context(), run.RunID, "alice")
+			if err != nil || p.calls != calls || stop == "deadline" && resumed.Status != "failed" || stop == "poll_budget" && resumed.Status != "completed" {
+				t.Fatal("verified task replayed its operation", resumed.Status, err, p.calls)
 			}
 		})
 	}

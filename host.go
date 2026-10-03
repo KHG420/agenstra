@@ -912,26 +912,22 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 		state.ErrorCode = strptr("operation_reference_unavailable")
 		return h.save(run, state, "", nil, map[string]any{"kind": "reconciliation_required", "invocation_id": item.InvocationID})
 	}
-	if h.now() >= receipt.Deadline {
-		if receipt.Binding.ReconcileOnTimeout {
-			item.Status = "unknown"
-			item.ErrorCode = strptr("operation_outcome_unknown")
-			state.Status = "needs_reconciliation"
-			state.ErrorCode = item.ErrorCode
-			return h.save(run, state, "", nil, map[string]any{"kind": "reconciliation_required", "invocation_id": item.InvocationID})
-		}
+	expired := h.now() >= receipt.Deadline
+	if expired && !receipt.Binding.ReconcileOnTimeout {
 		item.Status = "failed"
 		item.ErrorCode = strptr("operation_deadline_exceeded")
 		Reject(state, item.Call.CallRef, item.Call.Capability, "operation_deadline_exceeded", nil, "")
 		return h.save(run, state, "", nil, map[string]any{"kind": "operation_timed_out"})
 	}
-	if h.now() < receipt.NextPollAt && !item.PollInFlight {
+	if !expired && h.now() < receipt.NextPollAt && !item.PollInFlight {
 		return run, nil
 	}
-	if state.PollCallsUsed >= h.runSettings(run).MaxPollCalls {
-		state.Status = "failed"
-		state.ErrorCode = strptr("poll_budget_exhausted")
-		return h.save(run, state, "", nil, nil)
+	if state.PollCallsUsed >= h.runSettings(run).MaxPollCalls && !item.PollInFlight {
+		item.Status = "unknown"
+		item.ErrorCode = strptr("operation_outcome_unknown")
+		state.Status = "needs_reconciliation"
+		state.ErrorCode = item.ErrorCode
+		return h.save(run, state, "", nil, map[string]any{"kind": "reconciliation_required", "invocation_id": item.InvocationID})
 	}
 	policy, e := h.projectPolicy(ctx, run)
 	if e != nil {
@@ -942,9 +938,9 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 	}
 	if !item.PollInFlight {
 		receipt.Polls++
+		state.PollCallsUsed++
 	}
 	item.PollInFlight = true
-	state.PollCallsUsed++
 	call := ToolCall{CallRef: fmt.Sprintf("poll-%s-%d", item.InvocationID, receipt.Polls), Capability: receipt.Binding.PollCapability, Arguments: receipt.PollArguments, Reason: "Read persisted operation status"}
 	inv := invocationContext(run, item, runtime.ConnectionID)
 	identifyInvocation(&inv, run, provider, call.Capability, policy)
@@ -1024,6 +1020,13 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 		// fields deliberately excluded by model_output.
 		observation.Arguments, observation.ArgumentsOmitted = JSON{}, true
 		state.ModelObservations = filter(state.ModelObservations, observation)
+	}
+	if expired && state.Status == "running" && item.Status == "waiting" {
+		item.Status = "unknown"
+		item.ErrorCode = strptr("operation_outcome_unknown")
+		state.Status = "needs_reconciliation"
+		state.ErrorCode = item.ErrorCode
+		return h.save(run, state, "", nil, map[string]any{"kind": "reconciliation_required", "invocation_id": item.InvocationID})
 	}
 	return h.save(run, state, "", nil, map[string]any{"kind": "operation_polled", "invocation_id": item.InvocationID, "poll": receipt.Polls, "fact_id": item.FactID, "error_code": strptr(outcome.ErrorCode)})
 }

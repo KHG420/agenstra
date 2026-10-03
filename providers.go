@@ -374,6 +374,7 @@ func Observe(state *RuntimeState, item *Invocation, outcome CallOutcome) {
 		obs.Status = "succeeded"
 		modelObs.Status = "succeeded"
 		item.Status = "succeeded"
+		item.ErrorCode = nil
 	} else {
 		obs.Status = "failed"
 		modelObs.Status = "failed"

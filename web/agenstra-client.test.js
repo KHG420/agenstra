@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AgenstraClient, AgenstraActionError } from "./agenstra-client.js";
+import { AgenstraClient, AgenstraActionError, AgenstraError } from "./agenstra-client.js";
 const response = (data, status = 200) => ({ status, ok: status >= 200 && status < 300, json: async () => data });
 const command = { id: "cmd-1", run_id: "run-1", session_id: "tab-1", generation: 1, action: "ui.navigate", arguments: { page: "orders" }, context_revision: 1 };
 function storage() { const data = new Map();return { getItem: key => data.get(key) || null, setItem: (key, value) => data.set(key, value), removeItem: key => data.delete(key) }; }
@@ -187,6 +187,46 @@ test("expired tickets refresh once without exposing the host API key", async () 
   } });
   assert.equal((await c.getRun("run-1")).run_id, "run-1");assert.equal(tickets, 2);
   await c.destroy({ closeSession: false });
+});
+test("plain or empty HTTP errors retain safe codes and status", async t => {
+  for (const [status, body, expected] of [
+    [404, "404 page not found", "not_found"],
+    [404, null, "not_found"],
+    [404, "{broken", "not_found"],
+    [401, "unauthorized <internal detail>", "unauthorized"],
+    [401, null, "unauthorized"],
+    [403, "Forbidden", "access_denied"],
+    [502, "<html>upstream failure</html>", "request_failed"],
+    [502, null, "request_failed"],
+  ]) {
+    let requests = 0, tickets = 0;
+    const c = new AgenstraClient({ integration: "erp", storage: null,
+      getSession: async () => "ticket-" + (++tickets),
+      fetch: async () => { requests++; return new Response(body, { status }); },
+    });
+    t.after(() => c.destroy({ closeSession: false }));
+    await assert.rejects(c.getRun("other-owner"), error => {
+      assert.ok(error instanceof AgenstraError);
+      assert.equal(error.status, status);
+      assert.equal(error.code, expected);
+      assert.equal(error.message, expected);
+      return true;
+    });
+    assert.equal(requests, 1, "an unstructured rejection cannot prove a safe retry");
+    assert.equal(tickets, 1);
+  }
+});
+test("structured HTTP errors keep their existing code and successful invalid JSON still fails parsing", async t => {
+  const structured = new AgenstraClient({ integration: "erp", storage: null, getSession: async () => "ticket",
+    fetch: async () => new Response(JSON.stringify({ detail: { code: "browser_session_invalid" } }), { status: 401 }),
+  });
+  t.after(() => structured.destroy({ closeSession: false }));
+  await assert.rejects(structured.getRun("run"), { code: "browser_session_invalid", status: 401 });
+  const malformed = new AgenstraClient({ integration: "erp", storage: null, getSession: async () => "ticket",
+    fetch: async () => new Response("not-json", { status: 200 }),
+  });
+  t.after(() => malformed.destroy({ closeSession: false }));
+  await assert.rejects(malformed.getRun("run"), SyntaxError);
 });
 test("destroy aborts pending work and stops reconnection", async () => {
   let started;

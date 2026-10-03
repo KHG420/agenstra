@@ -106,6 +106,15 @@ func (s *HTTPServer) worker() {
 	defer close(s.done)
 	ticker := time.NewTicker(s.WorkerInterval)
 	defer ticker.Stop()
+	type result struct {
+		runID string
+		err   error
+	}
+	limit := max(1, s.Host.Settings.MaxConcurrentRuns)
+	finished := make(chan result, limit)
+	active := make(map[string]bool, limit)
+	var workers sync.WaitGroup
+	defer workers.Wait()
 	for {
 		select {
 		case <-s.stop:
@@ -113,13 +122,45 @@ func (s *HTTPServer) worker() {
 		default:
 		}
 		var err error
-		if s.Web != nil {
-			err = s.Web.Tick(s.workerCtx)
+	drain:
+		for {
+			select {
+			case result := <-finished:
+				delete(active, result.runID)
+				err = errors.Join(err, result.err)
+			default:
+				break drain
+			}
 		}
-		if err == nil {
+		var webErr error
+		if s.Web != nil {
+			webErr = s.Web.Tick(s.workerCtx)
+			err = errors.Join(err, webErr)
+		}
+		if webErr == nil {
 			_, scheduleErr := s.Host.DispatchDueSchedules(s.workerCtx, 100)
-			_, runErr := s.Host.WakeDue(s.workerCtx, 100)
-			err = errors.Join(scheduleErr, runErr)
+			err = errors.Join(err, scheduleErr)
+			if available := limit - len(active); available > 0 {
+				runs, storeErr := s.Host.Store.DueRuns(available)
+				err = errors.Join(err, storeErr)
+				for _, run := range runs {
+					if active[run.RunID] {
+						continue
+					}
+					active[run.RunID] = true
+					workers.Go(func() {
+						_, driveErr := s.Host.Drive(s.workerCtx, run.RunID, run.OwnerID)
+						var hostErr *HostError
+						if errors.Is(driveErr, ErrStoreConflict) || errors.Is(driveErr, ErrLeaseLost) || errors.As(driveErr, &hostErr) {
+							driveErr = nil
+						}
+						select {
+						case finished <- result{runID: run.RunID, err: driveErr}:
+						case <-s.workerCtx.Done():
+						}
+					})
+				}
+			}
 		}
 		if s.workerCtx.Err() != nil {
 			return

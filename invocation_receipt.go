@@ -24,6 +24,7 @@ func captureInvocationReceipt(item *Invocation, cap CapabilityDescription, outco
 	r.Reconciled = item.Reconciled
 	if outcome.Fact != nil {
 		r.Status = "succeeded"
+		r.ErrorCode = ""
 		r.FactID = outcome.Fact.FactID
 		sum := sha256.Sum256(result)
 		r.ResultSHA256, r.ResultBytes = hex.EncodeToString(sum[:]), len(result)

@@ -72,15 +72,22 @@ export class AgenstraClient {
       if (body !== undefined) headers["Content-Type"] = "application/json";
       if (browserKey) headers["X-Agenstra-Browser-Key"] = browserKey;
       const response = await this.fetch(this.endpoint + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: aborter.signal, credentials: "same-origin" });
-      const data = await response.json();
-      const code = data.code || data.detail?.code;
-      if (response.status === 401 && retry && code === "unauthorized") {
+      let data;
+      try { data = await response.json(); }
+      catch (error) { if (response.ok) throw error; }
+      if (response.ok) {
+        if (data == null) throw new TypeError("Invalid JSON response");
+        return data;
+      }
+      const rawCode = data && typeof data === "object" ? data.code || data.detail?.code : undefined;
+      const fallbackCode = response.status === 401 ? "unauthorized" : response.status === 403 ? "access_denied" : response.status === 404 ? "not_found" : "request_failed";
+      const code = typeof rawCode === "string" && /^[a-z][a-z0-9_]{0,95}$/.test(rawCode) ? rawCode : fallbackCode;
+      if (response.status === 401 && retry && rawCode === "unauthorized") {
         // A late rejection only invalidates the credential used by this request.
         if (this.token === token) this.token = null;
         return await this.request(path, { method, body, browserKey, retry: false });
       }
-      if (!response.ok) throw new AgenstraError(data.code || data.detail?.code || "request_failed", response.status);
-      return data;
+      throw new AgenstraError(code, response.status);
     } finally { this.aborters.delete(aborter); }
   }
   registerActions(actions) {

@@ -52,6 +52,9 @@ func TestVerifiedReconciliationResumesOriginalRunWithoutReplay(t *testing.T) {
 	if len(state.Facts) != 1 || !state.Pending[0].Reconciled || state.Pending[0].Call.Arguments["id"] != "R-1" {
 		t.Fatal(state)
 	}
+	if state.Pending[0].ErrorCode != nil || state.Pending[0].Receipt.ErrorCode != "" {
+		t.Fatal("verified success retained the previous unknown outcome error")
+	}
 	if _, err = h.Reconcile(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, originalRevision); err != nil || verifications != 1 {
 		t.Fatal("lost ACK reran verifier", err, verifications)
 	}
