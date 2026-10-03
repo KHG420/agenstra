@@ -637,7 +637,12 @@ func openMCPSource(ctx context.Context, source MCPSource, env map[string]string)
 		return nil, nil, errors.New("invalid MCP transport")
 	}
 	initParams := JSON{"protocolVersion": "2025-03-26", "capabilities": JSON{}, "clientInfo": JSON{"name": "agenstra", "version": "1.0.0"}}
-	initialized, err := transport.Request(ctx, "initialize", initParams)
+	// Bound startup exchanges as well as business calls. Keep the subprocess
+	// attached to the caller's context, not these short-lived request contexts.
+	requestTimeout := time.Duration(source.TimeoutSeconds * float64(time.Second))
+	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	initialized, err := transport.Request(requestCtx, "initialize", initParams)
+	cancel()
 	if err != nil {
 		_ = transport.Close()
 		return nil, nil, err
@@ -647,7 +652,10 @@ func openMCPSource(ctx context.Context, source MCPSource, env map[string]string)
 			client.protocol = version
 		}
 	}
-	if err := transport.Notify(ctx, "notifications/initialized", JSON{}); err != nil {
+	requestCtx, cancel = context.WithTimeout(ctx, requestTimeout)
+	err = transport.Notify(requestCtx, "notifications/initialized", JSON{})
+	cancel()
+	if err != nil {
 		_ = transport.Close()
 		return nil, nil, err
 	}
@@ -659,7 +667,9 @@ func openMCPSource(ctx context.Context, source MCPSource, env map[string]string)
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
-		page, e := transport.Request(ctx, "tools/list", params)
+		requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+		page, e := transport.Request(requestCtx, "tools/list", params)
+		cancel()
 		if e != nil {
 			_ = transport.Close()
 			return nil, nil, e
