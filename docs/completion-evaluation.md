@@ -2,6 +2,16 @@
 
 `completed` 表示当前运行的回答已结束。业务动作是否完成，还需要可验证的结果契约；Fact 引用检查只保证引用存在，无法证明自然语言中的每句话正确。
 
+## 写操作后的回答一致性复核
+
+运行出现 `write` 操作结果后，框架在发布最终回答前自动复核一次拟返回的回答。模型上下文的 `action_outcomes` 将每次动作、确定状态和当前结果 Fact 关联起来，区分成功、仅受理、失败、未执行和结果未知，并说明能力的审批要求。复核仍使用本次运行固定的业务决策模型及参数，宿主无需实现文本判断或额外选择模型。
+
+复核只能返回 `final`，不能执行或重新提交业务操作。草稿和复核结果都进入现有决策审计；只有复核结果通过 Fact、业务对象引用和已有 `CompletionValidator` 检查后才发布。写操作之外的只读、计算和对话运行不增加复核请求。正常复核增加一次模型请求；格式错误最多使用现有的一次格式纠正，并始终受轮次、Token、输入上下文、超时和费用统计约束。复核无法完成时，任务保持未完成、草稿不发布，已有业务回执继续保留。
+
+遥测中的 `completion_review` 单独记录这部分请求和用量。标准聊天组件直接显示执行回执；任务或回答生成失败不会把已成功的业务操作显示成未执行。自定义界面可使用已有的 `run.state.runtime.invocation_receipts`，无需解析模型文字。
+
+这是针对执行结果叙述的模型语义复核，并不是自由文本正确性的数学证明；确定的执行状态仍以框架回执为准。它不代替业务专用字段规则。具体问题证据、真实模型回放与边界测试见[动作成功但回答否认执行的修复记录](completion-consistency-findings.md)。
+
 嵌入式宿主可配置 `AgentHost.CompletionValidator`；临时运行可配置 `AgentRuntime.CompletionValidator`。回调在引用检查通过后接收完整 Fact、观察、任务、补充输入及拟返回的回答，应保持只读并响应取消。返回 nil 才会完成；返回 `CompletionValidationError` 会把安全的错误码和明确反馈加入观察，让模型在原轮次预算内修正。其他错误仅暴露 `completion_validation_failed`，不会把内部错误详情发给模型。重启后的宿主应使用相同业务校验配置。
 
 `RequireFactValues` 可检查指定能力的最新 Fact、引用和字段值，例如：
@@ -25,6 +35,14 @@ AGENSTRA_LIVE_EVAL=1 go test -run TestLiveAgentCompletionEvaluation -v
 ```
 
 环境变量使用 `AGENT_MODEL`、`AGENT_MODEL_BASE_URL` 和 `AGENT_MODEL_API_KEY`。评测打印每个任务的结果、工具调用、模型决策数量和耗时；默认 CI 跳过付费模型调用。测试通过代表这些案例通过，不能替代目标场景的成功率、事实一致性和延迟评测。
+
+针对历史错误回答的真实模型回放：
+
+```sh
+AGENSTRA_LIVE_EVAL=1 go test -run TestLiveWriteCompletionConsistencyReplay -v -count=1
+```
+
+它注入当时的错误草稿和合成数据，只让复核请求访问模型；不重新操作抽奖软件。可用 `AGENT_MODEL_API_TYPE`、`AGENT_MODEL_THINKING` 和 `AGENT_MODEL_REASONING_EFFORT` 选择网关参数。测试检查流程和引用，语义结论还需检查打印的完整回答；不能把有效引用当成语义通过。
 
 ## 独立服务的业务成功配置
 

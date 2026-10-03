@@ -431,6 +431,7 @@ func (r *AgentRuntime) contextCandidate(state *RuntimeState) ContextPacket {
 	}
 	packet.MaxModelOutputTokens = r.MaxModelOutputTokens
 	packet.Progress = runProgress(state, r.MaxStagnantRounds)
+	packet.ActionOutcomes = actionOutcomes(state, r.Provider.Capabilities())
 	return packet
 }
 
@@ -481,14 +482,29 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 	}
 	feedback := ""
 	var decision Decision
+	var review *Decision
 	for attempt := 0; attempt < 2; attempt++ {
+		if state.RoundsUsed >= r.MaxModelRounds {
+			state.Status = "failed"
+			state.ErrorCode = strptr("model_round_budget_exhausted")
+			return nil
+		}
 		if r.MaxModelTokens > 0 && state.ModelUsage.BudgetTokens >= r.MaxModelTokens {
 			state.Status = "failed"
 			state.ErrorCode = strptr("model_token_budget_exhausted")
 			return nil
 		}
 		packet := r.contextCandidate(state)
+		packet.CompletionReview = review
 		prompt := r.systemPrompt() + feedback
+		purpose := "decision"
+		if len(packet.ActionOutcomes) > 0 {
+			prompt += "\n" + actionOutcomePrompt
+		}
+		if review != nil {
+			purpose = "completion_review"
+			prompt += "\n" + completionReviewPrompt
+		}
 		if packet.Progress != nil {
 			prompt += "\n" + progressUsagePrompt
 		}
@@ -575,7 +591,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			return nil
 		}
 		state.RoundsUsed++
-		reservation := ModelCallMetrics{Purpose: "decision", Reservation: true, Round: state.RoundsUsed, Attempts: 1, EstimatedInputTokens: int64(len(raw) + len(prompt) + 128), EstimatedOutputTokens: int64(r.MaxModelOutputTokens), ErrorCode: strptr("model_outcome_unknown")}
+		reservation := ModelCallMetrics{Purpose: purpose, Reservation: true, Round: state.RoundsUsed, Attempts: 1, EstimatedInputTokens: int64(len(raw) + len(prompt) + 128), EstimatedOutputTokens: int64(r.MaxModelOutputTokens), ErrorCode: strptr("model_outcome_unknown")}
 		if r.MaxModelTokens > 0 {
 			reservation.EstimatedInputTokens = r.MaxModelTokens - state.ModelUsage.BudgetTokens
 			reservation.EstimatedOutputTokens = 0
@@ -597,7 +613,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		}
 		metrics.FormatRecovery = attempt > 0
 		metrics.Round = state.RoundsUsed
-		metrics.Purpose = "decision"
+		metrics.Purpose = purpose
 		metrics.Reservation = false
 		if metrics.UsageAvailable && state.ContextTelemetry != nil {
 			n := metrics.InputTokens
@@ -619,7 +635,21 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		if err == nil {
 			err = d.Validate()
 		}
+		if err == nil && review != nil && d.Kind != "final" {
+			err = ModelDecisionError{"model_decision_invalid"}
+			state.ModelCalls[callIndex].ErrorCode = strptr("model_decision_invalid")
+			rebuildModelUsage(state)
+		}
 		if err == nil {
+			if review == nil && d.Kind == "final" && len(packet.ActionOutcomes) > 0 {
+				// Save the proposal for audit/checkpointing, but never publish it.
+				// The reviewer has no path to executing another business action.
+				recordDecision(state, d)
+				review = &d
+				feedback = ""
+				attempt = -1
+				continue
+			}
 			decision = d
 			break
 		}
@@ -635,18 +665,15 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			return nil
 		}
 		var oversized DecisionTooManyCallsError
-		if errors.As(err, &oversized) {
+		if review != nil {
+			feedback = "\nYour previous review was invalid. Return exactly one final agenstra.decision.v1 JSON decision; no tools or other decision kinds are allowed during completion review."
+		} else if errors.As(err, &oversized) {
 			feedback = "\nYour previous decision was invalid: tool_batch.calls has at most 4 items. Return one valid agenstra.decision.v1 JSON decision with no more than 4 calls."
 		} else {
 			feedback = "\nYour previous response was not a valid agenstra.decision.v1 JSON decision. Return exactly one valid decision object. Do not put read_skill, inspect_capability, or inspect_fact inside tool_batch.calls."
 		}
 	}
-	raw, _ := CanonicalJSON(decision)
-	var stored JSON
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
-	decoder.UseNumber()
-	_ = decoder.Decode(&stored)
-	state.Decisions = append(state.Decisions, stored)
+	recordDecision(state, decision)
 	facts := map[string]Fact{}
 	for _, f := range state.Facts {
 		facts[f.FactID] = f
@@ -852,6 +879,15 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 	}
 	return nil
 }
+func recordDecision(state *RuntimeState, decision Decision) {
+	raw, _ := CanonicalJSON(decision)
+	var stored JSON
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber()
+	_ = decoder.Decode(&stored)
+	state.Decisions = append(state.Decisions, stored)
+}
+
 func (r *AgentRuntime) Result(state *RuntimeState) RunResult {
 	status := state.Status
 	if status == "queued" || status == "running" {

@@ -3,6 +3,24 @@ const labels = {
   "zh-CN": { title: "Agenstra 助手", subtitle: "查询数据、执行操作，并同步当前页面", chatOnly: "通过已授权的系统能力完成任务", empty: "从一个具体任务开始", hint: "描述要查询的信息或要执行的操作。", placeholder: "描述你想完成的操作…", choose: "请选择…", send: "发送", queue: "添加任务", stop: "停止任务", approve: "批准操作", reject: "拒绝操作", approval: "执行前请核对操作和参数", input: "请补充以下信息", invalidInput: "请按提示填写有效信息。", invalidChoice: "请选择列表中的一个选项。", invalidDate: "请输入有效日期。", unknown: "操作结果尚未确认。核对实际页面后再继续；也可以停止此任务。", unknownStopped: "操作结果仍待核对。核对只更新结果，任务仍保持停止。", reconcile: "读取已确认的回执", connected: "已连接", disconnected: "连接中断，正在重试", loading: "正在连接系统…", error: "请求未完成，请检查连接或重试。", retry: "重试发送", statuses: { queued: "等待执行", creating: "准备任务", active: "正在执行", cancelling: "正在停止", completed: "已完成", failed: "未完成", cancelled: "已停止", needs_input: "等待补充信息", needs_approval: "等待确认", waiting: "等待操作结果", needs_reconciliation: "等待核对", needs_authorization: "需要恢复授权" } },
   en: { title: "Agenstra assistant", subtitle: "Query data, take action, and update this page", chatOnly: "Complete tasks using authorized system capabilities", empty: "Start with a specific task", hint: "Describe the information you need or the action you want to take.", placeholder: "Describe what you want to do…", choose: "Choose…", send: "Send", queue: "Queue task", stop: "Stop task", approve: "Approve action", reject: "Reject action", approval: "Review the action and arguments before proceeding", input: "More information is needed", invalidInput: "Enter a value that matches the request.", invalidChoice: "Choose an option from the list.", invalidDate: "Enter a valid date.", unknown: "The action outcome is unconfirmed. Check the actual page before continuing, or stop this task.", unknownStopped: "The operation result still needs verification. Verification only updates the result; this task stays stopped.", reconcile: "Read the verified receipt", connected: "Connected", disconnected: "Disconnected. Retrying…", loading: "Connecting to your system…", error: "The request did not complete. Check the connection or retry.", retry: "Retry send", statuses: { queued: "Queued", creating: "Preparing", active: "Working", cancelling: "Stopping", completed: "Completed", failed: "Incomplete", cancelled: "Stopped", needs_input: "Waiting for input", needs_approval: "Waiting for approval", waiting: "Waiting for the result", needs_reconciliation: "Needs review", needs_authorization: "Authorization needed" } }
 };
+const outcomeLabels = {
+  "zh-CN": {
+    succeeded: capability => `业务操作已成功：${capability}`,
+    accepted: capability => `业务操作已受理，最终结果尚未确认：${capability}`,
+    failed: capability => `业务操作失败：${capability}`,
+    unknown: capability => `业务操作结果尚未确认：${capability}`,
+    unavailable: "执行回执已保留，但结果详情未能保存。请核对业务系统中的实际结果。",
+    incomplete: "任务未完成。请以上方回执判断操作结果，避免重复提交已成功的操作。"
+  },
+  en: {
+    succeeded: capability => `Action succeeded: ${capability}`,
+    accepted: capability => `Action accepted; final outcome unconfirmed: ${capability}`,
+    failed: capability => `Action failed: ${capability}`,
+    unknown: capability => `Action outcome unconfirmed: ${capability}`,
+    unavailable: "The execution receipt was retained, but result details could not be saved. Check the actual result in your system.",
+    incomplete: "The task is incomplete. Check the action receipts above and avoid resubmitting actions that succeeded."
+  }
+};
 const style = `
 :host{--agenstra-accent:#116b64;--agenstra-text:#18313b;--agenstra-muted:#51636a;--agenstra-surface:#fff;--agenstra-ground:#f4f6f3;--agenstra-line:#d8e0dc;--agenstra-danger:#a5352c;display:block;height:var(--agenstra-height,560px);min-height:320px;color:var(--agenstra-text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;color-scheme:light}
 *{box-sizing:border-box}button,textarea,select,input{font:inherit}button{cursor:pointer}button:disabled{cursor:wait;opacity:.65}button:focus-visible,textarea:focus-visible,select:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid var(--agenstra-accent);outline-offset:3px}::selection{background:var(--agenstra-accent);color:var(--agenstra-surface)}
@@ -11,7 +29,7 @@ header{padding:20px 22px 17px;border-bottom:1px solid var(--agenstra-line)}h2{ma
 .log{flex:1;min-height:0;overflow:auto;padding:22px;scrollbar-color:var(--agenstra-line) transparent;scrollbar-width:thin}.empty{padding:34px 0}.empty h3{margin:0 0 8px;font-size:1.18rem;font-weight:600}.empty p{max-width:34ch;margin:0;color:var(--agenstra-muted);font-size:.9rem}.turn+.turn{margin-top:25px;padding-top:24px;border-top:1px solid var(--agenstra-line)}
 .user{margin:0 0 13px 26px;padding:11px 14px;border-radius:10px;background:var(--agenstra-ground);white-space:pre-wrap;overflow-wrap:anywhere}.answer{white-space:pre-wrap;overflow-wrap:anywhere;max-width:70ch}.answer p{margin:0 0 10px}.answer ul,.answer ol{margin:8px 0 12px;padding-inline-start:24px}.answer li{white-space:normal}.answer code{font:.86em ui-monospace,SFMono-Regular,Menlo,monospace}.answer-table{max-width:100%;overflow:auto;margin:12px 0;white-space:normal}.answer table{border-collapse:collapse;font-size:.9rem;font-variant-numeric:tabular-nums}.answer th,.answer td{padding:8px 12px;border:1px solid var(--agenstra-line);text-align:start;min-width:8ch}.answer th{background:var(--agenstra-ground);font-weight:600}.answer-table:focus-visible{outline:3px solid var(--agenstra-accent);outline-offset:3px}.answer pre{white-space:pre;overflow:auto;padding:12px;background:var(--agenstra-ground);border-radius:8px;font: .82rem/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}.status{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:9px 0;color:var(--agenstra-muted);font-size:.78rem}.status[data-state=failed]{color:var(--agenstra-danger)}
 button{border:1px solid var(--agenstra-line);border-radius:7px;background:var(--agenstra-surface);color:var(--agenstra-text);padding:6px 11px;font-size:.82rem;transition:background 140ms ease-out}button:hover{background:var(--agenstra-ground)}.primary{background:var(--agenstra-accent);border-color:var(--agenstra-accent);color:var(--agenstra-surface)}.primary:hover{filter:brightness(.94)}.text-button{padding:2px 0;border:0;color:var(--agenstra-accent);background:transparent;font-size:.78rem}.text-button:hover{text-decoration:underline;text-underline-offset:3px;background:transparent}
-.request{padding-top:8px;margin-top:12px}.request p{margin:0 0 10px}.request details{margin:12px 0}.request summary{cursor:pointer;overflow-wrap:anywhere;font-weight:600;font-size:.86rem}.request pre{max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;background:var(--agenstra-ground);font:.78rem/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;border-radius:8px}.actions{display:flex;gap:8px;flex-wrap:wrap}.notice{color:var(--agenstra-muted);font-size:.86rem}
+.request{padding-top:8px;margin-top:12px}.request p{margin:0 0 10px}.request details{margin:12px 0}.request summary{cursor:pointer;overflow-wrap:anywhere;font-weight:600;font-size:.86rem}.request pre{max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;background:var(--agenstra-ground);font:.78rem/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;border-radius:8px}.actions{display:flex;gap:8px;flex-wrap:wrap}.notice{color:var(--agenstra-muted);font-size:.86rem}.action-outcome{color:var(--agenstra-text);overflow-wrap:anywhere}
 form{padding:15px 18px 17px;border-top:1px solid var(--agenstra-line)}label{display:block;margin-bottom:7px;color:var(--agenstra-muted);font-size:.78rem}.composer{display:flex;gap:10px;align-items:flex-end}textarea,.composer select,.composer input[type=date]{flex:1;min-width:0;min-height:40px;border:1px solid var(--agenstra-line);border-radius:8px;padding:10px 12px;background:var(--agenstra-surface);color:var(--agenstra-text)}textarea{min-height:60px;max-height:160px;resize:vertical;caret-color:var(--agenstra-accent)}textarea::placeholder{color:var(--agenstra-muted)}.send{min-height:40px}.feedback{margin:0;padding:0 18px;color:var(--agenstra-danger);font-size:.82rem;overflow-wrap:anywhere}.feedback:not(:empty){padding-top:10px}
 @media(prefers-reduced-motion:reduce){button{transition:none}}
 `;
@@ -223,12 +241,24 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
           }
         }
       }
+      // Execution receipts remain authoritative even if final answer generation
+      // fails or the task stops. A queued submission is never rendered as success.
+      const receipts = new Map((runtime?.invocation_receipts || []).map(receipt => [receipt.invocation_id, receipt]));
+      for (const item of runtime?.pending || []) if (item.receipt) receipts.set(item.invocation_id, item.receipt);
+      const outcomes = outcomeLabels[this.getAttribute("lang")] || outcomeLabels["zh-CN"];
+      for (const receipt of receipts.values()) {
+        if (receipt.effect !== "write") continue;
+        const p = document.createElement("p");p.className = "notice action-outcome";
+        const describe = typeof outcomes[receipt.status] === "function" ? outcomes[receipt.status] : outcomes.unknown;
+        p.textContent = describe(receipt.capability);turn.append(p);
+        if (receipt.result_error_code) { const detail = document.createElement("p");detail.className = "notice";detail.textContent = outcomes.unavailable;turn.append(detail); }
+      }
       if (message.answer_markdown) { const answer = document.createElement("div");answer.className = "answer";appendAnswer(answer, message.answer_markdown);turn.append(answer); }
       for (const ref of message.result_refs || runtime?.result_refs || []) {
         const p = document.createElement("p");p.className = "notice";
         p.textContent = [ref.label || ref.entity_type || (this.getAttribute("lang") === "en" ? "Result" : "业务对象"), ref.id].join(": ");turn.append(p);
       }
-      if (message.error_code) { const p = document.createElement("p");p.className = "notice";p.textContent = t.error + " (" + message.error_code + ")";turn.append(p); }
+      if (message.error_code) { const p = document.createElement("p");p.className = "notice";p.textContent = (Array.from(receipts.values()).some(receipt => receipt.effect === "write") ? outcomes.incomplete : t.error) + " (" + message.error_code + ")";turn.append(p); }
       if (state === "needs_input") {
         this.awaitingInput = { run, runtime, messageID: message.id };
         const p = document.createElement("p");p.id = "input-prompt-" + message.id;p.className = "notice";p.textContent = runtime.input_prompt;turn.append(p);

@@ -110,7 +110,7 @@ export interface ContextTelemetry {
 export interface CounterBudget { used: number; limit: number; remaining: number }
 export interface ModelUsage { requests: number; input_tokens: number; output_tokens: number; budget_tokens: number; estimated_requests: number; estimated_cost_usd: number; cost_available: boolean; cached_input_tokens?: number; reasoning_output_tokens?: number; cached_input_requests?: number; reasoning_output_requests?: number; priced_requests?: number; reported_requests?: number; format_recovery_requests?: number; elapsed_ms?: number; invalid_responses?: number; retry_attempts?: number }
 export interface ModelCallMetrics {
- round: number; purpose?: "decision" | "memory_extraction"; source_id?: string; reservation?: boolean;
+ round: number; purpose?: "decision" | "completion_review" | "memory_extraction"; source_id?: string; reservation?: boolean;
  profile?: string; model?: string; response_model?: string; api_type?: string; thinking?: string; reasoning_effort?: string;
  cached_input_tokens?: number; reasoning_output_tokens?: number; format_error?: string; format_recovery?: boolean;
  attempts: number; input_tokens: number; output_tokens: number; usage_available: boolean;
