@@ -130,7 +130,7 @@ test("recovery fences late poll dispatches and coalesces concurrent recovery and
   assert.equal(recoveries, 1); assert.equal(executions, 0); assert.equal(c.browser.id, "new-tab");
 });
 
-test("a late observation cannot overwrite the recovered connection", async t => {
+test("recovery drains queued observations without accepting their stale response", async t => {
   let releaseOld, entered;
   const delayed = new Promise(r => { releaseOld = r; }), reading = new Promise(r => { entered = r; });
   const c = bridge(t, async path => {
@@ -141,7 +141,8 @@ test("a late observation cannot overwrite the recovered connection", async t => 
   });
   c.browser = old;
   const pending = c.publishPageObservation(); await reading;
-  await c.recoverBrowser(); releaseOld(); await pending;
+  const recovering = c.recoverBrowser();
+  releaseOld(); await Promise.all([recovering, pending]);
   assert.equal(c.browser.id, "new-tab"); assert.equal(c.browser.key, "new-key");
 });
 

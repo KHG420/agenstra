@@ -174,15 +174,20 @@ export class AgenstraClient {
   updatePageObservation(observation) {
     // Page observations are tool data, never the conversation's agent context.
     // Serialize updates so page revisions cannot race in one tab.
-    this.pageObservation = structuredClone(observation);
+    this.pendingPageObservation = structuredClone(observation);
     if (!this.browser) return Promise.resolve();
-    this.observationChain = this.observationChain.catch(() => {}).then(() => this.publishPageObservation());
+    return this.publishPageObservation();
+  }
+  publishPageObservation() {
+    this.observationChain = this.observationChain.catch(() => {}).then(() => this.publishPageObservationOnce());
     return this.observationChain;
   }
-  async publishPageObservation() {
+  async publishPageObservationOnce() {
     if (!this.browser) return;
     const browser = this.browser, epoch = this.browserEpoch;
-    const observation = this.options.getPageObservation ? await this.options.getPageObservation() : this.pageObservation;
+    // Freeze the bytes to publish before awaiting the server. A host may return
+    // a live state object, and an attempted upload is not a confirmed snapshot.
+    const observation = structuredClone(this.options.getPageObservation ? await this.options.getPageObservation() : (this.pendingPageObservation ?? this.pageObservation));
     const data = await this.request("/browser/v1/sessions/" + browser.id + "/observation", { method: "POST", browserKey: browser.key, body: { generation: browser.generation, revision: browser.context_revision, observation } });
     if (this.closed || epoch !== this.browserEpoch) return;
     this.browser = { ...data.session, key: browser.key };
@@ -193,10 +198,8 @@ export class AgenstraClient {
     if (this.closed) return;
     const epoch = this.browserEpoch;
     try {
-      if (this.options.getPageObservation) {
-        const latest = await this.options.getPageObservation();
-        if (JSON.stringify(latest) !== JSON.stringify(this.pageObservation)) await this.updatePageObservation(latest);
-      }
+      const latest = this.options.getPageObservation ? await this.options.getPageObservation() : (this.pendingPageObservation ?? this.pageObservation);
+      if (JSON.stringify(latest) !== JSON.stringify(this.pageObservation)) await this.updatePageObservation(latest);
       if (epoch !== this.browserEpoch) return;
       await this.flushReceipts();
       if (epoch !== this.browserEpoch) return;
@@ -242,7 +245,7 @@ export class AgenstraClient {
       receipt.status = "succeeded"; receipt.result = result ?? {};
       this.save("receipts", this.receipts);
       try {
-        const latest = this.options.getPageObservation ? await this.options.getPageObservation() : this.pageObservation;
+        const latest = this.options.getPageObservation ? await this.options.getPageObservation() : (this.pendingPageObservation ?? this.pageObservation);
         if (JSON.stringify(latest) !== JSON.stringify(this.pageObservation)) await this.updatePageObservation(latest);
       } catch (error) { this.emit("error", error); }
       await this.flushReceipts();

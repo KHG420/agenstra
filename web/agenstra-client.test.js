@@ -9,6 +9,87 @@ function client(fetch, store = storage()) {
   c.browser = { id: "tab-1", generation: 1, key: "tab-key", context_revision: 1 };
   return c;
 }
+test("heartbeat retries a page observation after its upload fails", async t => {
+  let uploads = 0, polls = 0;
+  const c = client(async (path, options) => {
+    if (path.endsWith("/observation")) {
+      uploads++;
+      assert.deepEqual(JSON.parse(options.body).observation, { page: "orders" });
+      if (uploads === 1) throw new Error("observation upload lost");
+      return response({ session: { id: "tab-1", generation: 1, context_revision: 2 } });
+    }
+    assert.ok(path.endsWith("/poll"));polls++;
+    return response({ commands: [] });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.options.getPageObservation = () => ({ page: "orders" });
+  c.pageObservation = { page: "home" };
+  await c.pollBrowser();clearTimeout(c.browserTimer);
+  assert.equal(polls, 0);
+  await c.pollBrowser();
+  assert.equal(uploads, 2);
+  assert.equal(polls, 1);
+  assert.deepEqual(c.pageObservation, { page: "orders" });
+});
+test("only the uploaded snapshot becomes the confirmed page observation", async t => {
+  const page = { page: "home" };let finish, entered;
+  const uploading = new Promise(resolve => { entered = resolve; });
+  const pending = new Promise(resolve => { finish = resolve; });
+  const uploads = [];
+  const c = client(async (path, options) => {
+    if (path.endsWith("/observation")) {
+      uploads.push(JSON.parse(options.body).observation);
+      if (uploads.length === 1) { entered();await pending; }
+      return response({ session: { id: "tab-1", generation: 1, context_revision: uploads.length + 1 } });
+    }
+    return response({ commands: [] });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.options.getPageObservation = () => page;
+  const first = c.publishPageObservation();await uploading;
+  page.page = "orders";finish();await first;
+  await c.pollBrowser();
+  assert.deepEqual(uploads, [{ page: "home" }, { page: "orders" }]);
+  assert.deepEqual(c.pageObservation, { page: "orders" });
+});
+test("explicit page updates retry through heartbeat without a page getter", async t => {
+  let uploads = 0;
+  const c = client(async (path, options) => {
+    if (path.endsWith("/observation")) {
+      uploads++;
+      assert.deepEqual(JSON.parse(options.body).observation, { page: "orders" });
+      if (uploads === 1) throw new Error("upload interrupted");
+      return response({ session: { id: "tab-1", generation: 1, context_revision: 2 } });
+    }
+    return response({ commands: [] });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.pageObservation = { page: "home" };
+  const page = { page: "orders" };
+  await assert.rejects(c.updatePageObservation(page));
+  page.page = "mutated after submission";
+  await c.pollBrowser();
+  assert.equal(uploads, 2);
+  assert.deepEqual(c.pageObservation, { page: "orders" });
+});
+test("initial publication and explicit updates share the page revision queue", async t => {
+  let finish, entered, revision = 1;
+  const uploading = new Promise(resolve => { entered = resolve; });
+  const pending = new Promise(resolve => { finish = resolve; });
+  const uploads = [];
+  const c = client(async (_path, options) => {
+    const body = JSON.parse(options.body);uploads.push(body);
+    if (uploads.length === 1) { entered();await pending; }
+    if (body.revision !== revision) return response({ code: "revision_conflict" }, 409);
+    return response({ session: { id: "tab-1", generation: 1, context_revision: ++revision } });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  const first = c.publishPageObservation();await uploading;
+  const second = c.updatePageObservation({ page: "orders" });
+  finish();await Promise.all([first, second]);
+  assert.deepEqual(uploads.map(item => item.revision), [1, 2]);
+  assert.deepEqual(c.pageObservation, { page: "orders" });
+});
 test("lost ACK retries the original receipt without rerunning a handler", async () => {
   let calls = 0, acknowledgements = 0;
   const c = client(async (path, options) => {
