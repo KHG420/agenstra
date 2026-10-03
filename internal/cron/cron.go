@@ -1,4 +1,5 @@
-package agenstra
+// Package cron implements numeric five-field schedules and IANA calendar calculations.
+package cron
 
 import (
 	"fmt"
@@ -8,15 +9,16 @@ import (
 	_ "time/tzdata" // Keep IANA zones available in the standalone server/container.
 )
 
-// cronRule implements numeric, five-field cron: minute hour day month weekday.
+// Rule implements numeric, five-field cron: minute hour day month weekday.
 // Day-of-month and weekday use the conventional OR rule when both are restricted.
-type cronRule struct {
+type Rule struct {
 	fields             [5]uint64
 	dayAny, weekdayAny bool
 	location           *time.Location
 }
 
-func parseCron(expression, timezone string) (*cronRule, error) {
+// Parse validates a numeric five-field expression and an explicit IANA timezone.
+func Parse(expression, timezone string) (*Rule, error) {
 	parts := strings.Fields(expression)
 	if len(parts) != 5 {
 		return nil, fmt.Errorf("cron requires five fields")
@@ -25,7 +27,7 @@ func parseCron(expression, timezone string) (*cronRule, error) {
 	if err != nil || timezone == "Local" || timezone == "" {
 		return nil, fmt.Errorf("cron requires an IANA timezone")
 	}
-	rule := &cronRule{location: loc}
+	rule := &Rule{location: loc}
 	minima := [5]int{0, 0, 1, 1, 0}
 	maxima := [5]int{59, 23, 31, 12, 7}
 	for i, part := range parts {
@@ -117,8 +119,8 @@ func cronField(raw string, minimum, maximum int) (uint64, bool, error) {
 	return mask, any, nil
 }
 
-func (r *cronRule) has(field, value int) bool { return r.fields[field]&(uint64(1)<<value) != 0 }
-func (r *cronRule) matchesDay(t time.Time) bool {
+func (r *Rule) has(field, value int) bool { return r.fields[field]&(uint64(1)<<value) != 0 }
+func (r *Rule) matchesDay(t time.Time) bool {
 	day, weekday := r.has(2, t.Day()), r.has(4, int(t.Weekday()))
 	if r.dayAny || r.weekdayAny {
 		return day && weekday
@@ -126,7 +128,9 @@ func (r *cronRule) matchesDay(t time.Time) bool {
 	return day || weekday
 }
 
-func (r *cronRule) next(after time.Time) (time.Time, error) {
+// Next returns the first scheduled minute strictly after the supplied time.
+// DST repeated minutes are both eligible; nonexistent minutes are skipped.
+func (r *Rule) Next(after time.Time) (time.Time, error) {
 	// Advance in absolute time so both occurrences of a repeated local minute
 	// are eligible at a DST fallback; nonexistent local minutes are skipped.
 	end := after.AddDate(8, 0, 0)

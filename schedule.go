@@ -6,6 +6,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/KHG420/agenstra/internal/cron"
 )
 
 // ScheduleSpec defines either an absolute Unix timestamp, an interval in
@@ -91,11 +93,11 @@ func (r ScheduleRequest) normalized(now float64) (ScheduleRequest, float64, erro
 		if spec.Timezone == "" {
 			spec.Timezone = "UTC"
 		}
-		rule, err := parseCron(spec.Cron, spec.Timezone)
+		rule, err := cron.Parse(spec.Cron, spec.Timezone)
 		if err != nil {
 			return r, 0, hostError("schedule_invalid")
 		}
-		next, err := rule.next(scheduleTime(now))
+		next, err := rule.Next(scheduleTime(now))
 		if err != nil {
 			return r, 0, hostError("schedule_invalid")
 		}
@@ -119,11 +121,11 @@ func nextSchedule(spec ScheduleSpec, due, now float64) (*float64, error) {
 		interval := float64(spec.IntervalSeconds)
 		next = due + (math.Floor((now-due)/interval)+1)*interval
 	case "cron":
-		rule, err := parseCron(spec.Cron, spec.Timezone)
+		rule, err := cron.Parse(spec.Cron, spec.Timezone)
 		if err != nil {
 			return nil, hostError("schedule_invalid")
 		}
-		t, err := rule.next(scheduleTime(now))
+		t, err := rule.Next(scheduleTime(now))
 		if err != nil {
 			return nil, hostError("schedule_invalid")
 		}

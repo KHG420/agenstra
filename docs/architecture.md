@@ -41,6 +41,9 @@ flowchart TB
 | --- | --- | --- |
 | 根包 | 公开类型与接入 API、执行与持久化、能力契约和授权、受信任连接配置、协议初始化与工具目录。 | 下列内部模块。 |
 | `internal/jsonvalue/` | 规范 JSON 编码与浮点格式、保留 Go 类型的边界复制、严格 JSON 解码和数值索引。 | 仅标准库。 |
+| `internal/schema/` | 本地 JSON Schema 编译、REST 方言约束、有限 JSON 值的规范化校验。 | `internal/jsonvalue` 与已有 JSON Schema 依赖。 |
+| `internal/cron/` | 五字段数字 Cron 解析、IANA 时区、日历和 DST 下的下一次触发时间计算。 | 仅标准库。 |
+| `internal/packfiles/` | 清单中的技能路径、发布内容摘要、不可变发布目录的文件类型与完整性核验。 | `internal/jsonvalue` 与标准库文件 API。 |
 | `internal/mcptransport/` | stdio 进程及管道、HTTP JSON-RPC 与 SSE、请求串行化与取消、会话清理。 | `internal/jsonvalue`。 |
 | `internal/openapi/` | OpenAPI 本地引用、3.0/3.1 schema 转换、选定 operation 的 REST 清单草稿生成。 | `internal/jsonvalue`。 |
 | `cmd/`、`examples/` | 命令接线与最小接入演示。 | 根包。 |
@@ -48,7 +51,9 @@ flowchart TB
 
 内部模块不得导入根包，也不读取 Host、SQLite 或授权状态。根包中的 `CanonicalJSON`、`ImportOpenAPI` 和 `ImportOpenAPIDocument` 保留公开入口，调用对应内部实现；宿主的 import、参数、返回类型和部署配置保持一致。MCP 的清单核验、凭据引用解析、初始化、工具契约固定和能力结果仍由根包负责，传输模块只处理连接与协议交换。
 
-纯 JSON 和传输测试放在所属内部包；公开入口、Provider、Host 和真实回执语义的集成测试留在根包。`make check` 的 `./...` 检查同时覆盖根包和内部模块。Host、Runtime、Store 共同拥有持久执行状态，后续拆分必须先厘清状态所有权，不能仅按文件名搬入子目录。
+Schema 校验只处理契约，不判断 grants、审批、原调用身份或业务终态。Cron 模块只计算时间；任务归属、取消、派发与 SQLite 事务仍由根包管理。发布文件模块不读注册表数据库；根包负责版本唯一性、发布事务与启用状态，并把内部文件错误映射为现有管理错误码。发布的中间目录可在失败后经完整内容核验重用，不允许因此覆盖或删除任意已有路径。
+
+纯 JSON、Schema、Cron、发布文件和传输测试放在所属内部包；公开入口、Provider、Host 和真实回执语义的集成测试留在根包。`make check` 的 `./...` 检查同时覆盖根包和内部模块。Host、Runtime、Store 共同拥有持久执行状态，后续拆分必须先厘清状态所有权，不能仅按文件名搬入子目录。
 
 ## 2. ReAct 决策循环
 

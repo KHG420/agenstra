@@ -7,14 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 	"time"
+
+	"github.com/KHG420/agenstra/internal/packfiles"
 )
 
 var registryID = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,127}$`)
@@ -94,54 +94,17 @@ func (r *CapabilityRegistry) Close() error {
 	return nil
 }
 func registryCanonical(v any) ([]byte, error) { return CanonicalJSON(v) }
-func registryHash(v any) (string, error) {
-	b, e := registryCanonical(v)
-	if e != nil {
-		return "", e
-	}
-	h := sha256.Sum256(b)
-	return hex.EncodeToString(h[:]), nil
-}
+func registryHash(v any) (string, error)      { return packfiles.Hash(v) }
 func registrySkillEntries(manifest map[string]any) (map[string]string, error) {
-	raw, ok := manifest["skills"]
-	if !ok {
-		return map[string]string{}, nil
+	entries, err := packfiles.SkillEntries(manifest)
+	return entries, registryFileError(err)
+}
+func registryFileError(err error) error {
+	var fileErr *packfiles.Error
+	if errors.As(err, &fileErr) {
+		return registryError(fileErr.Code)
 	}
-	items, ok := raw.([]any)
-	if !ok {
-		return nil, registryError("invalid_skills")
-	}
-	out := map[string]string{}
-	for _, v := range items {
-		item, ok := v.(map[string]any)
-		if !ok {
-			return nil, registryError("invalid_skills")
-		}
-		p, ok := item["path"].(string)
-		if !ok {
-			return nil, registryError("invalid_skills")
-		}
-		if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, `\`) || strings.HasPrefix(p, "pack.json/") || p == "pack.json" {
-			return nil, registryError("invalid_skill_path")
-		}
-		for _, part := range strings.Split(p, "/") {
-			if part == "" || part == "." || part == ".." {
-				return nil, registryError("invalid_skill_path")
-			}
-		}
-		if _, ok := out[p]; ok {
-			return nil, registryError("duplicate_skill_path")
-		}
-		out[p], _ = item["sha256"].(string)
-	}
-	for p := range out {
-		for q := range out {
-			if p != q && strings.HasPrefix(q, p+"/") {
-				return nil, registryError("skill_path_conflict")
-			}
-		}
-	}
-	return out, nil
+	return err
 }
 func registrySummary(manifest map[string]any) ([]map[string]string, error) {
 	schema, _ := manifest["schema"].(string)
@@ -365,103 +328,8 @@ func (r *CapabilityRegistry) ReleasePath(packID, digest string) (string, error) 
 }
 
 func (r *CapabilityRegistry) verifyReleaseFiles(packID, digest, version, mj string) (string, error) {
-	dir := filepath.Join(r.PackageDir, packID, digest)
-	path := filepath.Join(dir, "pack.json")
-	for _, p := range []string{filepath.Join(r.PackageDir, packID), dir} {
-		info, err := os.Lstat(p)
-		if err != nil || !info.IsDir() {
-			return "", registryError("release_tampered")
-		}
-	}
-	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
-		return "", registryError("release_tampered")
-	}
-	mb, e := os.ReadFile(path)
-	if e != nil {
-		return "", registryError("release_tampered")
-	}
-	if !json.Valid(mb) || !json.Valid([]byte(mj)) {
-		return "", registryError("release_tampered")
-	}
-	var manifest, stored map[string]any
-	manifestDecoder := json.NewDecoder(strings.NewReader(string(mb)))
-	manifestDecoder.UseNumber()
-	storedDecoder := json.NewDecoder(strings.NewReader(mj))
-	storedDecoder.UseNumber()
-	if manifestDecoder.Decode(&manifest) != nil || storedDecoder.Decode(&stored) != nil {
-		return "", registryError("release_tampered")
-	}
-	b1, err := registryCanonical(manifest)
-	if err != nil {
-		return "", registryError("release_tampered")
-	}
-	b2, err := registryCanonical(stored)
-	if err != nil {
-		return "", registryError("release_tampered")
-	}
-	if string(b1) != string(b2) {
-		return "", registryError("release_tampered")
-	}
-	entries, e := registrySkillEntries(manifest)
-	if e != nil {
-		return "", registryError("release_tampered")
-	}
-	allowed := map[string]bool{"pack.json": true}
-	for p := range entries {
-		allowed[p] = true
-		parts := strings.Split(p, "/")
-		for i := 1; i < len(parts); i++ {
-			allowed[strings.Join(parts[:i], "/")] = true
-		}
-	}
-	// Check entry types before reading skills, so recovery does not follow
-	// symlinks or read special files from an uncommitted directory.
-	e = filepath.WalkDir(dir, func(p string, d fs.DirEntry, e error) error {
-		if e != nil {
-			return e
-		}
-		if p == dir {
-			return nil
-		}
-		rel, err := filepath.Rel(dir, p)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		_, file := entries[rel]
-		file = file || rel == "pack.json"
-		if !allowed[rel] || (file && !info.Mode().IsRegular()) || (!file && !info.IsDir()) {
-			return registryError("release_tampered")
-		}
-		return nil
-	})
-	if e != nil {
-		return "", registryError("release_tampered")
-	}
-	skills := map[string]string{}
-	for p, want := range entries {
-		data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(p)))
-		if err != nil {
-			return "", registryError("release_tampered")
-		}
-		hash := sha256.Sum256(data)
-		if hex.EncodeToString(hash[:]) != want {
-			return "", registryError("release_tampered")
-		}
-		skills[p] = string(data)
-	}
-	actual, err := registryHash(map[string]any{"pack_id": packID, "version": version, "manifest": manifest, "skills": skills})
-	if err != nil {
-		return "", registryError("release_tampered")
-	}
-	if actual != digest {
-		return "", registryError("release_tampered")
-	}
-	return path, nil
+	path, err := packfiles.Verify(r.PackageDir, packID, digest, version, mj)
+	return path, registryFileError(err)
 }
 
 // Activate atomically selects a release after validating enabled bindings and revision.

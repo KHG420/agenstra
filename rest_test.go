@@ -106,27 +106,6 @@ func TestLegacyRESTOptionalNullAndOutputFiltering(t *testing.T) {
 	}
 }
 
-func TestRESTSchemaChecksOnlySchemaPositions(t *testing.T) {
-	literal := JSON{"$ref": "provider-data", "$id": "provider-id", "$schema": "provider-metadata"}
-	schema := JSON{"type": "object", "properties": JSON{
-		"$ref":     JSON{"type": "string"},
-		"metadata": JSON{"enum": []any{literal}, "default": literal},
-	}}
-	if _, err := validateLocalSchema(schema, true); err != nil {
-		t.Fatalf("literal JSON treated as a schema instruction: %v", err)
-	}
-	for _, nested := range []JSON{
-		{"properties": JSON{"item": JSON{"$ref": "https://external.invalid/schema"}}},
-		{"items": JSON{"$ref": "https://external.invalid/schema"}},
-		{"allOf": []any{JSON{"$ref": "https://external.invalid/schema"}}},
-		{"additionalProperties": JSON{"$id": "https://external.invalid/schema"}},
-	} {
-		if _, err := validateLocalSchema(nested, true); err == nil {
-			t.Fatalf("unsafe nested schema accepted: %v", nested)
-		}
-	}
-}
-
 func TestRESTExplicitResponseNormalizationAndBusinessFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
