@@ -21,7 +21,10 @@ func uncertainRun(t *testing.T) (*AgentHost, *hostProvider, StoredRun, Invocatio
 	if err != nil || run.Status != "needs_reconciliation" {
 		t.Fatal(run.Status, err)
 	}
-	state, _ := h.restore(run)
+	state, callErr := h.restore(run)
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	return h, p, run, state.Pending[0]
 }
 
@@ -42,7 +45,10 @@ func TestVerifiedReconciliationResumesOriginalRunWithoutReplay(t *testing.T) {
 	if err != nil || run.Status != "queued" || p.calls != 1 {
 		t.Fatal(run.Status, err, p.calls)
 	}
-	state, _ := h.restore(run)
+	state, callErr2 := h.restore(run)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	if len(state.Facts) != 1 || !state.Pending[0].Reconciled || state.Pending[0].Call.Arguments["id"] != "R-1" {
 		t.Fatal(state)
 	}
@@ -67,7 +73,10 @@ func TestVerifiedReconciliationResumesOriginalRunWithoutReplay(t *testing.T) {
 	if _, err = h.Reconcile(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, originalRevision); err != nil {
 		t.Fatal("retry after original run completed", err)
 	}
-	events, _ := h.Store.ListEvents(run.RunID, "alice", 0, 100)
+	events, callErr3 := h.Store.ListEvents(run.RunID, "alice", 0, 100)
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	found := false
 	for _, event := range events {
 		if event["event"].(JSON)["kind"] == "invocation_reconciled" {
@@ -102,8 +111,14 @@ func TestReconciliationRejectsStaleForgedAndUnavailableResults(t *testing.T) {
 			t.Fatal("unverified outcome accepted", result)
 		}
 	}
-	current, _ := h.Store.GetRun(run.RunID, "alice")
-	state, _ := h.restore(current)
+	current, callErr4 := h.Store.GetRun(run.RunID, "alice")
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
+	state, callErr5 := h.restore(current)
+	if callErr5 != nil {
+		t.Error(callErr5)
+	}
 	if current.Status != "needs_reconciliation" || current.Revision != run.Revision || len(state.Facts) != 0 || p.calls != 1 || state.Pending[0].Reconciled {
 		t.Fatal("failed verification changed state", current, state, p.calls)
 	}
@@ -143,8 +158,14 @@ func TestReconciliationChecksFreshAuthorizationLeaseAndCancellation(t *testing.T
 				if mode == "lease" && !errors.Is(err, ErrLeaseLost) {
 					t.Fatal(err)
 				}
-				current, _ := h.Store.GetRun(run.RunID, "alice")
-				state, _ := h.restore(current)
+				current, callErr6 := h.Store.GetRun(run.RunID, "alice")
+				if callErr6 != nil {
+					t.Error(callErr6)
+				}
+				state, callErr7 := h.restore(current)
+				if callErr7 != nil {
+					t.Error(callErr7)
+				}
 				if len(state.Facts) != 0 || state.Pending[0].Reconciled {
 					t.Fatal("stale verification committed", state)
 				}
@@ -172,8 +193,14 @@ func TestReconciliationRequiresSettledMatchingOperation(t *testing.T) {
 
 func TestReconciliationSettlesVerifiedFailureAndKeepsOtherUncertainCallsPaused(t *testing.T) {
 	h, p, run, item := uncertainRun(t)
-	claimed, _ := h.Store.Claim(run.RunID, "alice", 60)
-	state, _ := h.restore(claimed)
+	claimed, callErr8 := h.Store.Claim(run.RunID, "alice", 60)
+	if callErr8 != nil {
+		t.Error(callErr8)
+	}
+	state, callErr9 := h.restore(claimed)
+	if callErr9 != nil {
+		t.Error(callErr9)
+	}
 	other := item
 	other.Call.CallRef = "second-write"
 	other.InvocationID = deterministicInvocationID(run.RunID, other.Call.CallRef)
@@ -182,7 +209,9 @@ func TestReconciliationSettlesVerifiedFailureAndKeepsOtherUncertainCallsPaused(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.Store.Release(run.RunID, "alice", claimed.LeaseToken)
+	if err := h.Store.Release(run.RunID, "alice", claimed.LeaseToken); err != nil {
+		t.Error(err)
+	}
 	h.Reconciler = func(context.Context, ReconciliationContext) (CapabilityResult, error) {
 		return CapabilityResult{ErrorCode: "verified_not_committed"}, nil
 	}
@@ -190,7 +219,11 @@ func TestReconciliationSettlesVerifiedFailureAndKeepsOtherUncertainCallsPaused(t
 	if err != nil || run.Status != "needs_reconciliation" {
 		t.Fatal(run.Status, err)
 	}
-	state, _ = h.restore(run)
+	var callErr10 error
+	state, callErr10 = h.restore(run)
+	if callErr10 != nil {
+		t.Error(callErr10)
+	}
 	if state.Pending[0].Status != "failed" || state.Pending[1].Reconciled || len(state.Facts) != 0 {
 		t.Fatal(state)
 	}
@@ -205,7 +238,10 @@ func TestReconciliationHTTPDoesNotTrustClientOutcome(t *testing.T) {
 	s := &HTTPServer{Host: h}
 	body := JSON{"invocation_id": item.InvocationID, "arguments_sha256": item.ArgumentsSHA256, "revision": run.Revision}
 	request := func(payload JSON) *httptest.ResponseRecorder {
-		raw, _ := CanonicalJSON(payload)
+		raw, callErr11 := CanonicalJSON(payload)
+		if callErr11 != nil {
+			t.Error(callErr11)
+		}
 		req := httptest.NewRequest("POST", "/runs/"+run.RunID+"/reconcile", strings.NewReader(string(raw)))
 		out := httptest.NewRecorder()
 		s.runHTTP(out, req, "alice")

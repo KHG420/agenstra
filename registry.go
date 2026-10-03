@@ -20,25 +20,38 @@ import (
 var registryID = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,127}$`)
 var registryDigest = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
+// RegistryError carries a safe capability-management error code.
 type RegistryError struct{ Code string }
 
+// Error returns the safe error identifier.
 func (e *RegistryError) Error() string { return e.Code }
 func registryError(code string) error  { return &RegistryError{Code: code} }
 
+// CapabilityRegistry owns immutable package releases and live owner bindings.
+// Initialize it before use and close it after all callers have stopped.
 type CapabilityRegistry struct {
 	DatabasePath, PackageDir string
 	db                       *sql.DB
 }
 
+// NewCapabilityRegistry configures a registry without opening files or a database.
 func NewCapabilityRegistry(databasePath, packageDir string) *CapabilityRegistry {
 	return &CapabilityRegistry{DatabasePath: databasePath, PackageDir: packageDir}
 }
+
+// Initialize opens the registry database and prepares its existing tables.
 func (r *CapabilityRegistry) Initialize() error {
 	if r.db != nil {
 		return r.db.Ping()
 	}
-	a, _ := filepath.Abs(r.DatabasePath)
-	b, _ := filepath.Abs(r.PackageDir)
+	a, err := filepath.Abs(r.DatabasePath)
+	if err != nil {
+		return err
+	}
+	b, err := filepath.Abs(r.PackageDir)
+	if err != nil {
+		return err
+	}
 	if a == b {
 		return fmt.Errorf("registry database and package directory must differ")
 	}
@@ -61,17 +74,17 @@ func (r *CapabilityRegistry) Initialize() error {
 		`CREATE TABLE IF NOT EXISTS bindings (owner_id TEXT NOT NULL,pack_id TEXT NOT NULL,config_json TEXT NOT NULL,enabled INTEGER NOT NULL,updated_at REAL NOT NULL,PRIMARY KEY(owner_id,pack_id))`,
 		`CREATE TABLE IF NOT EXISTS audit (sequence INTEGER PRIMARY KEY AUTOINCREMENT,created_at REAL NOT NULL,action TEXT NOT NULL,pack_id TEXT NOT NULL,detail_json TEXT NOT NULL)`} {
 		if _, err = db.Exec(s); err != nil {
-			db.Close()
-			return err
+			return errors.Join(err, db.Close())
 		}
 	}
 	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS drafts (draft_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, manifest_json TEXT NOT NULL, skills_json TEXT NOT NULL, updated_at REAL NOT NULL)`); err != nil {
-		db.Close()
-		return err
+		return errors.Join(err, db.Close())
 	}
 	r.db = db
 	return nil
 }
+
+// Close releases an initialized registry and permits a later initialization.
 func (r *CapabilityRegistry) Close() error {
 	if r.db != nil {
 		db := r.db
@@ -212,6 +225,8 @@ func registryCheckPackage(packID, version string, manifest map[string]any, skill
 	}
 	return summary, nil
 }
+
+// Validate checks a candidate package without publishing it.
 func (r *CapabilityRegistry) Validate(packID, version string, manifest map[string]any, skills map[string]string) ([]map[string]string, error) {
 	return registryCheckPackage(packID, version, manifest, skills)
 }
@@ -223,7 +238,10 @@ func registryAudit(tx *sql.Tx, action, packID string, detail any) error {
 	_, e = tx.Exec(`INSERT INTO audit(created_at,action,pack_id,detail_json) VALUES(?,?,?,?)`, float64(time.Now().UnixNano())/1e9, action, packID, string(b))
 	return e
 }
-func (r *CapabilityRegistry) Publish(packID, version string, manifest map[string]any, skills map[string]string) (map[string]any, error) {
+
+// Publish stores an immutable version and its verified skill files.
+// Reusing a version is permitted only for identical content.
+func (r *CapabilityRegistry) Publish(packID, version string, manifest map[string]any, skills map[string]string) (result map[string]any, resultErr error) {
 	caps, e := r.Validate(packID, version, manifest, skills)
 	if e != nil {
 		return nil, e
@@ -260,8 +278,11 @@ func (r *CapabilityRegistry) Publish(packID, version string, manifest map[string
 		if e != nil {
 			return nil, e
 		}
-		defer os.RemoveAll(stage)
-		mb, _ := registryCanonical(manifest)
+		defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(stage)) }()
+		mb, err := registryCanonical(manifest)
+		if err != nil {
+			return nil, err
+		}
 		if e := os.WriteFile(filepath.Join(stage, "pack.json"), mb, 0644); e != nil {
 			return nil, e
 		}
@@ -282,7 +303,12 @@ func (r *CapabilityRegistry) Publish(packID, version string, manifest map[string
 	if e != nil {
 		return nil, e
 	}
-	defer tx.Rollback()
+	defer func() {
+		// A committed transaction is already closed; other rollback failures remain visible.
+		if rollbackErr := tx.Rollback(); !errors.Is(rollbackErr, sql.ErrTxDone) {
+			resultErr = errors.Join(resultErr, rollbackErr)
+		}
+	}()
 	now := float64(time.Now().UnixNano()) / 1e9
 	var created float64
 	e = tx.QueryRow(`SELECT digest,created_at FROM releases WHERE pack_id=? AND version=?`, packID, version).Scan(&old, &created)
@@ -291,8 +317,14 @@ func (r *CapabilityRegistry) Publish(packID, version string, manifest map[string
 			return nil, registryError("version_already_published")
 		}
 	} else if errors.Is(e, sql.ErrNoRows) {
-		mb, _ := registryCanonical(manifest)
-		cb, _ := registryCanonical(caps)
+		mb, err := registryCanonical(manifest)
+		if err != nil {
+			return nil, err
+		}
+		cb, err := registryCanonical(caps)
+		if err != nil {
+			return nil, err
+		}
 		if _, e = tx.Exec(`INSERT INTO releases VALUES(?,?,?,?,?,?)`, packID, digest, version, string(mb), string(cb), now); e != nil {
 			return nil, e
 		}
@@ -308,6 +340,8 @@ func (r *CapabilityRegistry) Publish(packID, version string, manifest map[string
 	}
 	return map[string]any{"pack_id": packID, "version": version, "digest": digest, "capabilities": caps, "created_at": created}, nil
 }
+
+// ActiveRelease returns the selected digest, or an empty string when none is active.
 func (r *CapabilityRegistry) ActiveRelease(packID string) (string, error) {
 	if !registryID.MatchString(packID) {
 		return "", registryError("invalid_pack_id")
@@ -319,6 +353,8 @@ func (r *CapabilityRegistry) ActiveRelease(packID string) (string, error) {
 	}
 	return digest, e
 }
+
+// ReleasePath verifies the stored release and its files before returning the manifest path.
 func (r *CapabilityRegistry) ReleasePath(packID, digest string) (string, error) {
 	if !registryID.MatchString(packID) {
 		return "", registryError("invalid_pack_id")
@@ -357,8 +393,14 @@ func (r *CapabilityRegistry) ReleasePath(packID, digest string) (string, error) 
 	if manifestDecoder.Decode(&manifest) != nil || storedDecoder.Decode(&stored) != nil {
 		return "", registryError("release_tampered")
 	}
-	b1, _ := registryCanonical(manifest)
-	b2, _ := registryCanonical(stored)
+	b1, err := registryCanonical(manifest)
+	if err != nil {
+		return "", registryError("release_tampered")
+	}
+	b2, err := registryCanonical(stored)
+	if err != nil {
+		return "", registryError("release_tampered")
+	}
 	if string(b1) != string(b2) {
 		return "", registryError("release_tampered")
 	}
@@ -391,7 +433,10 @@ func (r *CapabilityRegistry) ReleasePath(packID, digest string) (string, error) 
 		if p == dir {
 			return nil
 		}
-		rel, _ := filepath.Rel(dir, p)
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
 		rel = filepath.ToSlash(rel)
 		if !allowed[rel] || d.Type()&os.ModeSymlink != 0 {
 			return registryError("release_tampered")
@@ -401,13 +446,18 @@ func (r *CapabilityRegistry) ReleasePath(packID, digest string) (string, error) 
 	if e != nil {
 		return "", registryError("release_tampered")
 	}
-	actual, _ := registryHash(map[string]any{"pack_id": packID, "version": version, "manifest": manifest, "skills": skills})
+	actual, err := registryHash(map[string]any{"pack_id": packID, "version": version, "manifest": manifest, "skills": skills})
+	if err != nil {
+		return "", registryError("release_tampered")
+	}
 	if actual != digest {
 		return "", registryError("release_tampered")
 	}
 	return path, nil
 }
-func (r *CapabilityRegistry) Activate(packID, digest string, expectedRevision *int) (map[string]any, error) {
+
+// Activate atomically selects a release after validating enabled bindings and revision.
+func (r *CapabilityRegistry) Activate(packID, digest string, expectedRevision *int) (result map[string]any, resultErr error) {
 	if _, e := r.ReleasePath(packID, digest); e != nil {
 		return nil, e
 	}
@@ -418,14 +468,21 @@ func (r *CapabilityRegistry) Activate(packID, digest string, expectedRevision *i
 	if e != nil {
 		return nil, e
 	}
-	defer tx.Rollback()
+	defer func() {
+		// A committed transaction is already closed; other rollback failures remain visible.
+		if rollbackErr := tx.Rollback(); !errors.Is(rollbackErr, sql.ErrTxDone) {
+			resultErr = errors.Join(resultErr, rollbackErr)
+		}
+	}()
 	var version, cj string
 	e = tx.QueryRow(`SELECT version,capabilities_json FROM releases WHERE pack_id=? AND digest=?`, packID, digest).Scan(&version, &cj)
 	if e != nil {
 		return nil, registryError("release_not_found")
 	}
 	var caps []map[string]string
-	json.Unmarshal([]byte(cj), &caps)
+	if e = json.Unmarshal([]byte(cj), &caps); e != nil {
+		return nil, fmt.Errorf("decode stored capabilities: %w", e)
+	}
 	names := map[string]bool{}
 	for _, c := range caps {
 		names[c["name"]] = true
@@ -434,23 +491,33 @@ func (r *CapabilityRegistry) Activate(packID, digest string, expectedRevision *i
 	if e != nil {
 		return nil, e
 	}
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	for rows.Next() {
 		var s string
-		rows.Scan(&s)
+		if e = rows.Scan(&s); e != nil {
+			return nil, e
+		}
 		var c map[string]any
-		json.Unmarshal([]byte(s), &c)
+		if e = json.Unmarshal([]byte(s), &c); e != nil {
+			return nil, fmt.Errorf("decode stored binding: %w", e)
+		}
 		for _, k := range []string{"granted_capabilities", "approval_capabilities"} {
 			if arr, ok := c[k].([]any); ok {
 				for _, v := range arr {
 					if !names[fmt.Sprint(v)] {
-						rows.Close()
 						return nil, registryError("binding_capability_missing")
 					}
 				}
 			}
 		}
 	}
-	rows.Close()
+	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+	// Release the single connection before the transaction's next query.
+	if e = rows.Close(); e != nil {
+		return nil, e
+	}
 	var prior string
 	revision := 0
 	e = tx.QueryRow(`SELECT digest,revision FROM active WHERE pack_id=?`, packID).Scan(&prior, &revision)
@@ -474,7 +541,9 @@ func (r *CapabilityRegistry) Activate(packID, digest string, expectedRevision *i
 	}
 	return map[string]any{"pack_id": packID, "version": version, "digest": digest, "revision": revision}, nil
 }
-func (r *CapabilityRegistry) PutBinding(ownerID, packID string, config map[string]any) error {
+
+// PutBinding verifies capability selections and atomically saves an enabled owner binding.
+func (r *CapabilityRegistry) PutBinding(ownerID, packID string, config map[string]any) (resultErr error) {
 	if !registryID.MatchString(packID) {
 		return registryError("invalid_pack_id")
 	}
@@ -485,7 +554,12 @@ func (r *CapabilityRegistry) PutBinding(ownerID, packID string, config map[strin
 	if e != nil {
 		return e
 	}
-	defer tx.Rollback()
+	defer func() {
+		// A committed transaction is already closed; other rollback failures remain visible.
+		if rollbackErr := tx.Rollback(); !errors.Is(rollbackErr, sql.ErrTxDone) {
+			resultErr = errors.Join(resultErr, rollbackErr)
+		}
+	}()
 	var cj string
 	e = tx.QueryRow(`SELECT r.capabilities_json FROM active a JOIN releases r ON r.pack_id=a.pack_id AND r.digest=a.digest WHERE a.pack_id=?`, packID).Scan(&cj)
 	if errors.Is(e, sql.ErrNoRows) {
@@ -495,7 +569,9 @@ func (r *CapabilityRegistry) PutBinding(ownerID, packID string, config map[strin
 		return e
 	}
 	var caps []map[string]string
-	json.Unmarshal([]byte(cj), &caps)
+	if e = json.Unmarshal([]byte(cj), &caps); e != nil {
+		return fmt.Errorf("decode stored capabilities: %w", e)
+	}
 	names := map[string]bool{}
 	for _, c := range caps {
 		names[c["name"]] = true
@@ -522,17 +598,27 @@ func (r *CapabilityRegistry) PutBinding(ownerID, packID string, config map[strin
 	}
 	return tx.Commit()
 }
-func (r *CapabilityRegistry) DisableBinding(ownerID, packID string) error {
+
+// DisableBinding revokes an existing owner binding and records its audit event.
+func (r *CapabilityRegistry) DisableBinding(ownerID, packID string) (resultErr error) {
 	tx, e := r.db.Begin()
 	if e != nil {
 		return e
 	}
-	defer tx.Rollback()
+	defer func() {
+		// A committed transaction is already closed; other rollback failures remain visible.
+		if rollbackErr := tx.Rollback(); !errors.Is(rollbackErr, sql.ErrTxDone) {
+			resultErr = errors.Join(resultErr, rollbackErr)
+		}
+	}()
 	res, e := tx.Exec(`UPDATE bindings SET enabled=0,updated_at=? WHERE owner_id=? AND pack_id=?`, float64(time.Now().UnixNano())/1e9, ownerID, packID)
 	if e != nil {
 		return e
 	}
-	n, _ := res.RowsAffected()
+	n, e := res.RowsAffected()
+	if e != nil {
+		return e
+	}
 	if n == 0 {
 		return registryError("binding_not_found")
 	}
@@ -541,6 +627,9 @@ func (r *CapabilityRegistry) DisableBinding(ownerID, packID string) error {
 	}
 	return tx.Commit()
 }
+
+// Binding returns an independent decoded binding.
+// A present disabled binding returns nil configuration so callers cannot inherit static grants.
 func (r *CapabilityRegistry) Binding(ownerID, packID string) (bool, map[string]any, error) {
 	var cj string
 	var enabled int
@@ -558,12 +647,14 @@ func (r *CapabilityRegistry) Binding(ownerID, packID string) (bool, map[string]a
 	e = json.Unmarshal([]byte(cj), &c)
 	return true, c, e
 }
-func (r *CapabilityRegistry) ListPacks() ([]map[string]any, error) {
+
+// ListPacks lists releases and their current activation revisions.
+func (r *CapabilityRegistry) ListPacks() (result []map[string]any, resultErr error) {
 	rows, e := r.db.Query(`SELECT r.pack_id,r.version,r.digest,r.capabilities_json,r.created_at,a.digest,a.revision FROM releases r LEFT JOIN active a ON a.pack_id=r.pack_id ORDER BY r.pack_id,r.created_at DESC`)
 	if e != nil {
 		return nil, e
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	out := []map[string]any{}
 	for rows.Next() {
 		var id, v, d, cj string
@@ -574,17 +665,21 @@ func (r *CapabilityRegistry) ListPacks() ([]map[string]any, error) {
 			return nil, e
 		}
 		var caps any
-		json.Unmarshal([]byte(cj), &caps)
+		if e = json.Unmarshal([]byte(cj), &caps); e != nil {
+			return nil, fmt.Errorf("decode stored capabilities: %w", e)
+		}
 		out = append(out, map[string]any{"pack_id": id, "version": v, "digest": d, "capabilities": caps, "created_at": created, "active": active.Valid && active.String == d, "revision": rev.Int64})
 	}
 	return out, rows.Err()
 }
-func (r *CapabilityRegistry) ListBindings() ([]map[string]any, error) {
+
+// ListBindings lists persisted owner bindings and their enabled state.
+func (r *CapabilityRegistry) ListBindings() (result []map[string]any, resultErr error) {
 	rows, e := r.db.Query(`SELECT owner_id,pack_id,config_json,enabled,updated_at FROM bindings ORDER BY owner_id,pack_id`)
 	if e != nil {
 		return nil, e
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	out := []map[string]any{}
 	for rows.Next() {
 		var owner, pack, cj string
@@ -594,12 +689,16 @@ func (r *CapabilityRegistry) ListBindings() ([]map[string]any, error) {
 			return nil, e
 		}
 		var config any
-		json.Unmarshal([]byte(cj), &config)
+		if e = json.Unmarshal([]byte(cj), &config); e != nil {
+			return nil, fmt.Errorf("decode stored binding: %w", e)
+		}
 		out = append(out, map[string]any{"owner_id": owner, "pack_id": pack, "config": config, "enabled": enabled != 0, "updated_at": updated})
 	}
 	return out, rows.Err()
 }
-func (r *CapabilityRegistry) Audit(limit int) ([]map[string]any, error) {
+
+// Audit returns a bounded page of recent management events.
+func (r *CapabilityRegistry) Audit(limit int) (result []map[string]any, resultErr error) {
 	if limit < 1 || limit > 1000 {
 		return nil, registryError("invalid_limit")
 	}
@@ -607,7 +706,7 @@ func (r *CapabilityRegistry) Audit(limit int) ([]map[string]any, error) {
 	if e != nil {
 		return nil, e
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	out := []map[string]any{}
 	for rows.Next() {
 		var seq int64
@@ -617,7 +716,9 @@ func (r *CapabilityRegistry) Audit(limit int) ([]map[string]any, error) {
 			return nil, e
 		}
 		var detail any
-		json.Unmarshal([]byte(dj), &detail)
+		if e = json.Unmarshal([]byte(dj), &detail); e != nil {
+			return nil, fmt.Errorf("decode stored audit detail: %w", e)
+		}
 		out = append(out, map[string]any{"sequence": seq, "created_at": at, "action": action, "pack_id": pack, "detail": detail})
 	}
 	return out, rows.Err()

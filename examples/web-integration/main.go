@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -88,7 +89,7 @@ func main() {
 	}
 }
 
-func run() error {
+func run() (resultErr error) {
 	address := flag.String("addr", "127.0.0.1:8092", "loopback listen address")
 	flag.Parse()
 	host, _, e := net.SplitHostPort(*address)
@@ -99,12 +100,16 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	defer listener.Close()
+	defer func() {
+		if err := listener.Close(); !errors.Is(err, net.ErrClosed) {
+			resultErr = errors.Join(resultErr, err)
+		}
+	}()
 	dir, e := os.MkdirTemp("", "agenstra-web-demo-")
 	if e != nil {
 		return e
 	}
-	defer os.RemoveAll(dir)
+	defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(dir)) }()
 	for _, name := range []string{"frontend.json", "pack.json", "deployment.json"} {
 		raw, e := assets.ReadFile(name)
 		if e != nil {
@@ -128,13 +133,13 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	defer store.Close()
+	defer func() { resultErr = errors.Join(resultErr, store.Close()) }()
 	agent := agenstra.NewAgentHost(store, dep.ProviderFactory, demoModel{}, dep.PolicyResolver)
 	server, e := agenstra.NewHTTPServer(agent, dep, true, 100*time.Millisecond)
 	if e != nil {
 		return e
 	}
-	defer server.Close()
+	defer func() { resultErr = errors.Join(resultErr, server.Close()) }()
 	// Demo-only identity. Production must resolve the signed-in user from a
 	// validated application session, never trust a browser-supplied owner ID.
 	server.Web.AuthenticateRequest = func(*http.Request) (string, error) { return "demo", nil }
@@ -163,15 +168,19 @@ func run() error {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		w.Write(raw)
+		if _, err := w.Write(raw); err != nil {
+			log.Print("demo HTTP response write failed")
+		}
 	})
 	mux.HandleFunc("GET /demo/orders", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(agenstra.JSON{"orders": []agenstra.JSON{
+		if err := json.NewEncoder(w).Encode(agenstra.JSON{"orders": []agenstra.JSON{
 			{"id": "1001", "customer": "青岚工作室", "status": "pending", "amount": 1280},
 			{"id": "1002", "customer": "北岸设计", "status": "completed", "amount": 3600},
 			{"id": "1003", "customer": "木禾工坊", "status": "pending", "amount": 860},
-		}})
+		}}); err != nil {
+			log.Print("demo HTTP response write failed")
+		}
 	})
 	for _, path := range []string{"/web/", "/chat/", "/browser/", "/healthz", "/readyz"} {
 		mux.Handle(path, server.Handler())
@@ -179,16 +188,32 @@ func run() error {
 	httpServer := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	servingStopped := make(chan struct{})
+	shutdownDone := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-servingStopped:
+			shutdownDone <- nil
+			return
+		case <-ctx.Done():
+		}
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		httpServer.Shutdown(shutdown)
+		err := httpServer.Shutdown(shutdown)
+		if err != nil {
+			err = errors.Join(err, httpServer.Close())
+		}
+		shutdownDone <- err
 	}()
-	fmt.Printf("Agenstra web demo: http://%s (deterministic model, demo data, temporary databases)\n", listener.Addr())
-	e = httpServer.Serve(listener)
-	if errors.Is(e, http.ErrServerClosed) {
-		return nil
+	if _, e = fmt.Printf("Agenstra web demo: http://%s (deterministic model, demo data, temporary databases)\n", listener.Addr()); e != nil {
+		close(servingStopped)
+		return errors.Join(e, <-shutdownDone)
 	}
-	return e
+	e = httpServer.Serve(listener)
+	close(servingStopped)
+	shutdownErr := <-shutdownDone
+	if errors.Is(e, http.ErrServerClosed) {
+		return shutdownErr
+	}
+	return errors.Join(e, shutdownErr)
 }

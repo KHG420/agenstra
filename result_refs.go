@@ -6,7 +6,7 @@ import (
 	"math"
 )
 
-// A decision names evidence; only the server resolves its business ID.
+// ResultRefRequest names evidence; only the server resolves its business ID.
 type ResultRefRequest struct {
 	FactID     string `json:"fact_id"`
 	Path       []any  `json:"path"`
@@ -14,6 +14,7 @@ type ResultRefRequest struct {
 	EntityType string `json:"entity_type,omitempty"`
 }
 
+// UnmarshalJSON strictly decodes a requested reference to retained evidence.
 func (r *ResultRefRequest) UnmarshalJSON(raw []byte) error {
 	type shape ResultRefRequest
 	var parsed shape
@@ -24,6 +25,7 @@ func (r *ResultRefRequest) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+// ResultObjectRef binds an external result identity to a cited fact and declared path.
 type ResultObjectRef struct {
 	FactID     string `json:"fact_id"`
 	Path       []any  `json:"path"`

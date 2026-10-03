@@ -75,13 +75,19 @@ func TestConversationContextLoadsHistoryAndInputFromFrameworkCheckpoints(t *test
 	}); e != nil {
 		t.Fatal(e)
 	}
-	f.w.Close()
+	if err := f.w.Close(); err != nil {
+		t.Error(err)
+	}
 	h := testHost(t, f.h.Store, f.p, &hostModel{})
 	w, e := NewWebIntegration(h, f.d, f.w.Config)
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer w.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(w.Close)
 	_, messages, e := w.Conversation(t.Context(), "alice", a.ID)
 	if e != nil || len(messages) != 2 || messages[1].Instruction != "" {
 		t.Fatal(messages, e)
@@ -98,13 +104,19 @@ func TestConversationContextLoadsHistoryAndInputFromFrameworkCheckpoints(t *test
 
 func TestHeadlessChatHTTPBoundary(t *testing.T) {
 	f := newWebFixture(t, &hostModel{}, false)
-	f.w.Close()
+	if err := f.w.Close(); err != nil {
+		t.Error(err)
+	}
 	h := testHost(t, f.h.Store, f.p, &hostModel{})
 	s, e := NewHTTPServer(h, f.d, false, time.Second)
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer s.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(s.Close)
 	ticket, e := s.Web.MintSession("alice")
 	if e != nil {
 		t.Fatal(e)

@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -127,8 +128,8 @@ func (s *HTTPServer) adminHTTP(w http.ResponseWriter, r *http.Request) {
 			apiError(w, 422, "invalid_request", true)
 			return
 		}
-		specBytes, _ := json.Marshal(b.Spec)
-		if len(specBytes) > 2000000 {
+		specBytes, err := json.Marshal(b.Spec)
+		if err != nil || len(specBytes) > 2000000 {
 			apiError(w, 422, "openapi_import_failed", true)
 			return
 		}
@@ -160,7 +161,12 @@ func (s *HTTPServer) adminHTTP(w http.ResponseWriter, r *http.Request) {
 	case p == "/admin/api/audit" && r.Method == "GET":
 		limit := 100
 		if raw := r.URL.Query().Get("limit"); raw != "" {
-			limit, _ = strconv.Atoi(raw)
+			var err error
+			limit, err = strconv.Atoi(raw)
+			if err != nil {
+				registryHTTPError(w, registryError("invalid_limit"))
+				return
+			}
 		}
 		result, e := registry.Audit(limit)
 		if e != nil {
@@ -183,7 +189,9 @@ func adminHTML(w http.ResponseWriter) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-	_, _ = w.Write(b)
+	if _, err := w.Write(b); err != nil {
+		log.Print("HTTP response write failed")
+	}
 }
 func adminAsset(w http.ResponseWriter, name string) {
 	if name != "admin_ui.js" && name != "admin_ui.css" && name != "admin_drafts.js" && name != "admin_models.js" {
@@ -201,7 +209,9 @@ func adminAsset(w http.ResponseWriter, name string) {
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(b)
+	if _, err := w.Write(b); err != nil {
+		log.Print("HTTP response write failed")
+	}
 }
 func (s *HTTPServer) adminBinding(w http.ResponseWriter, r *http.Request, path string) {
 	check := strings.HasSuffix(path, "/check")
@@ -227,7 +237,12 @@ func (s *HTTPServer) adminBinding(w http.ResponseWriter, r *http.Request, path s
 			}
 			return
 		}
-		defer provider.Close()
+		defer func() {
+			// Closing the connection does not change an already observed business outcome.
+			if err := provider.Close(); err != nil {
+				log.Print("provider cleanup failed")
+			}
+		}()
 		caps := make([]string, 0, len(provider.Capabilities()))
 		for k := range provider.Capabilities() {
 			caps = append(caps, k)
@@ -298,9 +313,11 @@ func (s *HTTPServer) adminBinding(w http.ResponseWriter, r *http.Request, path s
 			}
 			return
 		}
-		b, _ := json.Marshal(body)
-		var config map[string]any
-		json.Unmarshal(b, &config)
+		config, e := objectOf(body)
+		if e != nil {
+			registryHTTPError(w, e)
+			return
+		}
 		if e = registry.PutBinding(owner, pack, config); e != nil {
 			registryHTTPError(w, e)
 			return

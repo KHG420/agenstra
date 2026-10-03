@@ -35,7 +35,9 @@ func TestMCPHTTPQueuedCancellationPreservesTheActiveRequest(t *testing.T) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(JSON{"jsonrpc": "2.0", "id": request["id"], "result": JSON{"capacity": 2400}})
+		if callErr := json.NewEncoder(w).Encode(JSON{"jsonrpc": "2.0", "id": request["id"], "result": JSON{"capacity": 2400}}); callErr != nil {
+			t.Error(callErr)
+		}
 	}))
 	defer server.Close()
 	var releaseOnce sync.Once
@@ -116,7 +118,9 @@ func TestMCPStdioQueuedCancellationPreservesTheActiveProcess(t *testing.T) {
 	started := make(chan struct{})
 	client := &stdioMCP{cmd: cmd, stdin: &mcpQueueSignalWriter{WriteCloser: stdin, started: started}, stdout: bufio.NewReader(stdout)}
 	t.Cleanup(func() {
-		_ = client.Close()
+		if callErr2 := client.Close(); callErr2 != nil {
+			t.Error(callErr2)
+		}
 		if cmd.ProcessState == nil {
 			t.Error("test subprocess was not reaped")
 		}

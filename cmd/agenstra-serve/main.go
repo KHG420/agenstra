@@ -21,7 +21,7 @@ func main() {
 		os.Exit(2)
 	}
 }
-func run() error {
+func run() (resultErr error) {
 	config := flag.String("config", os.Getenv("AGENT_DEPLOYMENT_CONFIG"), "deployment JSON")
 	address := flag.String("host", "127.0.0.1", "listen address")
 	port := flag.Int("port", 8091, "listen port")
@@ -37,16 +37,16 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	defer store.Close()
+	defer func() { resultErr = errors.Join(resultErr, store.Close()) }()
 	if dep.Registry != nil {
-		defer dep.Registry.Close()
+		defer func() { resultErr = errors.Join(resultErr, dep.Registry.Close()) }()
 	}
 	settings := dep.Config.Settings
 	model, e := dep.NewModel()
 	if e != nil {
 		return e
 	}
-	defer model.Close()
+	defer func() { resultErr = errors.Join(resultErr, model.Close()) }()
 	host := agenstra.NewAgentHost(store, dep.ProviderFactory, model, dep.PolicyResolver)
 	host.Settings = settings
 	if dep.Registry != nil {
@@ -57,20 +57,36 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	defer server.Close()
+	defer func() { resultErr = errors.Join(resultErr, server.Close()) }()
 	httpServer := &http.Server{Addr: *address + ":" + strconv.Itoa(*port), Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	servingStopped := make(chan struct{})
+	shutdownDone := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-servingStopped:
+			shutdownDone <- nil
+			return
+		case <-ctx.Done():
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 		defer cancel()
-		_ = httpServer.Shutdown(shutdownCtx)
+		err := httpServer.Shutdown(shutdownCtx)
+		if err != nil {
+			err = errors.Join(err, httpServer.Close())
+		}
+		shutdownDone <- err
 	}()
-	fmt.Printf("Agenstra listening on %s\n", httpServer.Addr)
-	e = httpServer.ListenAndServe()
-	if e == http.ErrServerClosed {
-		return nil
+	if _, e = fmt.Printf("Agenstra listening on %s\n", httpServer.Addr); e != nil {
+		close(servingStopped)
+		return errors.Join(e, <-shutdownDone)
 	}
-	return e
+	e = httpServer.ListenAndServe()
+	close(servingStopped)
+	shutdownErr := <-shutdownDone
+	if errors.Is(e, http.ErrServerClosed) {
+		return shutdownErr
+	}
+	return errors.Join(e, shutdownErr)
 }

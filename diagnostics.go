@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// DiagnosticFinding explains a saved error using safe framework copy and recovery evidence.
 type DiagnosticFinding struct {
 	Category   string `json:"category"`
 	Code       string `json:"code"`
@@ -15,6 +16,8 @@ type DiagnosticFinding struct {
 	Recovered  bool   `json:"recovered"`
 	Actionable bool   `json:"actionable"`
 }
+
+// RunDiagnostics combines evidence-derived findings, progress and execution budgets.
 type RunDiagnostics struct {
 	Schema    string              `json:"schema"`
 	RunID     string              `json:"run_id"`

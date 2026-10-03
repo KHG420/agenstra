@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Progress is an evidence-derived view, not a model-authored task plan.
+// ProgressItem is an evidence-derived call status, never a model-authored task plan.
 type ProgressItem struct {
 	Capability string  `json:"capability"`
 	CallRef    string  `json:"call_ref,omitempty"`
@@ -17,6 +17,7 @@ type ProgressItem struct {
 	ErrorCode  *string `json:"error_code,omitempty"`
 }
 
+// RunProgress groups persisted call evidence into completed, pending and blocked items.
 type RunProgress struct {
 	Completed         []ProgressItem `json:"completed,omitempty"`
 	Pending           []ProgressItem `json:"pending,omitempty"`
@@ -28,6 +29,7 @@ type RunProgress struct {
 	StagnationWarning bool           `json:"stagnation_warning,omitempty"`
 }
 
+// ProgressTracker retains evidence fingerprints used to detect repeated rounds without progress.
 type ProgressTracker struct {
 	Fingerprint      string   `json:"fingerprint"`
 	NoProgressRounds int      `json:"no_progress_rounds"`
@@ -35,7 +37,10 @@ type ProgressTracker struct {
 }
 
 func progressKey(value any) string {
-	raw, _ := CanonicalJSON(value)
+	raw, err := CanonicalJSON(value)
+	if err != nil {
+		return ""
+	}
 	return fmt.Sprintf("%x", sha256.Sum256(raw))
 }
 
@@ -44,6 +49,9 @@ func recordInspection(state *RuntimeState, value any) {
 		state.Progress = &ProgressTracker{}
 	}
 	key := progressKey(value)
+	if key == "" {
+		return
+	}
 	if !slices.Contains(state.Progress.Inspections, key) {
 		state.Progress.Inspections = append(state.Progress.Inspections, key)
 	}

@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"errors"
+	"log"
 )
 
 func (w *WebIntegration) browserRegistration(ctx context.Context, owner, integration, handlerVersion string, handlers []string) (*compiledFrontend, error) {
@@ -34,6 +35,8 @@ func (w *WebIntegration) browserRegistration(ctx context.Context, owner, integra
 	}
 	return p, nil
 }
+
+// CreateBrowserSession validates registered handlers and creates an owner-bound session and key.
 func (w *WebIntegration) CreateBrowserSession(ctx context.Context, owner, integration, handlerVersion string, handlers []string) (BrowserSession, string, error) {
 	p, e := w.browserRegistration(ctx, owner, integration, handlerVersion, handlers)
 	if e != nil {
@@ -192,7 +195,7 @@ func (w *WebIntegration) RecoverBrowserSession(ctx context.Context, owner, id, k
 		if e == nil {
 			e = rows.Err()
 		}
-		rows.Close()
+		e = errors.Join(e, rows.Close())
 		if e != nil {
 			return e
 		}
@@ -239,7 +242,7 @@ func (w *WebIntegration) RecoverBrowserSession(ctx context.Context, owner, id, k
 	}
 	return replacement, newKey, nil
 }
-func (w *WebIntegration) frontend(digest string) (*compiledFrontend, error) {
+func (w *WebIntegration) frontend(digest string) (result *compiledFrontend, resultErr error) {
 	for _, p := range w.profiles {
 		if p.digest == digest {
 			return p, nil
@@ -249,7 +252,7 @@ func (w *WebIntegration) frontend(digest string) (*compiledFrontend, error) {
 	if e != nil {
 		return nil, e
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	for rows.Next() {
 		var raw string
 		var r webRelease
@@ -415,6 +418,9 @@ func (w *WebIntegration) command(owner, id string) (BrowserCommand, error) {
 	})
 	return c, e
 }
+
+// PollBrowser dispatches eligible commands under the current session key and generation.
+// The boolean reports unresolved prior outcomes that block new actions.
 func (w *WebIntegration) PollBrowser(owner, id, key string, generation int) ([]BrowserCommand, bool, error) {
 	commands := []BrowserCommand{}
 	blocked := false
@@ -466,6 +472,8 @@ func (w *WebIntegration) PollBrowser(owner, id, key string, generation int) ([]B
 	})
 	return commands, blocked, e
 }
+
+// BeginBrowserCommand rechecks authorization and claims a command for one handler execution.
 func (w *WebIntegration) BeginBrowserCommand(ctx context.Context, owner, id, key string, generation int) (bool, BrowserCommand, error) {
 	current, e := w.command(owner, id)
 	if e != nil {
@@ -504,6 +512,9 @@ func (w *WebIntegration) BeginBrowserCommand(ctx context.Context, owner, id, key
 	})
 	return accepted, c, e
 }
+
+// CompleteBrowserCommand validates and retains a client receipt under its session generation.
+// Uncertain outcomes remain unknown and cannot authorize replay.
 func (w *WebIntegration) CompleteBrowserCommand(owner, id, key string, generation int, status string, result JSON, errorCode string) (BrowserCommand, error) {
 	c, e := w.command(owner, id)
 	if e != nil {
@@ -552,6 +563,8 @@ func (w *WebIntegration) CompleteBrowserCommand(owner, id, key string, generatio
 	})
 	return c, e
 }
+
+// CloseBrowserSession closes the authenticated session and preserves interrupted action uncertainty.
 func (w *WebIntegration) CloseBrowserSession(owner, id, key string, generation int) error {
 	return w.Store.store.write(func(tx *sql.Tx) error {
 		var s BrowserSession
@@ -586,7 +599,7 @@ func (w *WebIntegration) cancelCommands(owner, run string) error {
 		if e == nil {
 			e = rows.Err()
 		}
-		rows.Close()
+		e = errors.Join(e, rows.Close())
 		if e != nil {
 			return e
 		}
@@ -630,7 +643,12 @@ func (w *WebIntegration) ReconcileBrowserCommand(ctx context.Context, owner, id 
 	if e != nil {
 		return run, e
 	}
-	defer w.Host.Store.Release(c.RunID, owner, run.LeaseToken)
+	defer func() {
+		// The lease expires if release fails; keep the committed run outcome.
+		if err := w.Host.Store.Release(c.RunID, owner, run.LeaseToken); err != nil {
+			log.Print("run lease release failed")
+		}
+	}()
 	if run.Revision != revision {
 		return run, hostError("revision_conflict")
 	}

@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/url"
 	"os"
 	"os/exec"
@@ -251,18 +252,19 @@ func draftCommand(args []string, call managementCall) (any, error) {
 		keepFile := false
 		defer func() {
 			if !keepFile {
-				os.Remove(f.Name())
+				if err := os.Remove(f.Name()); err != nil {
+					log.Print("draft temporary file cleanup failed")
+				}
 			}
 		}()
 		data, err := json.MarshalIndent(m, "", "  ")
 		if err != nil {
-			f.Close()
-			return nil, err
+			return nil, errors.Join(err, f.Close())
 		}
 		_, err = f.Write(data)
 		closeErr := f.Close()
 		if err != nil {
-			return nil, err
+			return nil, errors.Join(err, closeErr)
 		}
 		if closeErr != nil {
 			return nil, closeErr
@@ -295,7 +297,10 @@ func draftCommand(args []string, call managementCall) (any, error) {
 			return nil, err
 		}
 		files := map[string]string{}
-		raw, _ := json.MarshalIndent(m, "", "  ")
+		raw, err := json.MarshalIndent(m, "", "  ")
+		if err != nil {
+			return nil, err
+		}
 		files["pack.json"] = string(raw) + "\n"
 		skills, _ := d["skills"].(map[string]any)
 		for p, v := range skills {

@@ -46,3 +46,17 @@ func TestOperationBindingDefaultsAndDisjointStates(t *testing.T) {
 		t.Fatal("overlapping states accepted")
 	}
 }
+
+func TestJSONBoundariesRejectUnsupportedAndCyclicValues(t *testing.T) {
+	cycle := JSON{}
+	cycle["self"] = cycle
+	for _, value := range []any{math.NaN(), math.Inf(1), func() {}, cycle} {
+		if _, err := CanonicalJSON(JSON{"value": value}); err == nil {
+			t.Errorf("CanonicalJSON accepted %T", value)
+		}
+		decision := Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []ToolCall{{CallRef: "read", Capability: "records.get", Reason: "read", Arguments: JSON{"value": value}}}}
+		if err := decision.Validate(); err == nil {
+			t.Errorf("Decision.Validate accepted %T", value)
+		}
+	}
+}

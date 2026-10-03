@@ -2,6 +2,7 @@ package agenstra
 
 import "context"
 
+// ModelCallMetrics retains request evidence even when a model call fails.
 // UsageAvailable distinguishes provider-reported usage from an estimate.
 // EstimatedCostUSD is populated only when the caller configured model prices.
 type ModelCallMetrics struct {
@@ -32,6 +33,7 @@ type ModelCallMetrics struct {
 	ErrorCode             *string  `json:"error_code,omitempty"`
 }
 
+// ModelUsage aggregates reported and estimated token use across model requests and purposes.
 type ModelUsage struct {
 	ReportedRequests        int     `json:"reported_requests"`
 	FormatRecoveryRequests  int     `json:"format_recovery_requests"`

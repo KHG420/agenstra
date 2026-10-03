@@ -34,11 +34,15 @@ func TestHostAuthDynamicOwnersBindingsAndRevocation(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(JSON{"owner_id": owner})
+		if callErr := json.NewEncoder(w).Encode(JSON{"owner_id": owner}); callErr != nil {
+			t.Error(callErr)
+		}
 	}))
 	defer auth.Close()
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"id":"R1"}`))
+		if _, callErr2 := w.Write([]byte(`{"id":"R1"}`)); callErr2 != nil {
+			t.Error(callErr2)
+		}
 	}))
 	defer api.Close()
 	t.Setenv("HOST_AUTH_URL", auth.URL)
@@ -47,7 +51,10 @@ func TestHostAuthDynamicOwnersBindingsAndRevocation(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "deployment.json")
 	config := JSON{"database_path": "runs.sqlite3", "host_auth": JSON{"url_env": "HOST_AUTH_URL"}, "management": JSON{"database_path": "registry.sqlite3", "package_dir": "packages", "admin_api_key_env": "ADMIN_KEY"}}
-	raw, _ := json.Marshal(config)
+	raw, callErr3 := json.Marshal(config)
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	if err := os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +65,11 @@ func TestHostAuthDynamicOwnersBindingsAndRevocation(t *testing.T) {
 	if err := d.Registry.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	defer d.Registry.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(d.Registry.Close)
 	if owner, err := d.AuthenticateContext(context.Background(), "host-alice"); err != nil || owner != "alice" {
 		t.Fatalf("alice host auth: %q %v", owner, err)
 	}
@@ -83,7 +94,10 @@ func TestHostAuthDynamicOwnersBindingsAndRevocation(t *testing.T) {
 	bind := func(owner string, grants []string) {
 		t.Helper()
 		body := JSON{"environment": JSON{"RECORDS_URL": "RECORDS_URL"}, "granted_capabilities": grants}
-		raw, _ := json.Marshal(body)
+		raw, callErr4 := json.Marshal(body)
+		if callErr4 != nil {
+			t.Error(callErr4)
+		}
 		req := httptest.NewRequest(http.MethodPut, "/admin/api/bindings/"+owner+"/records", strings.NewReader(string(raw)))
 		req.Header.Set("Authorization", "Bearer admin-secret-with-adequate-length")
 		resp := httptest.NewRecorder()
@@ -131,17 +145,29 @@ func TestHostAuthRejectsMalformedRedirectAndAmbiguousStaticKeys(t *testing.T) {
 		case "Bearer redirect":
 			http.Redirect(w, r, target.URL, http.StatusFound)
 		case "Bearer malformed":
-			_, _ = w.Write([]byte(`{"owner_id":`))
+			if _, callErr5 := w.Write([]byte(`{"owner_id":`)); callErr5 != nil {
+				t.Error(callErr5)
+			}
 		case "Bearer missing":
-			_, _ = w.Write([]byte(`{"other":"alice"}`))
+			if _, callErr6 := w.Write([]byte(`{"other":"alice"}`)); callErr6 != nil {
+				t.Error(callErr6)
+			}
 		case "Bearer empty":
-			_, _ = w.Write([]byte(`{"owner_id":" "}`))
+			if _, callErr7 := w.Write([]byte(`{"owner_id":" "}`)); callErr7 != nil {
+				t.Error(callErr7)
+			}
 		case "Bearer oversized":
-			_, _ = w.Write([]byte(`{"owner_id":"` + strings.Repeat("x", 1<<20) + `"}`))
+			if _, callErr8 := w.Write([]byte(`{"owner_id":"` + strings.Repeat("x", 1<<20) + `"}`)); callErr8 != nil {
+				t.Error(callErr8)
+			}
 		case "Bearer trailing":
-			_, _ = w.Write([]byte(`{"owner_id":"alice"}{"owner_id":"bob"}`))
+			if _, callErr9 := w.Write([]byte(`{"owner_id":"alice"}{"owner_id":"bob"}`)); callErr9 != nil {
+				t.Error(callErr9)
+			}
 		case "Bearer collide":
-			_, _ = w.Write([]byte(`{"owner_id":"static"}`))
+			if _, callErr10 := w.Write([]byte(`{"owner_id":"static"}`)); callErr10 != nil {
+				t.Error(callErr10)
+			}
 		default:
 			w.WriteHeader(http.StatusUnauthorized)
 		}

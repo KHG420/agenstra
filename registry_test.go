@@ -16,7 +16,11 @@ func TestRegistryImmutableRevisionsAndGrants(t *testing.T) {
 	if e := r.Initialize(); e != nil {
 		t.Fatalf("second initialization: %v", e)
 	}
-	defer r.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(r.Close)
 	manifest := testRegistryManifest("records.get")
 	first, e := r.Publish("records", "1.0.0", manifest, map[string]string{})
 	if e != nil {
@@ -86,7 +90,11 @@ func TestRegistryReleaseRequiresCompleteJSONBeforeActivation(t *testing.T) {
 				if err := r.Initialize(); err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { _ = r.Close() })
+				t.Cleanup(func() {
+					if callErr := r.Close(); callErr != nil {
+						t.Error(callErr)
+					}
+				})
 				published, err := r.Publish("records", "1.0.0", testRegistryManifest("records.get"), map[string]string{})
 				if err != nil {
 					t.Fatal(err)
@@ -139,4 +147,63 @@ func registryHasCode(err error, code string) bool {
 
 func testRegistryManifest(name string) map[string]any {
 	return map[string]any{"schema": "agenstra.rest-pack.v2", "name": "records", "version": "1.0.0", "guidance": "Use reviewed record data.", "base_url_env": "RECORDS_URL", "capabilities": []any{map[string]any{"name": name, "description": "Read a record", "method": "GET", "path": "/records/{record_id}", "effect": "read", "input_schema": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "object", "properties": map[string]any{"record_id": map[string]any{"type": "string"}}, "required": []any{"record_id"}, "additionalProperties": false}}, "required": []any{"path"}, "additionalProperties": false}, "output_schema": map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string"}}, "required": []any{"id"}, "additionalProperties": false}}}}
+}
+
+func TestRegistryRejectsUnreadableStoredJSON(t *testing.T) {
+	for _, location := range []string{"capabilities", "binding", "audit"} {
+		t.Run(location, func(t *testing.T) {
+			dir := t.TempDir()
+			r := NewCapabilityRegistry(filepath.Join(dir, "registry.sqlite3"), filepath.Join(dir, "packages"))
+			if err := r.Initialize(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := r.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			published, err := r.Publish("records", "1.0.0", testRegistryManifest("records.get"), map[string]string{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest := published["digest"].(string)
+			if _, err := r.Activate("records", digest, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.PutBinding("alice", "records", JSON{"granted_capabilities": []any{"records.get"}}); err != nil {
+				t.Fatal(err)
+			}
+			queries := map[string]string{
+				"capabilities": "UPDATE releases SET capabilities_json='invalid'",
+				"binding":      "UPDATE bindings SET config_json='invalid'",
+				"audit":        "UPDATE audit SET detail_json='invalid'",
+			}
+			if _, err := r.db.Exec(queries[location]); err != nil {
+				t.Fatal(err)
+			}
+			if location == "audit" {
+				if _, err := r.Audit(100); err == nil {
+					t.Fatal("invalid audit JSON accepted")
+				}
+				return
+			}
+			if location == "capabilities" {
+				if _, err := r.ListPacks(); err == nil {
+					t.Error("invalid capability JSON accepted")
+				}
+				if err := r.PutBinding("bob", "records", JSON{}); err == nil {
+					t.Error("binding created from unreadable catalog")
+				}
+			} else if _, err := r.ListBindings(); err == nil {
+				t.Error("invalid binding JSON accepted")
+			}
+			if _, err := r.Activate("records", digest, nil); err == nil {
+				t.Error("activation accepted unreadable stored JSON")
+			}
+			var revision int
+			if err := r.db.QueryRow("SELECT revision FROM active WHERE pack_id='records'").Scan(&revision); err != nil || revision != 1 {
+				t.Fatalf("activation changed state: revision=%d, err=%v", revision, err)
+			}
+		})
+	}
 }

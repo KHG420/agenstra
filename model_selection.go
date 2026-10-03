@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/url"
 	"strings"
@@ -20,6 +21,7 @@ type ModelConfiguration struct {
 	Profiles                map[string]ModelProfile `json:"profiles"`
 }
 
+// ModelProfile configures one model adapter using connection references rather than resolved secrets.
 type ModelProfile struct {
 	APIType               string       `json:"api_type"`
 	Model                 string       `json:"model"`
@@ -39,12 +41,14 @@ type ModelProfile struct {
 	Prices                *ModelPrices `json:"prices,omitempty"`
 }
 
+// ModelPrices holds optional per-million-token prices used only for cost estimates.
 type ModelPrices struct {
 	InputPerMillion       float64  `json:"input_per_million"`
 	OutputPerMillion      float64  `json:"output_per_million"`
 	CachedInputPerMillion *float64 `json:"cached_input_per_million,omitempty"`
 }
 
+// ModelSelectionSnapshot binds a configuration to a management revision.
 type ModelSelectionSnapshot struct {
 	Revision int                `json:"revision"`
 	Config   ModelConfiguration `json:"config"`
@@ -95,6 +99,7 @@ func (c ModelConfiguration) profileID(purpose string) string {
 	return id
 }
 
+// Validate checks profiles, purpose selections and supported adapter parameters.
 func (c ModelConfiguration) Validate() error {
 	if len(c.Profiles) < 1 || len(c.Profiles) > 32 {
 		return registryError("model_configuration_invalid")
@@ -175,16 +180,24 @@ func (d *Deployment) NewModel() (*ModelManager, error) {
 	return m, nil
 }
 
+// Snapshot returns an independent copy of the selected configuration.
 func (m *ModelManager) Snapshot() ModelSelectionSnapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	raw, _ := json.Marshal(m.selection)
+	raw, err := json.Marshal(m.selection)
+	if err != nil {
+		return ModelSelectionSnapshot{}
+	}
 	var snapshot ModelSelectionSnapshot
-	_ = json.Unmarshal(raw, &snapshot)
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		return ModelSelectionSnapshot{}
+	}
 	return snapshot
 }
 
-func (m *ModelManager) Configure(config ModelConfiguration, expectedRevision int) (ModelSelectionSnapshot, error) {
+// Configure validates and persists a catalog edit under its expected revision.
+// The manager retains its own configuration so caller mutations cannot reroute runs.
+func (m *ModelManager) Configure(config ModelConfiguration, expectedRevision int) (result ModelSelectionSnapshot, resultErr error) {
 	if _, err := m.selectedModel(config); err != nil {
 		return ModelSelectionSnapshot{}, err
 	}
@@ -205,7 +218,12 @@ func (m *ModelManager) Configure(config ModelConfiguration, expectedRevision int
 	if err != nil {
 		return ModelSelectionSnapshot{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		// A committed transaction is already closed; other rollback failures remain visible.
+		if rollbackErr := tx.Rollback(); !errors.Is(rollbackErr, sql.ErrTxDone) {
+			resultErr = errors.Join(resultErr, rollbackErr)
+		}
+	}()
 	var revision int
 	err = tx.QueryRow(`SELECT revision FROM model_configuration WHERE id=1`).Scan(&revision)
 	if err != nil && err != sql.ErrNoRows {
@@ -225,7 +243,9 @@ func (m *ModelManager) Configure(config ModelConfiguration, expectedRevision int
 	}
 	// Own the decoded configuration; caller maps and pointers cannot mutate it.
 	var owned ModelConfiguration
-	_ = json.Unmarshal(raw, &owned)
+	if err := json.Unmarshal(raw, &owned); err != nil {
+		return ModelSelectionSnapshot{}, err
+	}
 	m.selection = ModelSelectionSnapshot{Revision: revision + 1, Config: owned}
 	return ModelSelectionSnapshot{Revision: revision + 1, Config: config}, nil
 }
@@ -288,17 +308,26 @@ func (m *ModelManager) selectedModel(c ModelConfiguration) (*selectedModels, err
 func (s *selectedModels) Decide(ctx context.Context, p ContextPacket, prompt string) (Decision, error) {
 	return s.decision.Decide(ctx, p, prompt)
 }
+
+// ModelInfo reports the selected decision model capacity without making a request.
 func (s *selectedModels) ModelInfo() ModelInfo { return s.decision.ModelInfo() }
+
+// MeasureInput measures the selected decision model payload without executing a decision.
 func (s *selectedModels) MeasureInput(p ContextPacket, prompt string) (InputMeasurement, error) {
 	return s.decision.MeasureInput(p, prompt)
 }
+
+// ExtractMemories validates extracted preferences from the supplied input.
 func (s *selectedModels) ExtractMemories(ctx context.Context, r MemoryExtractionRequest) ([]MemoryProposal, error) {
 	return s.memory.ExtractMemories(ctx, r)
 }
+
+// ExtractMemoriesMeasured retains extraction request metrics on success and failure.
 func (s *selectedModels) ExtractMemoriesMeasured(ctx context.Context, r MemoryExtractionRequest) ([]MemoryProposal, ModelCallMetrics, error) {
 	return s.memory.ExtractMemoriesMeasured(ctx, r)
 }
 
+// Decide uses the current selected decision profile; durable runs use their pinned selection.
 func (m *ModelManager) Decide(ctx context.Context, p ContextPacket, prompt string) (Decision, error) {
 	s, err := m.selectedModel(m.Snapshot().Config)
 	if err != nil {
@@ -306,6 +335,8 @@ func (m *ModelManager) Decide(ctx context.Context, p ContextPacket, prompt strin
 	}
 	return s.Decide(ctx, p, prompt)
 }
+
+// ModelInfo reports the current decision profile's configured capacity.
 func (m *ModelManager) ModelInfo() ModelInfo {
 	s, err := m.selectedModel(m.Snapshot().Config)
 	if err != nil {
@@ -313,6 +344,8 @@ func (m *ModelManager) ModelInfo() ModelInfo {
 	}
 	return s.ModelInfo()
 }
+
+// MeasureInput measures the current decision profile's request payload.
 func (m *ModelManager) MeasureInput(p ContextPacket, prompt string) (InputMeasurement, error) {
 	s, err := m.selectedModel(m.Snapshot().Config)
 	if err != nil {
@@ -320,10 +353,14 @@ func (m *ModelManager) MeasureInput(p ContextPacket, prompt string) (InputMeasur
 	}
 	return s.MeasureInput(p, prompt)
 }
+
+// ExtractMemories uses the current memory profile and validates proposals.
 func (m *ModelManager) ExtractMemories(ctx context.Context, r MemoryExtractionRequest) ([]MemoryProposal, error) {
 	p, _, err := m.ExtractMemoriesMeasured(ctx, r)
 	return p, err
 }
+
+// ExtractMemoriesMeasured also returns request metrics for the memory profile.
 func (m *ModelManager) ExtractMemoriesMeasured(ctx context.Context, r MemoryExtractionRequest) ([]MemoryProposal, ModelCallMetrics, error) {
 	s, err := m.selectedModel(m.Snapshot().Config)
 	if err != nil {
@@ -331,6 +368,8 @@ func (m *ModelManager) ExtractMemoriesMeasured(ctx context.Context, r MemoryExtr
 	}
 	return s.ExtractMemoriesMeasured(ctx, r)
 }
+
+// Close is a no-op because model adapters have no owned persistent connection.
 func (m *ModelManager) Close() error { return nil }
 
 func (h *AgentHost) modelForRun(run StoredRun) (DecisionModel, error) {
@@ -348,6 +387,7 @@ func (h *AgentHost) modelForRun(run StoredRun) (DecisionModel, error) {
 	return manager.selectedModel(c.ModelSelection.Config)
 }
 
+// ModelCheckResult records the outcome and usage of one synthetic profile probe.
 type ModelCheckResult struct {
 	Profile   string           `json:"profile"`
 	Purpose   string           `json:"purpose"`
@@ -393,7 +433,7 @@ func (m *ModelManager) Check(ctx context.Context, id, purpose string, config *Mo
 	result.Metrics.Purpose = purpose
 	result.Passed = err == nil
 	if err != nil {
-		result.ErrorCode = ErrorCode(err)
+		result.ErrorCode = modelErrorCode(err)
 		if result.Metrics.FormatError != "" {
 			result.ErrorCode = result.Metrics.FormatError
 		}

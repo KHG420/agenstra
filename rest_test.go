@@ -32,7 +32,9 @@ func TestRESTValidationTransportAndOutput(t *testing.T) {
 			t.Errorf("request boundary: %+v", r)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"record":{"id":"R 1"}}`))
+		if _, callErr := w.Write([]byte(`{"record":{"id":"R 1"}}`)); callErr != nil {
+			t.Error(callErr)
+		}
 	}))
 	defer server.Close()
 	endpoint := JSON{"name": "record.update", "description": "Update", "method": "PATCH", "path": "/records/{record_id}", "effect": "write", "idempotency_header": "Idempotency-Key", "response_path": []any{"record"}, "input_schema": JSON{"type": "object", "additionalProperties": false, "properties": JSON{"path": JSON{"type": "object", "properties": JSON{"record_id": JSON{"type": "string"}}, "required": []any{"record_id"}, "additionalProperties": false}, "query": JSON{"type": "object", "properties": JSON{"tag": JSON{"type": "array", "items": JSON{"type": "string"}}}, "additionalProperties": false}, "body": JSON{"type": "object", "properties": JSON{"profile": JSON{"type": "string"}}, "required": []any{"profile"}, "additionalProperties": false}}, "required": []any{"path", "body"}}, "output_schema": JSON{"type": "object", "properties": JSON{"id": JSON{"type": "string"}}, "required": []any{"id"}, "additionalProperties": false}, "response_schemas": JSON{"200": JSON{"type": "object", "properties": JSON{"id": JSON{"type": "string"}}, "required": []any{"id"}, "additionalProperties": false}}}
@@ -87,7 +89,9 @@ func TestLegacyRESTOptionalNullAndOutputFiltering(t *testing.T) {
 		if _, exists := payload["note"]; exists {
 			t.Error("optional null input should be omitted")
 		}
-		_, _ = w.Write([]byte(`{"record":{"id":"R1","note":null,"secret":"not exposed"}}`))
+		if _, callErr2 := w.Write([]byte(`{"record":{"id":"R1","note":null,"secret":"not exposed"}}`)); callErr2 != nil {
+			t.Error(callErr2)
+		}
 	}))
 	defer server.Close()
 	manifest := JSON{"schema": "agenstra.capability-pack.v1", "name": "legacy", "guidance": "Use records", "capabilities": []any{JSON{"name": "record.read", "version": "1", "description": "Read", "url_env": "API_URL", "inputs": JSON{"id": JSON{"type": "string", "description": "ID"}, "note": JSON{"type": "string", "description": "Optional", "required": false}}, "outputs": JSON{"id": JSON{"type": "string", "description": "ID"}, "note": JSON{"type": "string", "description": "Optional", "required": false}}, "response_path": []any{"record"}}}}
@@ -127,21 +131,33 @@ func TestRESTExplicitResponseNormalizationAndBusinessFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/array":
-			_, _ = w.Write([]byte(`["A","B"]`))
+			if _, callErr3 := w.Write([]byte(`["A","B"]`)); callErr3 != nil {
+				t.Error(callErr3)
+			}
 		case "/scalar":
-			_, _ = w.Write([]byte(`17`))
+			if _, callErr4 := w.Write([]byte(`17`)); callErr4 != nil {
+				t.Error(callErr4)
+			}
 		case "/empty":
 			w.WriteHeader(http.StatusNoContent)
 		case "/empty-200":
 			w.WriteHeader(http.StatusOK)
 		case "/business-failed":
-			_, _ = w.Write([]byte(`{"ok":false,"record":{"id":"R1"}}`))
+			if _, callErr5 := w.Write([]byte(`{"ok":false,"record":{"id":"R1"}}`)); callErr5 != nil {
+				t.Error(callErr5)
+			}
 		case "/business-missing":
-			_, _ = w.Write([]byte(`{"record":{"id":"R1"}}`))
+			if _, callErr6 := w.Write([]byte(`{"record":{"id":"R1"}}`)); callErr6 != nil {
+				t.Error(callErr6)
+			}
 		case "/business-ok":
-			_, _ = w.Write([]byte(`{"ok":true,"record":{"id":"R1"}}`))
+			if _, callErr7 := w.Write([]byte(`{"ok":true,"record":{"id":"R1"}}`)); callErr7 != nil {
+				t.Error(callErr7)
+			}
 		default:
-			_, _ = w.Write([]byte(`{"id":"R1"}`))
+			if _, callErr8 := w.Write([]byte(`{"id":"R1"}`)); callErr8 != nil {
+				t.Error(callErr8)
+			}
 		}
 	}))
 	defer server.Close()
@@ -178,7 +194,11 @@ func TestRESTExplicitResponseNormalizationAndBusinessFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pack.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(pack.Close)
 	for _, tc := range []struct {
 		name string
 		want JSON

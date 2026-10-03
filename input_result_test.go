@@ -134,20 +134,31 @@ func TestFinalResultRefsResolveOnlyCitedFacts(t *testing.T) {
 	fact := Fact{FactID: NewID(), SourceCapability: "orders.get", Value: JSON{"data": JSON{"id": "ORDER-42"}}, ReferenceScope: "durable"}
 	decision := Decision{Kind: "final", AnswerMarkdown: "Done", FactIDs: []string{fact.FactID}, ResultRefs: []ResultRefRequest{{FactID: fact.FactID, Path: []any{"data", "id"}, EntityType: "order", Label: "Order"}}}
 	r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{}}, Model: decisionModelFunc(func(context.Context, ContextPacket, string) (Decision, error) { return decision, nil })}
-	state, _ := r.NewState("Find order", "")
+	state, callErr := r.NewState("Find order", "")
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	state.Facts = []Fact{fact}
 	if err := r.Step(t.Context(), state, nil); err != nil || state.Status != "completed" || len(state.ResultRefs) != 1 || state.ResultRefs[0].ID != "ORDER-42" || r.Result(state).ResultRefs[0].ID != "ORDER-42" {
 		t.Fatal(state.Status, state.ResultRefs, err)
 	}
 	decision.FactIDs = nil
-	state, _ = r.NewState("Find order", "")
+	var callErr2 error
+	state, callErr2 = r.NewState("Find order", "")
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	state.Facts = []Fact{fact}
 	if err := r.Step(t.Context(), state, nil); err != nil || state.Status == "completed" {
 		t.Fatal("uncited result ref accepted", state.Status, err)
 	}
 	decision.FactIDs = []string{fact.FactID}
 	fact.ModelOutput = &ModelOutput{Paths: [][]string{{"status"}}}
-	state, _ = r.NewState("Find order", "")
+	var callErr3 error
+	state, callErr3 = r.NewState("Find order", "")
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	state.Facts = []Fact{fact}
 	if err := r.Step(t.Context(), state, nil); err != nil || state.Status == "completed" {
 		t.Fatal("hidden business ID accepted", state.Status, err)
@@ -183,7 +194,10 @@ func TestFinalReferenceFeedbackAllowsCorrectionWithoutExtraBusinessCalls(t *test
 					if len(packet.Observations) == 0 {
 						t.Fatal("missing rejection observation")
 					}
-					raw, _ := json.Marshal(packet.Observations)
+					raw, callErr4 := json.Marshal(packet.Observations)
+					if callErr4 != nil {
+						t.Error(callErr4)
+					}
 					if !strings.Contains(string(raw), "feedback") {
 						t.Fatal("missing correction guidance", string(raw))
 					}
@@ -191,7 +205,10 @@ func TestFinalReferenceFeedbackAllowsCorrectionWithoutExtraBusinessCalls(t *test
 				return final, nil
 			})
 			r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{}}, Model: model}
-			state, _ := r.NewState("Open object", "")
+			state, callErr5 := r.NewState("Open object", "")
+			if callErr5 != nil {
+				t.Error(callErr5)
+			}
 			state.Facts = []Fact{fact}
 			if err := r.Step(t.Context(), state, nil); err != nil || state.Status == "completed" {
 				t.Fatal("invalid answer accepted", err)

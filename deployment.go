@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,11 +19,14 @@ import (
 	"time"
 )
 
+// DeploymentError carries a safe deployment or connection error code.
 type DeploymentError struct{ Code string }
 
+// Error returns the safe error identifier.
 func (e *DeploymentError) Error() string { return e.Code }
 func deploymentError(code string) error  { return &DeploymentError{Code: code} }
 
+// IdentityConfig binds a trusted identity response to the expected subject and grants.
 type IdentityConfig struct {
 	URLEnv           string `json:"url_env"`
 	TokenEnv         string `json:"token_env"`
@@ -30,6 +34,8 @@ type IdentityConfig struct {
 	ExpectedSubject  string `json:"expected_subject"`
 	CapabilitiesPath []any  `json:"capabilities_path,omitempty"`
 }
+
+// ConnectionConfig declares owner-specific grants and credential references.
 type ConnectionConfig struct {
 	Environment          map[string]string   `json:"environment"`
 	BindingEnvironment   []string            `json:"binding_environment"`
@@ -39,20 +45,28 @@ type ConnectionConfig struct {
 	Identity             *IdentityConfig     `json:"identity"`
 	Delegations          map[string][]string `json:"delegations,omitempty"`
 }
+
+// UserConfig selects static authentication and the user's authorized connections.
 type UserConfig struct {
 	APIKeyEnv      string                      `json:"api_key_env"`
 	Packs          map[string]ConnectionConfig `json:"packs"`
 	BrowserActions map[string][]string         `json:"browser_actions,omitempty"`
 }
+
+// PackConfig locates a trusted capability manifest on disk.
 type PackConfig struct {
 	Path string `json:"path"`
 }
+
+// ManagementConfig configures the optional registry and administrator credential reference.
 type ManagementConfig struct {
 	DatabasePath   string `json:"database_path"`
 	PackageDir     string `json:"package_dir"`
 	AdminAPIKeyEnv string `json:"admin_api_key_env"`
 	SecretDir      string `json:"secret_dir"`
 }
+
+// DeploymentConfig contains trusted host wiring, execution limits and optional integrations.
 type DeploymentConfig struct {
 	Models               *ModelConfiguration                      `json:"models,omitempty"`
 	CompletionChecks     map[string][]FactRequirement             `json:"completion_checks,omitempty"`
@@ -65,6 +79,9 @@ type DeploymentConfig struct {
 	Settings             HostSettings                             `json:"settings"`
 	WebIntegration       *WebIntegrationConfig                    `json:"web_integration,omitempty"`
 }
+
+// Deployment resolves trusted configuration and per-owner connections.
+// Treat Config and Environment as read-only while requests are active.
 type Deployment struct {
 	Config         DeploymentConfig
 	BaseDir        string
@@ -73,6 +90,8 @@ type Deployment struct {
 	Registry       *CapabilityRegistry
 }
 
+// LoadDeployment strictly decodes configuration and snapshots the process environment.
+// Registry initialization and capability connections remain explicit operations.
 func LoadDeployment(path string) (*Deployment, error) {
 	absolute, e := filepath.Abs(path)
 	if e != nil {
@@ -132,7 +151,12 @@ func (d *Deployment) resolve(p string) string {
 	}
 	return filepath.Join(d.BaseDir, p)
 }
+
+// DatabasePath resolves the configured run database relative to the deployment file.
 func (d *Deployment) DatabasePath() string { return d.resolve(d.Config.DatabasePath) }
+
+// Authenticate checks a token without a request context.
+// HTTP callers should use AuthenticateContext to propagate request cancellation.
 func (d *Deployment) Authenticate(token string) (string, error) {
 	return d.AuthenticateContext(context.Background(), token)
 }
@@ -150,7 +174,10 @@ func (d *Deployment) connection(ownerID, packID string) (ConnectionConfig, error
 			if managed == nil {
 				return ConnectionConfig{}, deploymentError("access_denied")
 			}
-			b, _ := json.Marshal(managed)
+			b, err := json.Marshal(managed)
+			if err != nil {
+				return ConnectionConfig{}, deploymentError("access_denied")
+			}
 			var c ConnectionConfig
 			if json.Unmarshal(b, &c) != nil {
 				return c, deploymentError("access_denied")
@@ -208,6 +235,7 @@ func normalizeConnection(c ConnectionConfig) ConnectionConfig {
 
 var deploymentEnvName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
+// Secret resolves a configured environment or local secret-file reference.
 func (d *Deployment) Secret(ref string) (string, error) {
 	var value string
 	if strings.HasPrefix(ref, "secret:") {
@@ -268,7 +296,11 @@ func (d *Deployment) verifiedIdentity(ctx context.Context, owner string, c Conne
 	if err != nil {
 		return "", nil, deploymentError("identity_unverified")
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Print("HTTP response cleanup failed")
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return "", nil, deploymentError("identity_unverified")
 	}
@@ -315,6 +347,8 @@ func (d *Deployment) validateIdentity(ctx context.Context, owner string, c Conne
 	_, _, err := d.verifiedIdentity(ctx, owner, c)
 	return err
 }
+
+// PolicyResolver checks the current binding and trusted identity for an owner and pack.
 func (d *Deployment) PolicyResolver(ctx context.Context, ownerID, packID string) (ExecutionPolicy, error) {
 	c, err := d.connection(ownerID, packID)
 	if err != nil {
@@ -404,6 +438,8 @@ func endpointEnvs(m map[string]any) []string {
 	sort.Strings(out)
 	return out
 }
+
+// BindingID hashes the trusted manifest, configured identity and resolved non-credential bindings.
 func (d *Deployment) BindingID(ownerID, packID, path string, c ConnectionConfig, env map[string]string) (string, error) {
 	b, e := os.ReadFile(path)
 	if e != nil {
@@ -481,16 +517,23 @@ func (d *Deployment) BindingID(ownerID, packID, path string, c ConnectionConfig,
 		}
 	}
 	binding := map[string]any{"owner_id": ownerID, "pack_id": packID, "pack_path": path, "manifest": m, "environment_refs": normalizeConnection(c).Environment, "working_directory": workingDirectory, "connection_identity": identities, "endpoints": endpoints, "identity": identity}
-	bytes, _ := registryCanonical(binding)
+	bytes, err := registryCanonical(binding)
+	if err != nil {
+		return "", deploymentError("connection_unavailable")
+	}
 	hash := sha256.Sum256(bytes)
 	return hex.EncodeToString(hash[:]), nil
 }
+
+// ReleaseResolver returns the registry's active release, or an empty string for static deployments.
 func (d *Deployment) ReleaseResolver(ctx context.Context, ownerID, packID string) (string, error) {
 	if d.Registry == nil {
 		return "", nil
 	}
 	return d.Registry.ActiveRelease(packID)
 }
+
+// ProviderFactory opens the current authorized release; the caller must close it.
 func (d *Deployment) ProviderFactory(ctx context.Context, ownerID, packID string) (CapabilityProvider, error) {
 	release := ""
 	if d.Registry != nil {
@@ -502,6 +545,8 @@ func (d *Deployment) ProviderFactory(ctx context.Context, ownerID, packID string
 	}
 	return d.ReleaseProviderFactory(ctx, ownerID, packID, release)
 }
+
+// ReleaseProviderFactory opens a pinned release with freshly checked connection identity.
 func (d *Deployment) ReleaseProviderFactory(ctx context.Context, ownerID, packID, release string) (CapabilityProvider, error) {
 	c, e := d.connection(ownerID, packID)
 	if e != nil {
@@ -543,6 +588,8 @@ func (d *Deployment) ReleaseProviderFactory(ctx context.Context, ownerID, packID
 	}
 	return &boundProvider{CapabilityProvider: provider, binding: bindingID, subject: credentialSubject(provider, ownerID, c)}, nil
 }
+
+// AdminKey resolves and validates the configured administrator secret.
 func (d *Deployment) AdminKey() (string, error) {
 	if d.Config.Management == nil {
 		return "", errors.New("management disabled")
@@ -565,6 +612,8 @@ type boundProvider struct {
 	subject string
 }
 
+// BindingID returns the stable connection identity used to detect configuration changes.
 func (p *boundProvider) BindingID() string { return p.binding }
 
+// BoundSubject returns the trusted subject checked when opening the connection.
 func (p *boundProvider) BoundSubject() string { return p.subject }

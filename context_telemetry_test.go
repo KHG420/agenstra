@@ -14,7 +14,10 @@ func TestContextTelemetryMeasuresFinalProjection(t *testing.T) {
 		state.Facts = append(state.Facts, contextBudgetFact(JSON{"body": strings.Repeat("汉", 1500)}))
 	}
 	r.Model = contextBudgetModel(func(_ctx context.Context, packet ContextPacket, prompt string) (Decision, error) {
-		raw, _ := CanonicalJSON(packet)
+		raw, callErr := CanonicalJSON(packet)
+		if callErr != nil {
+			t.Error(callErr)
+		}
 		if state.ContextTelemetry == nil || state.ContextTelemetry.InputCharacters != utf8.RuneCount(raw)+utf8.RuneCountInString(prompt) {
 			t.Fatal("not the final request")
 		}

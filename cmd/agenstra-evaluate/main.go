@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -68,7 +69,11 @@ func (c evaluationClient) request(ctx context.Context, method, path string, body
 		}
 		return errors.New("evaluation_connection_failed")
 	}
-	defer res.Body.Close()
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			log.Print("HTTP response cleanup failed")
+		}
+	}()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return fmt.Errorf("evaluation_http_%d", res.StatusCode)
 	}

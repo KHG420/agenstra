@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"math"
 	"net"
 	"net/http"
@@ -14,11 +15,47 @@ import (
 	"time"
 )
 
+// ModelDecisionError carries a safe model transport or format error code.
 type ModelDecisionError struct{ Kind string }
 
+// Error returns the safe error identifier.
 func (e ModelDecisionError) Error() string { return e.Kind }
-func (e ModelDecisionError) Code() string  { return e.Kind }
 
+// Code exposes the stable identifier used by framework error handling.
+func (e ModelDecisionError) Code() string { return e.Kind }
+
+// modelErrorCode exposes deliberate codes while keeping uncoded adapter errors private.
+func modelErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	var coded interface{ Code() string }
+	if errors.As(err, &coded) {
+		return coded.Code()
+	}
+	var host *HostError
+	if errors.As(err, &host) {
+		return host.Code
+	}
+	var deployment *DeploymentError
+	if errors.As(err, &deployment) {
+		return deployment.Code
+	}
+	var registry *RegistryError
+	if errors.As(err, &registry) {
+		return registry.Code
+	}
+	// Existing decision and projection validators return these fixed safe strings.
+	// Preserve their retry/budget behavior without exposing arbitrary error text.
+	switch code := err.Error(); code {
+	case "model_decision_invalid", "model_context_measurement_failed", "model_output_reserve_required", "context_too_large":
+		return code
+	}
+	return "model_unavailable"
+}
+
+// HTTPJSONDecisionModel adapts a compatible JSON chat endpoint to typed decisions.
+// Configure it before concurrent use; supplied HTTP clients remain caller-owned.
 type HTTPJSONDecisionModel struct {
 	Profile                    string
 	APIType                    string
@@ -49,6 +86,7 @@ type HTTPJSONDecisionModel struct {
 	OutputPricePerMillion float64
 }
 
+// NewHTTPJSONDecisionModel configures a bounded model adapter without contacting the service.
 func NewHTTPJSONDecisionModel(model, baseURL, apiKey string, timeout time.Duration, client *http.Client) (*HTTPJSONDecisionModel, error) {
 	if model == "" || baseURL == "" || apiKey == "" {
 		return nil, errors.New("model, base_url, and api_key are required")
@@ -61,6 +99,8 @@ func NewHTTPJSONDecisionModel(model, baseURL, apiKey string, timeout time.Durati
 	}
 	return &HTTPJSONDecisionModel{Model: model, BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, Timeout: timeout, Client: client}, nil
 }
+
+// Decide requests and validates one typed decision, preserving request usage on failure.
 func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet ContextPacket, prompt string) (decision Decision, resultErr error) {
 	metrics := &ModelCallMetrics{}
 	started := time.Now()
@@ -218,7 +258,9 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 					code = "model_response_too_large"
 				}
 			}
-			_ = res.Body.Close()
+			if err := res.Body.Close(); err != nil {
+				log.Print("model HTTP response cleanup failed")
+			}
 		}
 		if code == "" {
 			break
@@ -374,4 +416,6 @@ func modelRetryAfter(value string, now time.Time) time.Duration {
 	}
 	return 0
 }
+
+// Close is a no-op; the adapter does not own the supplied HTTP transport.
 func (m *HTTPJSONDecisionModel) Close() error { return nil }

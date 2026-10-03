@@ -80,7 +80,11 @@ func TestOpenAPI30ExclusiveBoundsValidateRequestAndResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pack.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(pack.Close)
 	for _, value := range []int{0, 10} {
 		result, err := pack.Invoke(context.Background(), "calculateValue", JSON{"body": JSON{"value": value}}, nil)
 		if err != nil || result.ErrorCode != "capability_input_invalid" || calls != 0 {
@@ -213,9 +217,13 @@ func TestOpenAPIImportsArrayScalarAndEmptyResponses(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/ids":
-			_, _ = w.Write([]byte(`["A","B"]`))
+			if _, callErr := w.Write([]byte(`["A","B"]`)); callErr != nil {
+				t.Error(callErr)
+			}
 		case "/count":
-			_, _ = w.Write([]byte(`2`))
+			if _, callErr2 := w.Write([]byte(`2`)); callErr2 != nil {
+				t.Error(callErr2)
+			}
 		case "/delete":
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -225,7 +233,11 @@ func TestOpenAPIImportsArrayScalarAndEmptyResponses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pack.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(pack.Close)
 	for _, tc := range []struct {
 		name string
 		want JSON

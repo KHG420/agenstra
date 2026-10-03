@@ -2,6 +2,7 @@ package agenstra
 
 import "strings"
 
+// AgentPrompt combines host usage guidance with the framework decision protocol.
 func AgentPrompt(guidance string) string {
 	return strings.Join([]string{
 		"You are a capability-using agent. Choose one JSON decision at a time: tool_batch, read_skill, inspect_capability, inspect_fact, final, or request_input. No precomputed plan is required. Use the capability catalog and returned Facts to complete the user's task.",

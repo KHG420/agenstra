@@ -8,7 +8,10 @@ import (
 
 func TestOperationContextPointsToRetainedPollEvidence(t *testing.T) {
 	r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{}}, MaxContextCharacters: 80000}
-	state, _ := r.NewState("Read current activity", "")
+	state, callErr := r.NewState("Read current activity", "")
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	initial, completed := NewID(), NewID()
 	ref := "read-1"
 	state.Facts = []Fact{{FactID: completed, SourceCapability: "ui.command_status", ReferenceScope: "durable", Value: JSON{"data": JSON{"status": "succeeded", "result": JSON{"count": 156}}}}}
@@ -17,7 +20,10 @@ func TestOperationContextPointsToRetainedPollEvidence(t *testing.T) {
 		{CallRef: "poll-" + deterministicInvocationID(state.RunID, ref) + "-1", Capability: "ui.command_status", Status: "succeeded", FactID: strptr(completed), Arguments: JSON{"command_id": "command-1"}},
 	}
 	state.ModelObservations = append([]Observation{}, state.Observations...)
-	before, _ := CanonicalJSON(state)
+	before, callErr2 := CanonicalJSON(state)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	packet := r.Context(state)
 	if packet.Observations[0].FactID == nil || *packet.Observations[0].FactID != completed {
 		t.Fatal("model was directed to a discarded queued receipt", packet.Observations[0])
@@ -34,7 +40,10 @@ func TestOperationContextPointsToRetainedPollEvidence(t *testing.T) {
 	if !found {
 		t.Fatal("progress omitted the completed host action")
 	}
-	after, _ := CanonicalJSON(state)
+	after, callErr3 := CanonicalJSON(state)
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("model projection changed the durable audit trail")
 	}
@@ -42,7 +51,10 @@ func TestOperationContextPointsToRetainedPollEvidence(t *testing.T) {
 
 func TestOperationContextDoesNotBorrowAnotherInvocationsEvidence(t *testing.T) {
 	r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{}}}
-	state, _ := r.NewState("Read", "")
+	state, callErr4 := r.NewState("Read", "")
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	initial, other, retained := NewID(), NewID(), NewID()
 	state.Facts = []Fact{{FactID: retained}, {FactID: other}}
 	state.Observations = []Observation{
@@ -74,7 +86,10 @@ func TestOperationContextPreservesFailedAndUnknownOutcomes(t *testing.T) {
 	for _, status := range []string{"failed", "unknown"} {
 		t.Run(status, func(t *testing.T) {
 			r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{}}}
-			state, _ := r.NewState("Run operation", "")
+			state, callErr5 := r.NewState("Run operation", "")
+			if callErr5 != nil {
+				t.Error(callErr5)
+			}
 			initial, retained := NewID(), NewID()
 			ref := "job-1"
 			state.Facts = []Fact{{FactID: retained, Value: JSON{"data": JSON{"status": status}}}}
@@ -87,7 +102,10 @@ func TestOperationContextPreservesFailedAndUnknownOutcomes(t *testing.T) {
 			if status == "failed" {
 				Reject(state, ref, "job.start", "operation_failed", nil, "")
 			}
-			before, _ := CanonicalJSON(state)
+			before, callErr6 := CanonicalJSON(state)
+			if callErr6 != nil {
+				t.Error(callErr6)
+			}
 			packet := r.Context(state)
 			for _, item := range packet.Progress.Completed {
 				if item.Capability == "job.start" {
@@ -100,7 +118,10 @@ func TestOperationContextPreservesFailedAndUnknownOutcomes(t *testing.T) {
 			if status == "unknown" && (len(packet.Progress.Pending) != 1 || packet.Progress.Pending[0].Status != "unknown") {
 				t.Fatal("uncertain operation was no longer pending", packet.Progress)
 			}
-			after, _ := CanonicalJSON(state)
+			after, callErr7 := CanonicalJSON(state)
+			if callErr7 != nil {
+				t.Error(callErr7)
+			}
 			if !reflect.DeepEqual(before, after) {
 				t.Fatal("model projection changed the failed/unknown audit state")
 			}
@@ -111,13 +132,19 @@ func TestOperationContextPreservesFailedAndUnknownOutcomes(t *testing.T) {
 func TestBrowserCatalogKeepsExecutionHintsWithoutRepeatingHostPollConfiguration(t *testing.T) {
 	binding := &OperationBinding{IDPath: []any{"command_id"}, StatusPath: []any{"status"}, PollCapability: "ui.command_status", PollArgument: []string{"command_id"}, PendingStates: []string{"queued", "dispatched", "running"}, SuccessStates: []string{"succeeded"}, FailureStates: []string{"failed", "expired", "cancelled"}, ReconciliationStates: []string{"unknown"}, ReconcileOnTimeout: true, IntervalSeconds: 1, TimeoutSeconds: 60}
 	capability := CapabilityDescription{Name: "ui.read_activity", InputSchema: JSON{"type": "object"}, Effect: "read", Operation: binding}
-	before, _ := json.Marshal(capability)
+	before, callErr8 := json.Marshal(capability)
+	if callErr8 != nil {
+		t.Error(callErr8)
+	}
 	view := capability.ModelView()
 	operation := view["operation"].(map[string]any)
 	if len(operation) != 1 || operation["poll_capability"] != "ui.command_status" || view["requires_browser_context"] != true {
 		t.Fatal("catalog must describe the context prerequisite and result source concisely", view)
 	}
-	after, _ := json.Marshal(capability)
+	after, callErr9 := json.Marshal(capability)
+	if callErr9 != nil {
+		t.Error(callErr9)
+	}
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("model catalog changed the provider contract")
 	}

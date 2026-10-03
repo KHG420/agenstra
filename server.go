@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+// HTTPServer owns HTTP routing and an optional worker lifecycle.
+// The supplied host, deployment registry and run store remain caller-owned.
 type HTTPServer struct {
 	Host                *AgentHost
 	Deployment          *Deployment
@@ -30,6 +32,8 @@ type HTTPServer struct {
 	Web                 *WebIntegration
 }
 
+// NewHTTPServer initializes required stores and starts the optional worker.
+// Close the server before closing its supplied host resources.
 func NewHTTPServer(host *AgentHost, deployment *Deployment, workerEnabled bool, interval time.Duration) (*HTTPServer, error) {
 	if host == nil || host.Store == nil || deployment == nil {
 		return nil, fmt.Errorf("host and deployment required")
@@ -53,7 +57,7 @@ func NewHTTPServer(host *AgentHost, deployment *Deployment, workerEnabled bool, 
 	}
 	if e := host.Store.Initialize(); e != nil {
 		if registryOpened {
-			_ = deployment.Registry.Close()
+			e = errors.Join(e, deployment.Registry.Close())
 		}
 		return nil, e
 	}
@@ -62,7 +66,7 @@ func NewHTTPServer(host *AgentHost, deployment *Deployment, workerEnabled bool, 
 		s.Web, e = NewWebIntegration(host, deployment, *deployment.Config.WebIntegration)
 		if e != nil {
 			if registryOpened {
-				_ = deployment.Registry.Close()
+				e = errors.Join(e, deployment.Registry.Close())
 			}
 			return nil, e
 		}
@@ -77,7 +81,11 @@ func NewHTTPServer(host *AgentHost, deployment *Deployment, workerEnabled bool, 
 	}
 	return s, nil
 }
+
+// Handler returns the configured HTTP entry point without starting a listener.
 func (s *HTTPServer) Handler() http.Handler { return s.handler }
+
+// Close stops and joins the worker before closing the optional integration store.
 func (s *HTTPServer) Close() error {
 	s.mu.Lock()
 	if !s.ready {
@@ -132,7 +140,9 @@ func (s *HTTPServer) worker() {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Print("HTTP response write failed")
+	}
 }
 func apiError(w http.ResponseWriter, status int, code string, detail bool) {
 	if detail {
@@ -179,9 +189,11 @@ func serverError(w http.ResponseWriter, e error) {
 	apiError(w, 500, "internal_error", false)
 }
 func runView(run StoredRun, host *AgentHost) map[string]any {
-	b, _ := json.Marshal(run)
-	var m map[string]any
-	_ = json.Unmarshal(b, &m)
+	m, err := objectOf(run)
+	if err != nil {
+		log.Print("run response encoding failed")
+		return map[string]any{}
+	}
 	delete(m, "lease_token")
 	delete(m, "lease_until")
 	if telemetry, err := host.telemetry(run); err == nil {

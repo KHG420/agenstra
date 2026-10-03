@@ -33,7 +33,10 @@ func TestExecutionTelemetryTracksModelToolAndInputWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, _ := h.GetTelemetry(t.Context(), run.RunID, "alice")
+	v, callErr := h.GetTelemetry(t.Context(), run.RunID, "alice")
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	if v.Execution.Stage != "needs_input" || v.Execution.WaitReason == nil || v.Execution.StartedAt == nil {
 		t.Fatalf("%+v", v.Execution)
 	}
@@ -64,10 +67,15 @@ func TestModelRetryProgressAndObserverFailure(t *testing.T) {
 			w.WriteHeader(503)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"message": JSON{"content": `{"kind":"final","answer_markdown":"hello","fact_ids":[]}`}}}})
+		if callErr2 := json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"message": JSON{"content": `{"kind":"final","answer_markdown":"hello","fact_ids":[]}`}}}}); callErr2 != nil {
+			t.Error(callErr2)
+		}
 	}))
 	defer server.Close()
-	m, _ := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	m, callErr3 := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	m.RetryBaseDelay = time.Nanosecond
 	var progress []ModelRequestProgress
 	ctx := WithModelRequestObserver(t.Context(), func(p ModelRequestProgress) error { progress = append(progress, p); return nil })
@@ -86,7 +94,10 @@ func TestModelRetryProgressAndObserverFailure(t *testing.T) {
 func TestRuntimeInfoAndFrozenConversationSelection(t *testing.T) {
 	f := newWebFixture(t, &hostModel{}, false)
 	s := &HTTPServer{Host: f.h, Web: f.w, Deployment: f.d}
-	token, _ := f.w.MintSession("alice")
+	token, callErr4 := f.w.MintSession("alice")
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	req := httptest.NewRequest("GET", "/web/v1/integrations/records/runtime-info", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	out := httptest.NewRecorder()

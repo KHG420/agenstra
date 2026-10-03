@@ -17,13 +17,21 @@ func TestServerAuthReadinessAndOwnerIsolation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer store.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(store.Close)
 	host := NewAgentHost(store, nil, nil, nil)
 	server, e := NewHTTPServer(host, d, false, time.Second)
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer server.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(server.Close)
 	request := func(path, token string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("GET", path, nil)
 		if token != "" {
@@ -76,7 +84,11 @@ func TestWorkerDoesNotCancelAtPollInterval(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer store.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(store.Close)
 	model := &slowServerModel{started: make(chan struct{}, 1)}
 	provider := &hostProvider{}
 	host := NewAgentHost(store, func(context.Context, string, string) (CapabilityProvider, error) { return provider, nil }, model, func(context.Context, string, string) (ExecutionPolicy, error) {
@@ -86,7 +98,11 @@ func TestWorkerDoesNotCancelAtPollInterval(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer server.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(server.Close)
 	run, e := host.Create(t.Context(), "alice", "records", "Say done", "")
 	if e != nil {
 		t.Fatal(e)
@@ -130,7 +146,11 @@ func TestWorkerShutdownCancelsInFlightModel(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer store.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(store.Close)
 	model := &blockingServerModel{started: make(chan struct{}, 1)}
 	host := NewAgentHost(store, func(context.Context, string, string) (CapabilityProvider, error) { return &hostProvider{}, nil }, model, func(context.Context, string, string) (ExecutionPolicy, error) {
 		return ExecutionPolicy{GrantedCapabilities: map[string]bool{}, AllowModelData: true}, nil
@@ -145,7 +165,9 @@ func TestWorkerShutdownCancelsInFlightModel(t *testing.T) {
 	select {
 	case <-model.started:
 	case <-time.After(2 * time.Second):
-		server.Close()
+		if err := server.Close(); err != nil {
+			t.Error(err)
+		}
 		t.Fatal("worker did not start")
 	}
 	done := make(chan error, 1)
@@ -167,13 +189,21 @@ func TestServerRequiredBodyFields(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer store.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(store.Close)
 	host := NewAgentHost(store, nil, nil, nil)
 	server, e := NewHTTPServer(host, d, false, time.Second)
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer server.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(server.Close)
 	cases := []struct{ path, body string }{{"/runs", `{"pack_id":"records","instruction":"do it","request_id":""}`}, {"/runs/unknown/input", `{"field":"id","revision":0}`}, {"/runs/unknown/input", `{"field":"id","text":"x"}`}, {"/runs/unknown/approval", `{"invocation_id":"call-1","arguments_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`}}
 	for _, tc := range cases {
 		req := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))

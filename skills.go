@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 )
 
+// SkillFile pins a usage guide's path, metadata and SHA-256 digest.
 type SkillFile struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -17,6 +18,7 @@ type SkillFile struct {
 	SHA256      string `json:"sha256"`
 }
 
+// LoadSkillFiles verifies pinned guides beneath the package directory and returns their contents.
 func LoadSkillFiles(entries []SkillFile, directory string) (map[string]Skill, error) {
 	root, err := filepath.EvalSymlinks(directory)
 	if err != nil {

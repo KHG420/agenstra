@@ -33,7 +33,10 @@ func TestEffectiveSettingsSurviveHostChangeAndCheckpoints(t *testing.T) {
 func TestOlderSettingsSnapshotDoesNotInheritNewHostPolicy(t *testing.T) {
 	h := testHost(t, testStore(t), &hostProvider{}, &hostModel{})
 	run := createTestHostRun(t, h)
-	config, _ := objectOf(run.State["effective_config"])
+	config, callErr := objectOf(run.State["effective_config"])
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	settings := config["settings"].(JSON)
 	delete(settings, "context_policy")
 	run.State["effective_config"] = config

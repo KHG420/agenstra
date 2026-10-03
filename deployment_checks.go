@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -193,8 +194,17 @@ func configureDeploymentChecks(h *AgentHost, d *Deployment) error {
 			if err != nil {
 				return CapabilityResult{}, err
 			}
-			defer provider.Close()
-			if previous, ok := run.State["pack_fingerprint"].(string); ok && previous != fingerprint(provider) {
+			defer func() {
+				// Closing the connection does not change an already observed business outcome.
+				if err := provider.Close(); err != nil {
+					log.Print("provider cleanup failed")
+				}
+			}()
+			fp := fingerprint(provider)
+			if fp == "" {
+				return CapabilityResult{}, hostError("pack_changed")
+			}
+			if previous, ok := run.State["pack_fingerprint"].(string); ok && previous != fp {
 				return CapabilityResult{}, hostError("pack_changed")
 			}
 			cap, ok := provider.Capabilities()[rule.VerifyCapability]
@@ -224,8 +234,14 @@ func configureDeploymentChecks(h *AgentHost, d *Deployment) error {
 				return CapabilityResult{}, hostError("reconciliation_verification_failed")
 			}
 			value, err := valueAt(result.Data, rule.SuccessPath)
-			schema, _ := validateLocalSchema(JSON{"const": rule.SuccessValue}, false)
-			if err != nil || validateSchema(schema, value) != nil {
+			if err != nil {
+				return CapabilityResult{}, hostError("reconciliation_verification_failed")
+			}
+			schema, err := validateLocalSchema(JSON{"const": rule.SuccessValue}, false)
+			if err != nil {
+				return CapabilityResult{}, hostError("reconciliation_unavailable")
+			}
+			if validateSchema(schema, value) != nil {
 				return CapabilityResult{}, hostError("reconciliation_verification_failed")
 			}
 			value, err = valueAt(result.Data, rule.ResultPath)

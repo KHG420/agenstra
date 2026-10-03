@@ -26,7 +26,11 @@ func selectionTestDeployment(t *testing.T, endpoint string) *Deployment {
 		}},
 	}}
 	d.Registry = NewCapabilityRegistry(filepath.Join(dir, "registry.sqlite3"), filepath.Join(dir, "packages"))
-	t.Cleanup(func() { _ = d.Registry.Close() })
+	t.Cleanup(func() {
+		if callErr := d.Registry.Close(); callErr != nil {
+			t.Error(callErr)
+		}
+	})
 	return d
 }
 
@@ -35,7 +39,9 @@ func TestModelSelectionPinsBothPurposesAndSurvivesRestart(t *testing.T) {
 	requests := []JSON{}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload JSON
-		_ = json.NewDecoder(r.Body).Decode(&payload)
+		if callErr2 := json.NewDecoder(r.Body).Decode(&payload); callErr2 != nil {
+			t.Error(callErr2)
+		}
 		mu.Lock()
 		requests = append(requests, payload)
 		mu.Unlock()
@@ -43,7 +49,9 @@ func TestModelSelectionPinsBothPurposesAndSurvivesRestart(t *testing.T) {
 		if strings.HasPrefix(payload["model"].(string), "memory") {
 			content = `{"proposals":[]}`
 		}
-		_ = json.NewEncoder(w).Encode(JSON{"usage": JSON{"prompt_tokens": 100, "completion_tokens": 10}, "choices": []any{JSON{"message": JSON{"content": content}}}})
+		if callErr3 := json.NewEncoder(w).Encode(JSON{"usage": JSON{"prompt_tokens": 100, "completion_tokens": 10}, "choices": []any{JSON{"message": JSON{"content": content}}}}); callErr3 != nil {
+			t.Error(callErr3)
+		}
 	}))
 	defer upstream.Close()
 	d := selectionTestDeployment(t, upstream.URL)
@@ -55,7 +63,11 @@ func TestModelSelectionPinsBothPurposesAndSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(store.Close)
 	if err = store.Initialize(); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +145,10 @@ func TestModelSelectionPinsBothPurposesAndSurvivesRestart(t *testing.T) {
 	if err != nil || restarted.Snapshot().Revision != 1 || restarted.Snapshot().Config.Profiles["business"].Model != "business-new" {
 		t.Fatal("configuration not durable", err)
 	}
-	raw, _ := CanonicalJSON(oldRun.State)
+	raw, callErr4 := CanonicalJSON(oldRun.State)
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	if bytes.Contains(raw, []byte(d.Environment["MODEL_KEY"])) {
 		t.Fatal("resolved credential persisted")
 	}
@@ -156,14 +171,22 @@ func TestModelParametersRejectUnsupportedAndPreserveMeasurement(t *testing.T) {
 			}
 		})
 	}
-	m, _ := NewHTTPJSONDecisionModel("test", "https://example.com/v1", "test-key", time.Second, nil)
+	m, callErr5 := NewHTTPJSONDecisionModel("test", "https://example.com/v1", "test-key", time.Second, nil)
+	if callErr5 != nil {
+		t.Error(callErr5)
+	}
 	m.APIType, m.ReasoningEffort, m.MaxOutputTokens, m.TokenLimitField = "openai_chat", "low", 128, "max_completion_tokens"
 	payload, err := m.requestPayload([]byte(`{}`), "json")
 	if err != nil || payload["reasoning_effort"] != "low" || payload["max_completion_tokens"] != 128 || payload["max_tokens"] != nil {
 		t.Fatal(payload, err)
 	}
 	var measured JSON
-	m.CountInputTokens = func(_ string, raw []byte) (int64, error) { _ = json.Unmarshal(raw, &measured); return 10, nil }
+	m.CountInputTokens = func(_ string, raw []byte) (int64, error) {
+		if callErr6 := json.Unmarshal(raw, &measured); callErr6 != nil {
+			t.Error(callErr6)
+		}
+		return 10, nil
+	}
 	if _, err := m.MeasureInput(ContextPacket{}, "json"); err != nil || measured["reasoning_effort"] != "low" || measured["max_completion_tokens"] != float64(128) {
 		t.Fatal("measurement omitted wire parameters", measured, err)
 	}
@@ -184,10 +207,15 @@ func TestModelUsageBreakdownAndCachePrices(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_ = json.NewEncoder(w).Encode(JSON{"usage": tc.usage, "choices": []any{JSON{"message": JSON{"content": `{"kind":"final","answer_markdown":"ok"}`}}}})
+				if callErr7 := json.NewEncoder(w).Encode(JSON{"usage": tc.usage, "choices": []any{JSON{"message": JSON{"content": `{"kind":"final","answer_markdown":"ok"}`}}}}); callErr7 != nil {
+					t.Error(callErr7)
+				}
 			}))
 			defer server.Close()
-			m, _ := NewHTTPJSONDecisionModel("test", server.URL, "test-key", time.Second, server.Client())
+			m, callErr8 := NewHTTPJSONDecisionModel("test", server.URL, "test-key", time.Second, server.Client())
+			if callErr8 != nil {
+				t.Error(callErr8)
+			}
 			cachePrice := 0.1
 			m.InputPricePerMillion, m.OutputPricePerMillion, m.CachedInputPricePerMillion = 1, 2, &cachePrice
 			d, err := m.Decide(t.Context(), ContextPacket{}, "json")
@@ -221,7 +249,7 @@ func TestModelProtocolCheckRejectsSuffixAndDoesNotRetry(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requests := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++; memoryModelReply(w, tc.content) }))
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++; memoryModelReply(t, w, tc.content) }))
 			defer server.Close()
 			m, err := selectionTestDeployment(t, server.URL).NewModel()
 			if err != nil {
@@ -245,15 +273,26 @@ func TestModelAdminAuthorizationReferencesAndRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(store.Close)
 	h := NewAgentHost(store, nil, m, nil)
 	s, err := NewHTTPServer(h, d, false, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(s.Close)
 	request := func(method, key string, body any) *httptest.ResponseRecorder {
-		raw, _ := json.Marshal(body)
+		raw, callErr9 := json.Marshal(body)
+		if callErr9 != nil {
+			t.Error(callErr9)
+		}
 		req := httptest.NewRequest(method, "/admin/api/models", bytes.NewReader(raw))
 		req.Header.Set("Authorization", "Bearer "+key)
 		w := httptest.NewRecorder()

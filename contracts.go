@@ -14,19 +14,150 @@ import (
 	"time"
 )
 
+// JSON represents an object at framework and provider boundaries.
 type JSON = map[string]any
+
+// cloneJSON copies boundary data without normalizing Go numbers or typed slices.
+// JSON validation runs first so recursive copying cannot walk cyclic values.
+func cloneJSON[T any](value T) (T, error) {
+	var zero T
+	original, err := json.Marshal(value)
+	if err != nil {
+		return zero, err
+	}
+	type reference struct {
+		typeOf  reflect.Type
+		pointer uintptr
+		length  int
+	}
+	active := map[reference]bool{}
+	var copyValue func(reflect.Value) (reflect.Value, error)
+	copyValue = func(v reflect.Value) (reflect.Value, error) {
+		if !v.IsValid() {
+			return v, nil
+		}
+		// time.Time is immutable; its location data is shared by the standard library.
+		if v.Type() == reflect.TypeFor[time.Time]() {
+			return v, nil
+		}
+		if (v.Kind() == reflect.Pointer || v.Kind() == reflect.Map || v.Kind() == reflect.Slice) && !v.IsNil() {
+			ref := reference{typeOf: v.Type(), pointer: uintptr(v.UnsafePointer())}
+			if v.Kind() == reflect.Slice {
+				ref.length = v.Len()
+			}
+			if active[ref] {
+				return reflect.Value{}, errors.New("cyclic JSON boundary value")
+			}
+			active[ref] = true
+			defer delete(active, ref)
+		}
+		switch v.Kind() {
+		case reflect.Interface, reflect.Pointer:
+			if v.IsNil() {
+				return reflect.Zero(v.Type()), nil
+			}
+			elem, err := copyValue(v.Elem())
+			if err != nil {
+				return reflect.Value{}, err
+			}
+			if v.Kind() == reflect.Pointer {
+				out := reflect.New(v.Type()).Elem()
+				out.Set(reflect.New(v.Type().Elem()))
+				out.Elem().Set(elem)
+				return out, nil
+			}
+			out := reflect.New(v.Type()).Elem()
+			out.Set(elem)
+			return out, nil
+		case reflect.Map:
+			if v.IsNil() {
+				return reflect.Zero(v.Type()), nil
+			}
+			out := reflect.MakeMapWithSize(v.Type(), v.Len())
+			iter := v.MapRange()
+			for iter.Next() {
+				elem, err := copyValue(iter.Value())
+				if err != nil {
+					return reflect.Value{}, err
+				}
+				out.SetMapIndex(iter.Key(), elem)
+			}
+			return out, nil
+		case reflect.Slice, reflect.Array:
+			out := reflect.New(v.Type()).Elem()
+			if v.Kind() == reflect.Slice {
+				if v.IsNil() {
+					return out, nil
+				}
+				out = reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+			}
+			for i := 0; i < v.Len(); i++ {
+				elem, err := copyValue(v.Index(i))
+				if err != nil {
+					return reflect.Value{}, err
+				}
+				out.Index(i).Set(elem)
+			}
+			return out, nil
+		case reflect.Struct:
+			out := reflect.New(v.Type()).Elem()
+			for i := 0; i < v.NumField(); i++ {
+				field := v.Type().Field(i)
+				if !field.IsExported() || strings.Split(field.Tag.Get("json"), ",")[0] == "-" {
+					// Non-JSON state can contain locks or resources; leave it zero in the copy.
+					continue
+				}
+				elem, err := copyValue(v.Field(i))
+				if err != nil {
+					return reflect.Value{}, err
+				}
+				out.Field(i).Set(elem)
+			}
+			return out, nil
+		default:
+			return v, nil
+		}
+	}
+	copy, err := copyValue(reflect.ValueOf(value))
+	if err != nil {
+		return zero, err
+	}
+	if !copy.IsValid() {
+		return zero, nil
+	}
+	result := copy.Interface().(T)
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return zero, err
+	}
+	if !bytes.Equal(original, encoded) {
+		return zero, errors.New("JSON boundary depends on opaque Go state")
+	}
+	return result, nil
+}
 
 var callRefPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 var fieldPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
+// NewID returns a cryptographically random UUID for a new framework identity.
 func NewID() string {
 	var b [16]byte
+	// Go 1.26's crypto/rand.Read fills the buffer or terminates the process;
+	// it never returns a recoverable error.
 	_, _ = rand.Read(b[:])
 	b[6] = (b[6] & 15) | 64
 	b[8] = (b[8] & 63) | 128
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
+
+// CanonicalJSON encodes finite JSON with stable key ordering and numeric formatting.
+// It rejects unsupported and cyclic values; the returned bytes belong to the caller.
 func CanonicalJSON(v any) ([]byte, error) {
+	// Validate with encoding/json before walking maps and pointers ourselves.
+	// This rejects cyclic or unsupported host values without unbounded recursion.
+	if _, err := json.Marshal(v); err != nil {
+		return nil, err
+	}
 	if err := finiteJSON(v); err != nil {
 		return nil, err
 	}
@@ -73,7 +204,7 @@ func pythonFloat(v float64) (string, error) {
 	}
 	s := strconv.FormatFloat(v, 'e', -1, 64)
 	parts := strings.SplitN(s, "e", 2)
-	exponent, _ := strconv.Atoi(parts[1])
+	exponent, _ := strconv.Atoi(parts[1]) //nolint:errcheck // FormatFloat emits a bounded numeric exponent.
 	return fmt.Sprintf("%se%+03d", parts[0], exponent), nil
 }
 func canonicalPrepare(v any) (any, error) {
@@ -267,6 +398,9 @@ func finiteJSON(v any) error {
 	}
 	return nil
 }
+
+// ErrorCode returns a coded error's identifier, or the text of an uncoded error.
+// Callers exposing errors across HTTP or model boundaries must select a safe code.
 func ErrorCode(err error) string {
 	if err == nil {
 		return ""
@@ -278,6 +412,8 @@ func ErrorCode(err error) string {
 	return err.Error()
 }
 
+// Fact retains provider evidence and its source, lifetime and model visibility.
+// A fact's value is evidence data and cannot grant authorization.
 type Fact struct {
 	SourcePackID     string       `json:"source_pack_id,omitempty"`
 	SourceRelease    string       `json:"source_release,omitempty"`
@@ -293,11 +429,15 @@ type Fact struct {
 	ConnectionID     *string      `json:"connection_id"`
 	ExpiresAt        *time.Time   `json:"expires_at"`
 }
+
+// FactView carries a bounded model preview and marks omitted paths explicitly.
 type FactView struct {
 	Fact
 	OmittedPaths       [][]any `json:"omitted_paths"`
 	ReferenceAvailable bool    `json:"reference_available"`
 }
+
+// Observation records a call outcome and references its retained evidence.
 type Observation struct {
 	CallRef          string  `json:"call_ref"`
 	Capability       string  `json:"capability"`
@@ -307,6 +447,8 @@ type Observation struct {
 	Arguments        JSON    `json:"arguments"`
 	ArgumentsOmitted bool    `json:"arguments_omitted"`
 }
+
+// ContextPacket is the bounded decision input; previews do not replace complete facts.
 type ContextPacket struct {
 	MaxModelInputTokens     int64             `json:"max_model_input_tokens,omitempty"`
 	OriginPackID            string            `json:"origin_pack_id,omitempty"`
@@ -335,12 +477,17 @@ type ContextPacket struct {
 	ActionOutcomes          []ActionOutcome   `json:"action_outcomes,omitempty"`
 	CompletionReview        *Decision         `json:"completion_review,omitempty"`
 }
+
+// ToolCall binds a model call reference to a capability and JSON arguments.
 type ToolCall struct {
 	CallRef    string `json:"call_ref"`
 	Capability string `json:"capability"`
 	Arguments  JSON   `json:"arguments"`
 	Reason     string `json:"reason"`
 }
+
+// Decision represents one typed action in the ReAct protocol.
+// ModelCall is local request telemetry and is excluded from the decision JSON.
 type Decision struct {
 	Schema         string                `json:"schema"`
 	Kind           string                `json:"kind"`
@@ -358,12 +505,18 @@ type Decision struct {
 	ModelCall      *ModelCallMetrics     `json:"-"`
 }
 
+// DecisionTooManyCallsError rejects a batch larger than the protocol permits.
 type DecisionTooManyCallsError struct{}
 
+// Error returns the safe error identifier.
 func (DecisionTooManyCallsError) Error() string {
 	return "model_decision_invalid: tool_batch.calls has at most 4 items"
 }
+
+// Code exposes the stable identifier used by framework error handling.
 func (DecisionTooManyCallsError) Code() string { return "model_decision_invalid" }
+
+// Validate checks the decision kind, field bounds and JSON serializability.
 func (d Decision) Validate() error {
 	if d.Schema != "" && d.Schema != "agenstra.decision.v1" {
 		return errors.New("model_decision_invalid")
@@ -438,7 +591,10 @@ func (d Decision) Validate() error {
 	default:
 		return errors.New("model_decision_invalid")
 	}
-	return finiteJSON(d.Calls)
+	if _, err := json.Marshal(d); err != nil {
+		return errors.New("model_decision_invalid")
+	}
+	return nil
 }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -484,6 +640,7 @@ func strictDecision(raw []byte) (Decision, error) {
 	return d, d.Validate()
 }
 
+// OperationReceipt retains an external job identity and its polling state.
 type OperationReceipt struct {
 	OperationID   string           `json:"operation_id"`
 	Binding       OperationBinding `json:"binding"`
@@ -492,6 +649,9 @@ type OperationReceipt struct {
 	Deadline      float64          `json:"deadline"`
 	Polls         int              `json:"polls"`
 }
+
+// Invocation journals the original call identity, parameters and execution evidence.
+// Retries and reconciliation retain this identity rather than creating another write.
 type Invocation struct {
 	InvocationID      string             `json:"invocation_id"`
 	Call              ToolCall           `json:"call"`
@@ -528,6 +688,9 @@ type InvocationReceipt struct {
 	OperationStatus string `json:"operation_status,omitempty"`
 	Reconciled      bool   `json:"reconciled,omitempty"`
 }
+
+// RuntimeState is the complete checkpoint for a single run.
+// A driver owns its mutable state; model input is a separate bounded projection.
 type RuntimeState struct {
 	InvocationReceipts      []InvocationReceipt   `json:"invocation_receipts,omitempty"`
 	Execution               *ExecutionCheckpoint  `json:"execution,omitempty"`
@@ -565,6 +728,8 @@ type RuntimeState struct {
 	Progress                *ProgressTracker      `json:"progress_tracker,omitempty"`
 	SteeringCursor          int                   `json:"steering_cursor,omitempty"`
 }
+
+// RunResult exposes transient execution status, evidence and any requested user action.
 type RunResult struct {
 	ContextTelemetry *ContextTelemetry     `json:"context_telemetry,omitempty"`
 	Progress         *RunProgress          `json:"progress,omitempty"`

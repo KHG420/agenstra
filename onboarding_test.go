@@ -22,7 +22,9 @@ func TestMCPDiscoveryPinsCompleteContractAndNeverInvokes(t *testing.T) {
 			return
 		}
 		var request JSON
-		_ = json.NewDecoder(r.Body).Decode(&request)
+		if callErr := json.NewDecoder(r.Body).Decode(&request); callErr != nil {
+			t.Error(callErr)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Mcp-Session-Id", "test-session")
 		if request["method"] == "notifications/initialized" {
@@ -36,7 +38,9 @@ func TestMCPDiscoveryPinsCompleteContractAndNeverInvokes(t *testing.T) {
 		case "tools/call":
 			calls++
 		}
-		_ = json.NewEncoder(w).Encode(JSON{"jsonrpc": "2.0", "id": request["id"], "result": result})
+		if callErr2 := json.NewEncoder(w).Encode(JSON{"jsonrpc": "2.0", "id": request["id"], "result": result}); callErr2 != nil {
+			t.Error(callErr2)
+		}
 	}))
 	defer upstream.Close()
 	tools, err := DiscoverMCPTools(t.Context(), MCPSource{Transport: "streamable_http", URLEnv: strptr("MCP_URL")}, map[string]string{"MCP_URL": upstream.URL})
@@ -57,7 +61,10 @@ func TestMCPDiscoveryPinsCompleteContractAndNeverInvokes(t *testing.T) {
 	d := &Deployment{Registry: r, Config: DeploymentConfig{Management: &ManagementConfig{AdminAPIKeyEnv: "ADMIN_KEY"}}, Environment: map[string]string{"ADMIN_KEY": "distinct-admin-key-at-least-24", "UPSTREAM_URL": upstream.URL}}
 	s := &HTTPServer{Deployment: d}
 	request := func(key string, revision int, refs map[string]string) *httptest.ResponseRecorder {
-		raw, _ := json.Marshal(JSON{"expected_revision": revision, "environment": refs})
+		raw, callErr3 := json.Marshal(JSON{"expected_revision": revision, "environment": refs})
+		if callErr3 != nil {
+			t.Error(callErr3)
+		}
 		req := httptest.NewRequest("POST", "/admin/api/drafts/discover/discover", bytes.NewReader(raw))
 		req.Header.Set("Authorization", "Bearer "+key)
 		w := httptest.NewRecorder()
@@ -77,7 +84,10 @@ func TestMCPDiscoveryPinsCompleteContractAndNeverInvokes(t *testing.T) {
 	if w.Code != 200 || strings.Contains(w.Body.String(), upstream.URL) || strings.Contains(w.Body.String(), d.Environment["ADMIN_KEY"]) {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	after, _ := r.Draft(draft.DraftID)
+	after, callErr4 := r.Draft(draft.DraftID)
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	if after.Revision != draft.Revision || len(after.Manifest["tools"].([]any)) != 0 || calls != 0 || closes != 2 {
 		t.Fatal("discovery changed grants, draft or business state")
 	}
@@ -176,7 +186,10 @@ func TestDeclarativeReconciliationChecksOriginalIdentityAndReadPermission(t *tes
 			if err != nil || run.Status != "needs_reconciliation" {
 				t.Fatal(run.Status, err)
 			}
-			state, _ := h.restore(run)
+			state, callErr5 := h.restore(run)
+			if callErr5 != nil {
+				t.Error(callErr5)
+			}
 			item := state.Pending[0]
 			run, err = h.Reconcile(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, run.Revision)
 			if mode == "confirmed" || mode == "large_number" {
@@ -199,7 +212,10 @@ func TestDeclarativeReconciliationChecksOriginalIdentityAndReadPermission(t *tes
 
 func TestRunDiagnosticsReadOnlyAndOwnerScoped(t *testing.T) {
 	h, p, run, _ := uncertainRun(t)
-	before, _ := h.Store.GetRun(run.RunID, "alice")
+	before, callErr6 := h.Store.GetRun(run.RunID, "alice")
+	if callErr6 != nil {
+		t.Error(callErr6)
+	}
 	report, err := h.GetDiagnostics(t.Context(), run.RunID, "alice")
 	if err != nil || report.Status != "needs_reconciliation" || len(report.Findings) == 0 {
 		t.Fatal(report, err)
@@ -214,7 +230,10 @@ func TestRunDiagnosticsReadOnlyAndOwnerScoped(t *testing.T) {
 	if out.Code != 200 || strings.Contains(out.Body.String(), "R-1") || strings.Contains(out.Body.String(), "lease_token") {
 		t.Fatal(out.Code, out.Body.String())
 	}
-	after, _ := h.Store.GetRun(run.RunID, "alice")
+	after, callErr7 := h.Store.GetRun(run.RunID, "alice")
+	if callErr7 != nil {
+		t.Error(callErr7)
+	}
 	if before.Revision != after.Revision || p.calls != 1 {
 		t.Fatal("diagnostic read invoked a tool or mutated a run")
 	}

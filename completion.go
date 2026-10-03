@@ -17,15 +17,21 @@ type CompletionContext struct {
 	Followups                                        []string
 }
 
+// CompletionValidator checks cited business evidence after citation identities are verified.
+// It must respect cancellation and return deliberate feedback through CompletionValidationError.
 type CompletionValidator func(context.Context, CompletionContext) error
 
 // CompletionValidationError carries deliberately model-visible feedback.
 // Ordinary errors are reduced to a stable code and never expose their text.
 type CompletionValidationError struct{ Kind, Feedback string }
 
+// Error returns the safe error identifier.
 func (e CompletionValidationError) Error() string { return e.Kind }
-func (e CompletionValidationError) Code() string  { return e.Kind }
 
+// Code exposes the stable identifier used by framework error handling.
+func (e CompletionValidationError) Code() string { return e.Kind }
+
+// FactRequirement constrains the latest cited value from one capability.
 type FactRequirement struct {
 	Capability string `json:"capability"`
 	Path       []any  `json:"path"`
@@ -33,6 +39,7 @@ type FactRequirement struct {
 	Required   bool   `json:"required,omitempty"`
 }
 
+// UnmarshalJSON strictly decodes a requirement and requires an explicit value.
 func (r *FactRequirement) UnmarshalJSON(raw []byte) error {
 	type requirement FactRequirement
 	var parsed requirement

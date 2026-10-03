@@ -18,7 +18,9 @@ import (
 func TestMCPStdioCancellationReapsProcess(t *testing.T) {
 	if os.Getenv("AGENSTRA_MCP_HANG_HELPER") == "1" {
 		reader := bufio.NewReader(os.Stdin)
-		_, _ = reader.ReadString('\n')
+		if _, callErr := reader.ReadString('\n'); callErr != nil {
+			t.Error(callErr)
+		}
 		time.Sleep(30 * time.Second)
 		return
 	}
@@ -75,7 +77,9 @@ func TestMCPHTTPPaginationContractAndSessionCleanup(t *testing.T) {
 			t.Errorf("wrong method: %s", r.Method)
 		}
 		var request JSON
-		_ = json.NewDecoder(r.Body).Decode(&request)
+		if callErr2 := json.NewDecoder(r.Body).Decode(&request); callErr2 != nil {
+			t.Error(callErr2)
+		}
 		method, _ := request["method"].(string)
 		if method != "initialize" && r.Header.Get("Mcp-Session-Id") != "session-1" {
 			t.Errorf("missing session on %s", method)
@@ -104,7 +108,9 @@ func TestMCPHTTPPaginationContractAndSessionCleanup(t *testing.T) {
 		default:
 			t.Errorf("unexpected method %s", method)
 		}
-		_ = json.NewEncoder(w).Encode(JSON{"jsonrpc": "2.0", "id": request["id"], "result": result})
+		if callErr3 := json.NewEncoder(w).Encode(JSON{"jsonrpc": "2.0", "id": request["id"], "result": result}); callErr3 != nil {
+			t.Error(callErr3)
+		}
 	}))
 	defer server.Close()
 	manifest := JSON{"schema": "agenstra.mcp-pack.v1", "name": "metrics", "version": "1", "guidance": "Use metrics", "source": JSON{"transport": "streamable_http", "url_env": "MCP_URL"}, "tools": []any{JSON{"name": tool["name"], "effect": "read", "contract_sha256": MCPContractDigest(tool)}}}

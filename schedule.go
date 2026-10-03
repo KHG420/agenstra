@@ -28,6 +28,7 @@ type ScheduleRequest struct {
 	Schedule    ScheduleSpec `json:"schedule"`
 }
 
+// ScheduledTask retains an owner's schedule, revision and next dispatch time.
 type ScheduledTask struct {
 	ScheduleID string `json:"schedule_id"`
 	OwnerID    string `json:"owner_id"`
@@ -133,6 +134,7 @@ func nextSchedule(spec ScheduleSpec, due, now float64) (*float64, error) {
 	return &next, nil
 }
 
+// CreateSchedule authorizes and saves a normalized schedule with its request identity.
 func (h *AgentHost) CreateSchedule(ctx context.Context, owner string, request ScheduleRequest) (ScheduledTask, error) {
 	now := h.now()
 	request, next, err := request.normalized(now)
@@ -146,14 +148,16 @@ func (h *AgentHost) CreateSchedule(ctx context.Context, owner string, request Sc
 	return task, h.Store.insertSchedule(task)
 }
 
-// GetSchedule/ListSchedules remain available to the owner after a pack grant is
-// revoked, so the owner can inspect, pause or remove the affected schedule.
+// GetSchedule remains available to the owner after a pack grant is revoked,
+// so the owner can inspect, pause or remove the affected schedule.
 func (h *AgentHost) GetSchedule(ctx context.Context, id, owner string) (ScheduledTask, error) {
 	if err := ctx.Err(); err != nil {
 		return ScheduledTask{}, err
 	}
 	return h.Store.getSchedule(id, owner)
 }
+
+// ListSchedules returns a bounded list of the owner's schedules.
 func (h *AgentHost) ListSchedules(ctx context.Context, owner string, limit int) ([]ScheduledTask, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -164,6 +168,7 @@ func (h *AgentHost) ListSchedules(ctx context.Context, owner string, limit int) 
 	return h.Store.listSchedules(owner, limit)
 }
 
+// UpdateSchedule authorizes an edit against the current schedule revision.
 func (h *AgentHost) UpdateSchedule(ctx context.Context, id, owner string, revision int, request ScheduleRequest) (ScheduledTask, error) {
 	task, err := h.GetSchedule(ctx, id, owner)
 	if err != nil {
@@ -182,6 +187,8 @@ func (h *AgentHost) UpdateSchedule(ctx context.Context, id, owner string, revisi
 	}
 	return h.Store.replaceSchedule(task, revision, h.now())
 }
+
+// PauseSchedule stops future dispatches under an expected revision.
 func (h *AgentHost) PauseSchedule(ctx context.Context, id, owner string, revision int) (ScheduledTask, error) {
 	task, err := h.GetSchedule(ctx, id, owner)
 	if err != nil {
@@ -193,6 +200,8 @@ func (h *AgentHost) PauseSchedule(ctx context.Context, id, owner string, revisio
 	task.Status = "paused"
 	return h.Store.replaceSchedule(task, revision, h.now())
 }
+
+// ResumeSchedule recomputes the next dispatch after checking current access and revision.
 func (h *AgentHost) ResumeSchedule(ctx context.Context, id, owner string, revision int) (ScheduledTask, error) {
 	task, err := h.GetSchedule(ctx, id, owner)
 	if err != nil {
@@ -213,12 +222,16 @@ func (h *AgentHost) ResumeSchedule(ctx context.Context, id, owner string, revisi
 	task.Status = "active"
 	return h.Store.replaceSchedule(task, revision, h.now())
 }
+
+// DeleteSchedule removes the schedule under its expected revision; existing runs retain their evidence.
 func (h *AgentHost) DeleteSchedule(ctx context.Context, id, owner string, revision int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	return h.Store.deleteSchedule(id, owner, revision)
 }
+
+// ListScheduleExecutions returns an owner-scoped page of saved dispatches after a cursor.
 func (h *AgentHost) ListScheduleExecutions(ctx context.Context, id, owner string, after int64, limit int) ([]ScheduleExecution, error) {
 	if _, err := h.GetSchedule(ctx, id, owner); err != nil {
 		return nil, err

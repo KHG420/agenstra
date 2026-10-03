@@ -15,7 +15,9 @@ import (
 
 func TestMCPStdioCancellationInterruptsBlockedWrite(t *testing.T) {
 	if os.Getenv("AGENSTRA_MCP_BLOCKED_STDIN_HELPER") == "1" {
-		_, _ = fmt.Fprintln(os.Stdout, "ready")
+		if _, callErr := fmt.Fprintln(os.Stdout, "ready"); callErr != nil {
+			t.Error(callErr)
+		}
 		time.Sleep(30 * time.Second)
 		return
 	}
@@ -33,7 +35,11 @@ func TestMCPStdioCancellationInterruptsBlockedWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &stdioMCP{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}
-	defer client.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(client.Close)
 	if line, err := client.stdout.ReadString('\n'); err != nil || line != "ready\n" {
 		t.Fatalf("helper failed to start: %q %v", line, err)
 	}
@@ -53,7 +59,9 @@ func TestMCPStdioCancellationInterruptsBlockedWrite(t *testing.T) {
 			t.Fatal("cancelled subprocess was not reaped")
 		}
 	case <-time.After(2 * time.Second):
-		_ = client.Close()
+		if callErr2 := client.Close(); callErr2 != nil {
+			t.Error(callErr2)
+		}
 		<-finished
 		t.Fatal("context deadline did not interrupt a blocked stdin write")
 	}
@@ -82,17 +90,27 @@ func TestMCPStdioRequiresCompleteResponseLinesForTheCurrentRequest(t *testing.T)
 		}
 		switch os.Getenv("AGENSTRA_MCP_STDIO_RESPONSE_CASE") {
 		case "server-request":
-			_, _ = fmt.Fprintf(os.Stdout, "{\"jsonrpc\":\"2.0\",\"id\":%v,\"method\":\"ping\"}\n", request["id"])
+			if _, callErr3 := fmt.Fprintf(os.Stdout, "{\"jsonrpc\":\"2.0\",\"id\":%v,\"method\":\"ping\"}\n", request["id"]); callErr3 != nil {
+				t.Error(callErr3)
+			}
 		case "notification":
-			_, _ = fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":1}}`)
+			if _, callErr4 := fmt.Fprintln(os.Stdout, `{"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":1}}`); callErr4 != nil {
+				t.Error(callErr4)
+			}
 		case "trailing-garbage":
-			_, _ = fmt.Fprintf(os.Stdout, "%s invalid\n", raw)
+			if _, callErr5 := fmt.Fprintf(os.Stdout, "%s invalid\n", raw); callErr5 != nil {
+				t.Error(callErr5)
+			}
 			return
 		case "second-value":
-			_, _ = fmt.Fprintf(os.Stdout, "%s %s\n", raw, raw)
+			if _, callErr6 := fmt.Fprintf(os.Stdout, "%s %s\n", raw, raw); callErr6 != nil {
+				t.Error(callErr6)
+			}
 			return
 		}
-		_, _ = fmt.Fprintf(os.Stdout, "%s \t\n", raw)
+		if _, callErr7 := fmt.Fprintf(os.Stdout, "%s \t\n", raw); callErr7 != nil {
+			t.Error(callErr7)
+		}
 		return
 	}
 	for _, tc := range []struct {
@@ -125,7 +143,9 @@ func TestMCPStdioRequiresCompleteResponseLinesForTheCurrentRequest(t *testing.T)
 			}
 			client := &stdioMCP{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}
 			defer func() {
-				_ = client.Close()
+				if callErr8 := client.Close(); callErr8 != nil {
+					t.Error(callErr8)
+				}
 				if cmd.ProcessState == nil {
 					t.Error("test subprocess was not reaped")
 				}

@@ -11,6 +11,8 @@ import (
 	"strings"
 )
 
+// ImportOpenAPI reads a complete JSON document and generates selected endpoint drafts.
+// It does not infer approvals, idempotency guarantees or final job states.
 func ImportOpenAPI(path, name, baseURLEnv string, operations []string, effects map[string]string, tokenEnv string) (JSON, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -28,7 +30,11 @@ func openapiPointer(doc JSON, ref string) (any, error) {
 	}
 	var cur any = doc
 	for _, part := range strings.Split(ref[2:], "/") {
-		part, _ = url.PathUnescape(part)
+		decoded, err := url.PathUnescape(part)
+		if err != nil {
+			return nil, fmt.Errorf("invalid OpenAPI reference: %w", err)
+		}
+		part = decoded
 		part = strings.ReplaceAll(strings.ReplaceAll(part, "~1", "/"), "~0", "~")
 		obj, ok := cur.(map[string]any)
 		if !ok {
@@ -304,6 +310,8 @@ func resolveParameters(doc JSON, v any) ([]JSON, error) {
 	}
 	return out, nil
 }
+
+// ImportOpenAPIDocument validates selected operations and returns a REST manifest draft for review.
 func ImportOpenAPIDocument(doc JSON, name, baseURLEnv string, operations []string, effects map[string]string, tokenEnv string) (JSON, error) {
 	version, _ := doc["openapi"].(string)
 	if !strings.HasPrefix(version, "3.0.") && !strings.HasPrefix(version, "3.1.") {
@@ -535,9 +543,15 @@ func ImportOpenAPIDocument(doc JSON, name, baseURLEnv string, operations []strin
 				first = v.(map[string]any)
 				break
 			}
-			firstRaw, _ := CanonicalJSON(first)
+			firstRaw, err := CanonicalJSON(first)
+			if err != nil {
+				return nil, err
+			}
 			for _, v := range byStatus {
-				raw, _ := CanonicalJSON(v)
+				raw, err := CanonicalJSON(v)
+				if err != nil {
+					return nil, err
+				}
 				if !bytes.Equal(raw, firstRaw) {
 					return nil, fmt.Errorf("%s: differing 2xx response schemas need manual mapping", opID)
 				}

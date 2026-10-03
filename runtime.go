@@ -14,6 +14,8 @@ import (
 	"unicode/utf8"
 )
 
+// AgentRuntime owns decision budgets, references and a run's mutable execution state.
+// A runtime is used by one driver at a time; its provider and model remain caller-owned.
 type AgentRuntime struct {
 	ContextPolicy              ContextPolicy
 	ModelContextWindowTokens   int64
@@ -65,6 +67,8 @@ func (r *AgentRuntime) defaults() {
 		r.Grants = map[string]bool{}
 	}
 }
+
+// NewState creates an independent checkpoint and validates the initial instruction.
 func (r *AgentRuntime) NewState(instruction, runID string) (*RuntimeState, error) {
 	r.defaults()
 	if strings.TrimSpace(instruction) == "" {
@@ -75,12 +79,16 @@ func (r *AgentRuntime) NewState(instruction, runID string) (*RuntimeState, error
 	}
 	return &RuntimeState{SchemaVersion: 1, RunID: runID, Instruction: instruction, Status: "queued", Facts: []Fact{}, Observations: []Observation{}, ModelObservations: []Observation{}, Decisions: []JSON{}, UsedRefs: []string{}, Repeated: map[string]int{}, LoadedSkills: []string{}, Followups: []string{}, Pending: []Invocation{}}, nil
 }
+
+// ReferenceAvailable checks expiry and the connection scope of evidence references.
 func ReferenceAvailable(f Fact, connectionID string) bool {
 	if f.ExpiresAt != nil && !f.ExpiresAt.After(time.Now().UTC()) {
 		return false
 	}
 	return f.ReferenceScope != "connection" || (f.ConnectionID != nil && *f.ConnectionID == connectionID)
 }
+
+// ResolveArgument copies JSON arguments and resolves permitted references from complete facts.
 func ResolveArgument(value any, facts map[string]Fact, connectionID string, check bool) (any, error) {
 	switch t := value.(type) {
 	case []any:
@@ -149,11 +157,16 @@ func ResolveArgument(value any, facts map[string]Fact, connectionID string, chec
 		if err != nil {
 			return nil, errors.New("fact_reference_path_invalid")
 		}
-		raw, _ := CanonicalJSON(selected)
+		raw, err := CanonicalJSON(selected)
+		if err != nil {
+			return nil, errors.New("fact_reference_path_invalid")
+		}
 		var copied any
 		dec := json.NewDecoder(strings.NewReader(string(raw)))
 		dec.UseNumber()
-		_ = dec.Decode(&copied)
+		if err := dec.Decode(&copied); err != nil {
+			return nil, errors.New("fact_reference_path_invalid")
+		}
 		return copied, nil
 	default:
 		return value, nil
@@ -215,7 +228,11 @@ func factView(f Fact, budget int) FactView {
 				return nil
 			}
 		}
-		raw, _ := CanonicalJSON(value)
+		raw, err := CanonicalJSON(value)
+		if err != nil {
+			omitted = append(omitted, append([]any{}, path...))
+			return nil
+		}
 		if utf8.RuneCount(raw) <= n {
 			return value
 		}
@@ -229,7 +246,10 @@ func factView(f Fact, budget int) FactView {
 			}
 			sort.Strings(keys)
 			for i, k := range keys {
-				keyJSON, _ := CanonicalJSON(k)
+				keyJSON, err := CanonicalJSON(k)
+				if err != nil {
+					break
+				}
 				overhead := utf8.RuneCount(keyJSON) + 2
 				slots := len(keys) - i
 				if remaining < overhead+4 {
@@ -251,7 +271,10 @@ func factView(f Fact, budget int) FactView {
 				if omittedValue {
 					continue
 				}
-				enc, _ := CanonicalJSON(preview)
+				enc, err := CanonicalJSON(preview)
+				if err != nil {
+					break
+				}
 				cost := overhead + utf8.RuneCount(enc)
 				if cost > remaining {
 					break
@@ -273,7 +296,10 @@ func factView(f Fact, budget int) FactView {
 				}
 				p := append(append([]any{}, path...), i)
 				preview := visit(t[i], p, max(4, (remaining-1)/(limit-i)))
-				enc, _ := CanonicalJSON(preview)
+				enc, err := CanonicalJSON(preview)
+				if err != nil {
+					break
+				}
 				cost := 1 + utf8.RuneCount(enc)
 				if cost > remaining {
 					break
@@ -318,7 +344,10 @@ func arrayOmissions(facts []Fact, views []FactView) []string {
 					key := facts[i].FactID + fmt.Sprint(p)
 					if !seen[key] {
 						seen[key] = true
-						raw, _ := CanonicalJSON(p)
+						raw, err := CanonicalJSON(p)
+						if err != nil {
+							return
+						}
 						notes = append(notes, fmt.Sprintf("fact %s: array at %s has %d items; omitted null placeholders/empty previews unknown; inspect_fact", facts[i].FactID, raw, len(t)))
 					}
 					for j := 0; j < min(3, len(t)); j++ {
@@ -382,8 +411,8 @@ func (r *AgentRuntime) contextCandidate(state *RuntimeState) ContextPacket {
 	modelObservations := currentEvidenceObservations(state, state.ModelObservations)
 	start := max(0, len(modelObservations)-12)
 	for _, o := range modelObservations[start:] {
-		raw, _ := CanonicalJSON(o.Arguments)
-		if utf8.RuneCount(raw) > 2000 {
+		raw, err := CanonicalJSON(o.Arguments)
+		if err != nil || utf8.RuneCount(raw) > 2000 {
 			o.Arguments = JSON{}
 			o.ArgumentsOmitted = true
 		}
@@ -409,8 +438,9 @@ func (r *AgentRuntime) contextCandidate(state *RuntimeState) ContextPacket {
 	var inspected JSON
 	if state.InspectedCapability != nil {
 		if c, ok := r.Provider.Capabilities()[*state.InspectedCapability]; ok && r.Grants[c.Name] {
-			raw, _ := json.Marshal(c)
-			_ = json.Unmarshal(raw, &inspected)
+			if view, err := objectOf(c); err == nil {
+				inspected = view
+			}
 		}
 	}
 	features := []string{}
@@ -435,11 +465,24 @@ func (r *AgentRuntime) contextCandidate(state *RuntimeState) ContextPacket {
 	return packet
 }
 
+// Context returns an independent bounded model view of the run.
+// An invalid JSON state produces an empty view; Step reports execution failures.
 func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
+	if _, err := json.Marshal(state); err != nil {
+		return ContextPacket{}
+	}
 	packet := r.contextCandidate(state)
 	projected, _, _ := r.characterProjection(state, packet, r.systemPrompt())
-	return projected
+	// A context view may be retained or modified by the host without changing
+	// the full evidence used to resolve references in later rounds.
+	view, err := cloneJSON(projected)
+	if err != nil {
+		return ContextPacket{}
+	}
+	return view
 }
+
+// Reject records a failed model observation without dispatching a provider call.
 func Reject(state *RuntimeState, callRef, capability, code string, args map[string]any, factID string) {
 	if args == nil {
 		args = JSON{}
@@ -448,6 +491,8 @@ func Reject(state *RuntimeState, callRef, capability, code string, args map[stri
 	state.Observations = append(state.Observations, obs)
 	state.ModelObservations = append(state.ModelObservations, obs)
 }
+
+// Reject records a failed model observation without dispatching the call.
 func (r *AgentRuntime) Reject(state *RuntimeState, callRef, capability, code string, args map[string]any, factID string) {
 	Reject(state, callRef, capability, code, args, factID)
 }
@@ -461,12 +506,21 @@ func deterministicInvocationID(runID, ref string) string {
 	sum[8] = (sum[8] & 63) | 128
 	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }
+
+// Step performs one bounded decision round and prepares calls without invoking them.
+// The driver may checkpoint a model reservation through beforeModel.
 func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeModel func() error) error {
 	r.defaults()
 	if err := r.contextPolicy(state).Validate(); err != nil {
 		return err
 	}
 	if len(state.Pending) > 0 || (state.Status != "queued" && state.Status != "running") {
+		return nil
+	}
+	// Validate before walking evidence or computing projection budgets.
+	if _, err := json.Marshal(state); err != nil {
+		state.Status = "failed"
+		state.ErrorCode = strptr("run_state_invalid")
 		return nil
 	}
 	state.Status = "running"
@@ -496,6 +550,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		}
 		packet := r.contextCandidate(state)
 		packet.CompletionReview = review
+		if _, err := CanonicalJSON(packet); err != nil {
+			state.Status = "failed"
+			state.ErrorCode = strptr("run_state_invalid")
+			return nil
+		}
 		prompt := r.systemPrompt() + feedback
 		purpose := "decision"
 		if len(packet.ActionOutcomes) > 0 {
@@ -511,8 +570,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		for _, note := range packet.ContextOmissions {
 			if strings.HasPrefix(note, "fact ") && strings.Contains(note, "array at") {
 				extra := "\nAuthoritative full array lengths from stored Facts follow. A preview may show fewer items; inspect omitted indices before claiming coverage:\n" + note
-				raw, _ := CanonicalJSON(packet)
-				if utf8.RuneCountInString(prompt)+utf8.RuneCount(raw)+utf8.RuneCountInString(extra) <= r.MaxContextCharacters {
+				if contextCharacters(packet) <= r.MaxContextCharacters-utf8.RuneCountInString(prompt)-utf8.RuneCountInString(extra) {
 					prompt += extra
 				}
 				break
@@ -565,7 +623,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		c.ReservedOutputTokens = reserve
 		if measureErr != nil {
 			state.Status = "failed"
-			state.ErrorCode = strptr(ErrorCode(measureErr))
+			state.ErrorCode = strptr(modelErrorCode(measureErr))
 			return nil
 		}
 		if tokenLimit != nil {
@@ -584,7 +642,20 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			c.TokenUtilization = &ratio
 			c.OverLimit = c.OverLimit || measurement.Tokens > *tokenLimit
 		}
-		raw, _ := CanonicalJSON(packet)
+		raw, err := CanonicalJSON(packet)
+		if err != nil {
+			state.Status = "failed"
+			state.ErrorCode = strptr("run_state_invalid")
+			return nil
+		}
+		// Detach nested evidence, observations and followups before handing the
+		// packet to a model implementation supplied by the host.
+		modelPacket, err := cloneJSON(packet)
+		if err != nil {
+			state.Status = "failed"
+			state.ErrorCode = strptr("run_state_invalid")
+			return nil
+		}
 		if state.ContextTelemetry.OverLimit {
 			state.Status = "failed"
 			state.ErrorCode = strptr("context_too_large")
@@ -606,7 +677,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			}
 		}
 		started := time.Now()
-		d, err := r.Model.Decide(ctx, packet, prompt)
+		d, err := r.Model.Decide(ctx, modelPacket, prompt)
 		metrics := ModelCallMetrics{Attempts: 1, EstimatedInputTokens: int64(len(raw) + len(prompt) + 128), ElapsedMilliseconds: time.Since(started).Milliseconds()}
 		if d.ModelCall != nil {
 			metrics = *d.ModelCall
@@ -620,7 +691,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			state.ContextTelemetry.ReportedInputTokens = &n
 		}
 		if err != nil {
-			metrics.ErrorCode = strptr(ErrorCode(err))
+			metrics.ErrorCode = strptr(modelErrorCode(err))
 		}
 		state.ModelCalls[callIndex] = metrics
 		rebuildModelUsage(state)
@@ -653,7 +724,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			decision = d
 			break
 		}
-		code := ErrorCode(err)
+		code := modelErrorCode(err)
 		if code != "model_decision_invalid" {
 			state.Status = "failed"
 			state.ErrorCode = strptr(code)
@@ -880,14 +951,21 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 	return nil
 }
 func recordDecision(state *RuntimeState, decision Decision) {
-	raw, _ := CanonicalJSON(decision)
+	raw, err := CanonicalJSON(decision)
+	if err != nil {
+		return // Invalid decisions cannot become saved history.
+	}
 	var stored JSON
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.UseNumber()
-	_ = decoder.Decode(&stored)
+	if err := decoder.Decode(&stored); err != nil {
+		return
+	}
 	state.Decisions = append(state.Decisions, stored)
 }
 
+// Result exposes the current result; its mutable slices remain owned by state.
+// Copy them before modifying or sharing them with another goroutine.
 func (r *AgentRuntime) Result(state *RuntimeState) RunResult {
 	status := state.Status
 	if status == "queued" || status == "running" {
@@ -895,6 +973,9 @@ func (r *AgentRuntime) Result(state *RuntimeState) RunResult {
 	}
 	return RunResult{ContextTelemetry: state.ContextTelemetry, Progress: runProgress(state, r.MaxStagnantRounds), Status: status, AnswerMarkdown: state.AnswerMarkdown, ResultRefs: state.ResultRefs, ErrorCode: state.ErrorCode, InputField: state.InputField, InputPrompt: state.InputPrompt, InputSchema: state.InputSchema, Facts: state.Facts, Observations: state.Observations, Decisions: state.Decisions, ModelCalls: state.ModelCalls, ModelUsage: state.ModelUsage}
 }
+
+// Run executes transient work until completion or a required user action.
+// It respects cancellation and leaves uncertain external effects for reconciliation.
 func (r *AgentRuntime) Run(ctx context.Context, instruction string) (RunResult, error) {
 	state, err := r.NewState(instruction, "")
 	if err != nil {
@@ -940,7 +1021,10 @@ func (r *AgentRuntime) Run(ctx context.Context, instruction string) (RunResult, 
 				item := &state.Pending[i]
 				cap, ok := r.Provider.Capabilities()[item.Call.Capability]
 				inv := &InvocationContext{RunID: state.RunID, InvocationID: item.InvocationID, IdempotencyKey: item.InvocationID, OwnerID: "transient", ConnectionID: r.ConnectionID}
-				outcome, _ := ExecuteCall(ctx, r.Provider, r.Grants, item.Call, inv)
+				outcome, err := ExecuteCall(ctx, r.Provider, r.Grants, item.Call, inv)
+				if err != nil {
+					outcome = CallOutcome{ErrorCode: "provider_outcome_unknown"}
+				}
 				Observe(state, item, outcome)
 				if outcome.ErrorCode == "provider_outcome_unknown" || ((outcome.ErrorCode == "upstream_response_invalid" || outcome.ErrorCode == "upstream_unavailable") && ok && cap.Effect != "read") {
 					state.Status = "needs_reconciliation"
@@ -952,6 +1036,8 @@ func (r *AgentRuntime) Run(ctx context.Context, instruction string) (RunResult, 
 	}
 	return r.Result(state), nil
 }
+
+// NewState creates a checkpoint using the runtime's default limits.
 func NewState(instruction, runID string) (*RuntimeState, error) {
 	return (&AgentRuntime{}).NewState(instruction, runID)
 }

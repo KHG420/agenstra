@@ -8,11 +8,13 @@ import (
 	"unicode/utf8"
 )
 
+// ContextPolicy sets optional thresholds for projecting model input within existing budgets.
 type ContextPolicy struct {
 	TriggerRatio float64 `json:"trigger_ratio"`
 	TargetRatio  float64 `json:"target_ratio"`
 }
 
+// Validate checks projection ratios without changing execution limits.
 func (p ContextPolicy) Validate() error {
 	if math.IsNaN(p.TriggerRatio) || math.IsNaN(p.TargetRatio) || math.IsInf(p.TriggerRatio, 0) || math.IsInf(p.TargetRatio, 0) || p.TriggerRatio < 0 || p.TriggerRatio > 1 || p.TargetRatio < 0 || p.TargetRatio > p.TriggerRatio || (p.TriggerRatio > 0 && p.TargetRatio == 0) {
 		return hostError("context_policy_invalid")
@@ -28,7 +30,11 @@ func (r *AgentRuntime) contextPolicy(state *RuntimeState) ContextPolicy {
 func (r *AgentRuntime) characterProjection(state *RuntimeState, packet ContextPacket, prompt string) (ContextPacket, string, bool) {
 	policy := r.contextPolicy(state)
 	limit := r.MaxContextCharacters
-	size := contextCharacters(packet) + utf8.RuneCountInString(prompt)
+	promptSize := utf8.RuneCountInString(prompt)
+	size := contextCharacters(packet)
+	if size <= math.MaxInt-promptSize {
+		size += promptSize
+	}
 	goal := limit
 	reason := "none"
 	if size > limit {
@@ -43,7 +49,7 @@ func (r *AgentRuntime) characterProjection(state *RuntimeState, packet ContextPa
 		}
 	}
 	projected := budgetContext(packet, state, goal-utf8.RuneCountInString(prompt))
-	return projected, reason, contextCharacters(projected)+utf8.RuneCountInString(prompt) <= goal
+	return projected, reason, contextCharacters(projected) <= goal-promptSize
 }
 
 func contextPolicyCursor(envelope JSON) int {
@@ -57,7 +63,7 @@ func latestContextPolicy(q sqlQueryer, id string) (int, error) {
 	return seq, err
 }
 
-// Journal requests independently of an active driver's checkpoint. Application
+// SetContextPolicy journals requests independently of an active driver's checkpoint. Application
 // occurs before a model decision, and completion cannot overtake acceptance.
 func (h *AgentHost) SetContextPolicy(ctx context.Context, id, owner, requestID string, revision int, policy ContextPolicy) (run StoredRun, err error) {
 	run, err = h.Get(ctx, id, owner)
@@ -73,7 +79,10 @@ func (h *AgentHost) SetContextPolicy(ctx context.Context, id, owner, requestID s
 	if err = policy.Validate(); err != nil {
 		return
 	}
-	policyRaw, _ := CanonicalJSON(policy)
+	policyRaw, err := CanonicalJSON(policy)
+	if err != nil {
+		return run, hostError("context_policy_invalid")
+	}
 	err = h.Store.write(func(tx *sql.Tx) error {
 		var e error
 		run, e = owned(tx, id, owner)
@@ -104,7 +113,10 @@ func (h *AgentHost) SetContextPolicy(ctx context.Context, id, owner, requestID s
 		if pending >= 32 {
 			return hostError("context_policy_queue_full")
 		}
-		raw, _ := CanonicalJSON(JSON{"kind": "context_policy_requested", "request_id": requestID, "policy_json": string(policyRaw), "policy": policy})
+		raw, e := CanonicalJSON(JSON{"kind": "context_policy_requested", "request_id": requestID, "policy_json": string(policyRaw), "policy": policy})
+		if e != nil {
+			return e
+		}
 		if _, e = tx.Exec("INSERT INTO events(run_id,created_at,event_json) VALUES(?,?,?)", id, h.Store.now(), string(raw)); e != nil {
 			return e
 		}
@@ -129,20 +141,16 @@ func (h *AgentHost) applyContextPolicy(run StoredRun, state *RuntimeState) (Stor
 	for rows.Next() {
 		var raw string
 		if err = rows.Scan(&sequence, &raw); err != nil {
-			rows.Close()
-			return run, err
+			return run, errors.Join(err, rows.Close())
 		}
 		if err = strictUnmarshal([]byte(raw), &policy); err != nil {
-			rows.Close()
-			return run, err
+			return run, errors.Join(err, rows.Close())
 		}
 		if err = policy.Validate(); err != nil {
-			rows.Close()
-			return run, err
+			return run, errors.Join(err, rows.Close())
 		}
 	}
-	err = rows.Err()
-	rows.Close()
+	err = errors.Join(rows.Err(), rows.Close())
 	if err != nil || sequence == 0 {
 		return run, err
 	}

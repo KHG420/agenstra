@@ -78,7 +78,9 @@ func TestMemoryHTTPManagementAuthenticationHistoryAndRevisionChecks(t *testing.T
 
 func TestMemoryWebTicketsResolveOwnerAndPackWithoutBrowserSession(t *testing.T) {
 	f := newWebFixture(t, &hostModel{}, false)
-	f.w.Close()
+	if err := f.w.Close(); err != nil {
+		t.Error(err)
+	}
 	f.d.Config.Users["bob"] = UserConfig{APIKeyEnv: "BOB_KEY"}
 	f.d.Environment["BOB_KEY"] = "bob-key"
 	f.d.Config.WebIntegration.BrowserBridge = false
@@ -88,7 +90,11 @@ func TestMemoryWebTicketsResolveOwnerAndPackWithoutBrowserSession(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	mint := func(key string) string {
 		w := memoryHTTP(t, s, "POST", "/web/v1/token", key, "", "", 200)
 		var b struct{ Token string }

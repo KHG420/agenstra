@@ -13,6 +13,8 @@ import (
 // WebStore owns only optional integration data, never the v1 run schema.
 type WebStore struct{ store *SQLiteStore }
 
+// NewWebStore opens and initializes the optional integration database.
+// The caller must close it after all integration requests have stopped.
 func NewWebStore(path string) (*WebStore, error) {
 	s, e := NewSQLiteStore(path)
 	if e != nil {
@@ -46,20 +48,27 @@ func NewWebStore(path string) (*WebStore, error) {
 		}
 	}
 	if e != nil {
-		s.Close()
-		return nil, e
+		return nil, errors.Join(e, s.Close())
 	}
 	return w, nil
 }
+
+// Close releases the integration database connection.
 func (w *WebStore) Close() error    { return w.store.Close() }
 func webJSON(v any) (string, error) { b, e := CanonicalJSON(v); return string(b), e }
 func webDecode(raw string, v any) error {
+	if !json.Valid([]byte(raw)) {
+		return errors.New("invalid JSON document")
+	}
 	d := json.NewDecoder(bytes.NewReader([]byte(raw)))
 	d.UseNumber()
 	return d.Decode(v)
 }
 func webHash(v any) string {
-	b, _ := CanonicalJSON(v)
+	b, err := CanonicalJSON(v)
+	if err != nil {
+		return ""
+	}
 	s := sha256.Sum256(b)
 	return hex.EncodeToString(s[:])
 }
@@ -92,6 +101,7 @@ func webInsert(tx *sql.Tx, table, id, owner string, v any) error {
 	return e
 }
 
+// BrowserSession is the persisted owner-bound browser generation and confirmed page snapshot.
 type BrowserSession struct {
 	ID             string   `json:"id"`
 	IntegrationID  string   `json:"integration_id"`
@@ -108,6 +118,8 @@ type BrowserSession struct {
 	ResumeRequestID string  `json:"resume_request_id,omitempty"`
 	Closed          bool    `json:"closed"`
 }
+
+// BrowserCommand retains an action's exact invocation and client-reported execution receipt.
 type BrowserCommand struct {
 	ID              string  `json:"id"`
 	RunID           string  `json:"run_id"`
@@ -123,6 +135,8 @@ type BrowserCommand struct {
 	Result          JSON    `json:"result,omitempty"`
 	ErrorCode       string  `json:"error_code,omitempty"`
 }
+
+// WebRunBinding links an authorized run to its integration and browser session.
 type WebRunBinding struct {
 	RunID            string `json:"run_id"`
 	IntegrationID    string `json:"integration_id"`
@@ -132,6 +146,8 @@ type WebRunBinding struct {
 	RequestID        string `json:"request_id"`
 	ObservedRevision int    `json:"observed_revision"`
 }
+
+// ChatConversation retains an owner-scoped integration and active message identity.
 type ChatConversation struct {
 	ID            string  `json:"id"`
 	IntegrationID string  `json:"integration_id"`
@@ -146,6 +162,7 @@ type ChatInput struct {
 	Text   string `json:"text"`
 }
 
+// ChatMessage retains queued user text and the framework's persisted result projection.
 type ChatMessage struct {
 	ContextSelection *ConversationContextSelection `json:"context_selection,omitempty"`
 	Sources          []RunSource                   `json:"sources,omitempty"`
@@ -177,12 +194,12 @@ func (w *WebStore) binding(owner, run string) (WebRunBinding, error) {
 	}
 	return b, e
 }
-func (w *WebStore) commands(tx *sql.Tx, owner, session string) ([]BrowserCommand, error) {
+func (w *WebStore) commands(tx *sql.Tx, owner, session string) (output []BrowserCommand, resultErr error) {
 	rows, e := tx.Query("SELECT payload FROM web_commands WHERE owner=? AND session=? ORDER BY sequence", owner, session)
 	if e != nil {
 		return nil, e
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	result := []BrowserCommand{}
 	for rows.Next() {
 		var raw string
@@ -199,12 +216,12 @@ func (w *WebStore) commands(tx *sql.Tx, owner, session string) ([]BrowserCommand
 }
 func (w *WebStore) messages(q interface {
 	Query(string, ...any) (*sql.Rows, error)
-}, owner, conversation string) ([]ChatMessage, error) {
+}, owner, conversation string) (output []ChatMessage, resultErr error) {
 	rows, e := q.Query("SELECT payload FROM web_messages WHERE owner=? AND conversation=? ORDER BY sequence", owner, conversation)
 	if e != nil {
 		return nil, e
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	result := []ChatMessage{}
 	for rows.Next() {
 		var raw string

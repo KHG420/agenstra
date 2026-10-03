@@ -21,7 +21,11 @@ func responseTestPack(t *testing.T, legacy bool, server *httptest.Server) Capabi
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { pack.Close() })
+		t.Cleanup(func() {
+			if err := pack.Close(); err != nil {
+				t.Error(err)
+			}
+		})
 		return pack
 	}
 	manifest = JSON{"schema": "agenstra.rest-pack.v2", "name": "records", "version": "1", "guidance": "Read records", "base_url_env": "API_URL", "capabilities": []any{JSON{
@@ -33,7 +37,11 @@ func responseTestPack(t *testing.T, legacy bool, server *httptest.Server) Capabi
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { pack.Close() })
+	t.Cleanup(func() {
+		if err := pack.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	return pack
 }
 
@@ -57,7 +65,9 @@ func TestRESTResponseRequiresOneCompleteBoundedJSONValue(t *testing.T) {
 			t.Run(version+"/"+tc.name, func(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
-					_, _ = w.Write([]byte(tc.payload))
+					if _, callErr := w.Write([]byte(tc.payload)); callErr != nil {
+						t.Error(callErr)
+					}
 				}))
 				defer server.Close()
 				pack := responseTestPack(t, legacy, server)
@@ -78,7 +88,12 @@ func TestLegacyRESTRejectsNonSuccessHTTPStatus(t *testing.T) {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(status)
-				_, _ = w.Write([]byte(`{"id":"R1"}`))
+				if status == http.StatusNotModified {
+					return // HTTP 304 responses cannot carry a body.
+				}
+				if _, callErr2 := w.Write([]byte(`{"id":"R1"}`)); callErr2 != nil {
+					t.Error(callErr2)
+				}
 			}))
 			defer server.Close()
 			pack := responseTestPack(t, true, server)
@@ -97,7 +112,9 @@ func TestRESTMalformedWriteResponsePausesWithoutReplayingBusinessOperation(t *te
 			t.Errorf("unexpected method: %s", r.Method)
 		}
 		writes.Add(1)
-		_, _ = w.Write([]byte(`{"id":"R1"} {"id":"R2"}`))
+		if _, callErr3 := w.Write([]byte(`{"id":"R1"} {"id":"R2"}`)); callErr3 != nil {
+			t.Error(callErr3)
+		}
 	}))
 	defer server.Close()
 	manifest := JSON{"schema": "agenstra.rest-pack.v2", "name": "records", "version": "1", "guidance": "Create records", "base_url_env": "API_URL", "capabilities": []any{JSON{
@@ -109,7 +126,11 @@ func TestRESTMalformedWriteResponsePausesWithoutReplayingBusinessOperation(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pack.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(pack.Close)
 	model := &hostModel{decisions: []Decision{{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []ToolCall{{CallRef: "create-1", Capability: "record.create", Arguments: JSON{}, Reason: "Create the requested record"}}}}}
 	host := NewAgentHost(testStore(t), func(context.Context, string, string) (CapabilityProvider, error) { return pack, nil }, model, func(context.Context, string, string) (ExecutionPolicy, error) {
 		return ExecutionPolicy{GrantedCapabilities: map[string]bool{"record.create": true}, AllowModelData: true}, nil

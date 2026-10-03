@@ -56,6 +56,6 @@ func (h *AgentHost) effectiveRunConfig(run StoredRun) (EffectiveRunConfig, error
 
 // Drivers validate this snapshot in restore before consuming execution limits.
 func (h *AgentHost) runSettings(run StoredRun) HostSettings {
-	c, _ := h.effectiveRunConfig(run)
+	c, _ := h.effectiveRunConfig(run) //nolint:errcheck // Drivers validate effective_config in restore before consuming these limits.
 	return c.Settings
 }

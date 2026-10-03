@@ -16,6 +16,7 @@ type RequestedInputSchema struct {
 	MaxLength int      `json:"max_length,omitempty"`
 }
 
+// UnmarshalJSON strictly decodes the schema for a single requested text answer.
 func (s *RequestedInputSchema) UnmarshalJSON(raw []byte) error {
 	type shape RequestedInputSchema
 	var parsed shape
@@ -26,6 +27,7 @@ func (s *RequestedInputSchema) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+// Validate checks supported answer types and bounds.
 func (s RequestedInputSchema) Validate() error {
 	switch s.Type {
 	case "string":
@@ -53,6 +55,8 @@ func (s RequestedInputSchema) Validate() error {
 	return nil
 }
 
+// ValidateRequestedInput checks a user answer against the saved input request.
+// A nil schema retains the existing unconstrained text behavior.
 func ValidateRequestedInput(schema *RequestedInputSchema, text string) error {
 	if schema == nil {
 		return nil

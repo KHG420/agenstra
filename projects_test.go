@@ -90,7 +90,10 @@ func TestProjectTaskScopeDeniesAdminReadsAndExplicitReads(t *testing.T) {
 		t.Fatal("ungranted read executed", outcome, err)
 	}
 	runtime := &AgentRuntime{Provider: p, Grants: map[string]bool{}}
-	state, _ := runtime.NewState("inspect", "inspect")
+	state, callErr := runtime.NewState("inspect", "inspect")
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	runtime.Model = &hostModel{decisions: []Decision{{Schema: "agenstra.decision.v1", Kind: "inspect_capability", Name: "admin.read"}}}
 	if err := runtime.Step(t.Context(), state, nil); err != nil || state.InspectedCapability != nil {
 		t.Fatal("ungranted read inspection exposed", err)
@@ -189,7 +192,10 @@ func TestProjectReleaseScopeAndPrivateMemorySnapshot(t *testing.T) {
 			t.Fatal("private memory scope leaked", v)
 		}
 	}
-	m, _ := h.ListMemories(t.Context(), "alice", "weather", 100, 0)
+	m, callErr2 := h.ListMemories(t.Context(), "alice", "weather", 100, 0)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	for _, v := range m {
 		if v.Key == "query.units" {
 			if _, err = h.DeleteMemory(t.Context(), "alice", "weather", v.ID, v.Revision); err != nil {
@@ -217,7 +223,10 @@ func TestProjectApprovalAndPollingCannotBypassRevokedGrant(t *testing.T) {
 	if err != nil || run.Status != "needs_approval" {
 		t.Fatal(run.Status, err)
 	}
-	state, _ := h.restore(run)
+	state, callErr3 := h.restore(run)
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	item := state.Pending[0]
 	policy := policies["weather"]
 	policy.GrantedCapabilities = map[string]bool{}
@@ -234,7 +243,10 @@ func writeProjectPack(t *testing.T, dir, pack string) string {
 	t.Helper()
 	cap := JSON{"name": "query", "description": "Query " + pack, "method": "GET", "path": "/query", "effect": "read", "input_schema": JSON{"type": "object", "properties": JSON{"query": JSON{"type": "object", "properties": JSON{"city": JSON{"type": "string"}}, "additionalProperties": false}}, "additionalProperties": false}, "output_schema": JSON{"type": "object"}}
 	admin := JSON{"name": "admin.read", "description": "Read admin secrets", "method": "GET", "path": "/admin", "effect": "read", "input_schema": JSON{"type": "object", "properties": JSON{}, "additionalProperties": false}, "output_schema": JSON{"type": "object"}}
-	raw, _ := json.Marshal(JSON{"schema": "agenstra.rest-pack.v2", "name": pack, "version": "1.0.0", "guidance": "Use only this project's query conventions.", "base_url_env": "API_URL", "token_env": "API_TOKEN", "capabilities": []any{cap, admin}})
+	raw, callErr4 := json.Marshal(JSON{"schema": "agenstra.rest-pack.v2", "name": pack, "version": "1.0.0", "guidance": "Use only this project's query conventions.", "base_url_env": "API_URL", "token_env": "API_TOKEN", "capabilities": []any{cap, admin}})
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	path := filepath.Join(dir, pack+".json")
 	if err := os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatal(err)
@@ -318,7 +330,9 @@ func TestProjectVerifiedRESTLocationToWeatherEndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatal(name, err)
 		}
-		p.Close()
+		if err := p.Close(); err != nil {
+			t.Error(err)
+		}
 	}
 	h := NewAgentHost(testStore(t), dep.ProviderFactory, model, dep.PolicyResolver)
 	run, err := h.CreateWithSources(t.Context(), "alice", "home", "Today's weather", "", []RunSource{source("location", "query"), source("weather", "query")})
@@ -329,7 +343,10 @@ func TestProjectVerifiedRESTLocationToWeatherEndToEnd(t *testing.T) {
 	if err != nil || run.Status != "completed" {
 		t.Fatal(run.Status, run.State, err)
 	}
-	state, _ := h.restore(run)
+	state, callErr5 := h.restore(run)
+	if callErr5 != nil {
+		t.Error(callErr5)
+	}
 	if len(state.Facts) != 2 || locationCalls.Load() != 1 || weatherCalls.Load() != 1 {
 		t.Fatal("composition did not execute once", state.Facts)
 	}
@@ -342,7 +359,10 @@ func TestProjectVerifiedRESTLocationToWeatherEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(events)
+	raw, callErr6 := json.Marshal(events)
+	if callErr6 != nil {
+		t.Error(callErr6)
+	}
 	if !strings.Contains(string(raw), "account-alice-weather") || strings.Contains(string(raw), "-token") {
 		t.Fatal("audit identity missing or credential leaked", string(raw))
 	}
@@ -435,9 +455,16 @@ func TestProjectScopeAcrossHTTPChatBrowserAndSchedules(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer server.Close()
+		defer func(close func() error) {
+			if err := close(); err != nil {
+				t.Error(err)
+			}
+		}(server.Close)
 		request := func(body JSON) *httptest.ResponseRecorder {
-			raw, _ := json.Marshal(body)
+			raw, callErr7 := json.Marshal(body)
+			if callErr7 != nil {
+				t.Error(callErr7)
+			}
 			req := httptest.NewRequest("POST", "/runs", strings.NewReader(string(raw)))
 			req.Header.Set("Authorization", "Bearer key")
 			rec := httptest.NewRecorder()
@@ -620,7 +647,9 @@ func TestProjectVerifiedCredentialsArePerUser(t *testing.T) {
 			t.Fatal("credential identity mismatched")
 		}
 		result, err := provider.Invoke(t.Context(), "query", JSON{}, nil)
-		provider.Close()
+		if err := provider.Close(); err != nil {
+			t.Error(err)
+		}
 		if err != nil || result.Data["account"] != owner+"-b" {
 			t.Fatal("user connection crossed account boundary", owner, result, err)
 		}
@@ -642,13 +671,20 @@ func TestProjectSourceSkillsDisappearAfterRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer provider.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(provider.Close)
 	policy, err := h.projectPolicy(t.Context(), run)
 	if err != nil {
 		t.Fatal(err)
 	}
 	runtime := &AgentRuntime{Provider: provider, Grants: policy.GrantedCapabilities}
-	state, _ := runtime.NewState("weather", run.RunID)
+	state, callErr8 := runtime.NewState("weather", run.RunID)
+	if callErr8 != nil {
+		t.Error(callErr8)
+	}
 	state.LoadedSkills = []string{"weather::usage", "weather::$project"}
 	packet := runtime.Context(state)
 	if len(packet.LoadedSkills) != 2 {

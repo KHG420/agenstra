@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -24,6 +25,7 @@ import (
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
+// MCPSource selects a trusted stdio or HTTP transport and connection references.
 type MCPSource struct {
 	Transport      string            `json:"transport"`
 	Command        *string           `json:"command"`
@@ -35,6 +37,7 @@ type MCPSource struct {
 	TimeoutSeconds float64           `json:"timeout_seconds"`
 }
 
+// UnmarshalJSON strictly decodes transport configuration and applies timeout defaults.
 func (s *MCPSource) UnmarshalJSON(raw []byte) error {
 	type source MCPSource
 	var parsed source
@@ -42,7 +45,9 @@ func (s *MCPSource) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	var fields map[string]json.RawMessage
-	_ = json.Unmarshal(raw, &fields)
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
 	if _, ok := fields["timeout_seconds"]; !ok {
 		parsed.TimeoutSeconds = 60
 	}
@@ -50,6 +55,7 @@ func (s *MCPSource) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+// MCPToolExposure pins an exposed tool's full contract and execution guarantees.
 type MCPToolExposure struct {
 	Name                string            `json:"name"`
 	Effect              string            `json:"effect"`
@@ -64,6 +70,7 @@ type MCPToolExposure struct {
 	Operation           *OperationBinding `json:"operation"`
 }
 
+// UnmarshalJSON strictly decodes a tool exposure and applies execution defaults.
 func (e *MCPToolExposure) UnmarshalJSON(raw []byte) error {
 	type exposure MCPToolExposure
 	var parsed exposure
@@ -71,7 +78,9 @@ func (e *MCPToolExposure) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	var fields map[string]json.RawMessage
-	_ = json.Unmarshal(raw, &fields)
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
 	if _, ok := fields["replay"]; !ok {
 		parsed.Replay = "never"
 	}
@@ -82,6 +91,7 @@ func (e *MCPToolExposure) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+// MCPManifest declares pinned MCP tools, connection references and skill files.
 type MCPManifest struct {
 	Schema        string            `json:"schema"`
 	Name          string            `json:"name"`
@@ -136,8 +146,9 @@ func (c *stdioMCP) request(ctx context.Context, method string, params JSON, noti
 	}()
 	select {
 	case <-ctx.Done():
-		_ = c.Close()
-		return nil, ctx.Err()
+		closeErr := c.Close()
+		writeErr := <-written
+		return nil, errors.Join(ctx.Err(), closeErr, writeErr)
 	case err := <-written:
 		if err != nil {
 			return nil, err
@@ -156,8 +167,9 @@ func (c *stdioMCP) request(ctx context.Context, method string, params JSON, noti
 		var got readResult
 		select {
 		case <-ctx.Done():
-			_ = c.Close()
-			return nil, ctx.Err()
+			closeErr := c.Close()
+			got = <-read
+			return nil, errors.Join(ctx.Err(), closeErr, got.err)
 		case got = <-read:
 		}
 		line, err := got.line, got.err
@@ -200,16 +212,27 @@ func (c *stdioMCP) Notify(ctx context.Context, m string, p JSON) error {
 	_, e := c.request(ctx, m, p, true)
 	return e
 }
+
+// Close releases owned connection resources after outstanding calls have stopped.
 func (c *stdioMCP) Close() error {
 	c.closeOnce.Do(func() {
-		_ = c.stdin.Close()
+		stdinErr := c.stdin.Close()
+		if errors.Is(stdinErr, os.ErrClosed) {
+			stdinErr = nil
+		}
+		var killErr error
 		if c.cmd.Process != nil {
-			_ = c.cmd.Process.Kill()
+			killErr = c.cmd.Process.Kill()
+			if errors.Is(killErr, os.ErrProcessDone) {
+				killErr = nil
+			}
 		}
-		c.closeErr = c.cmd.Wait()
-		if _, ok := c.closeErr.(*exec.ExitError); ok {
-			c.closeErr = nil
+		waitErr := c.cmd.Wait()
+		if _, ok := waitErr.(*exec.ExitError); ok {
+			// Closing a stdio connection intentionally terminates its subprocess.
+			waitErr = nil
 		}
+		c.closeErr = errors.Join(stdinErr, killErr, waitErr)
 	})
 	return c.closeErr
 }
@@ -268,7 +291,11 @@ func (c *httpMCP) request(ctx context.Context, method string, params JSON, notif
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			log.Print("HTTP response cleanup failed")
+		}
+	}()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return nil, fmt.Errorf("MCP HTTP %d", res.StatusCode)
 	}
@@ -279,7 +306,10 @@ func (c *httpMCP) request(ctx context.Context, method string, params JSON, notif
 		return nil, nil
 	}
 	var reply JSON
-	mediaType, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type"))
+	mediaType, _, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
+	if err != nil {
+		return nil, errors.New("invalid MCP response content type")
+	}
 	if mediaType == "text/event-stream" {
 		scanner := bufio.NewScanner(io.LimitReader(res.Body, 16<<20))
 		scanner.Buffer(make([]byte, 4096), 16<<20)
@@ -380,6 +410,8 @@ func (c *httpMCP) Notify(ctx context.Context, m string, p JSON) error {
 	_, e := c.request(ctx, m, p, true)
 	return e
 }
+
+// Close releases owned connection resources after outstanding calls have stopped.
 func (c *httpMCP) Close() error {
 	c.closeOnce.Do(func() {
 		if c.session == "" {
@@ -406,14 +438,16 @@ func (c *httpMCP) Close() error {
 			c.closeErr = err
 			return
 		}
-		_ = res.Body.Close()
+		c.closeErr = res.Body.Close()
 		if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusNoContent && res.StatusCode != http.StatusNotFound {
-			c.closeErr = fmt.Errorf("MCP session close: HTTP %d", res.StatusCode)
+			c.closeErr = errors.Join(c.closeErr, fmt.Errorf("MCP session close: HTTP %d", res.StatusCode))
 		}
 	})
 	return c.closeErr
 }
 
+// MCPPack owns an MCP transport and validated tool catalogs.
+// Close it only after requests have stopped; catalogs remain read-only.
 type MCPPack struct {
 	Manifest     MCPManifest
 	transport    mcpTransport
@@ -424,15 +458,31 @@ type MCPPack struct {
 	outputs      map[string]*jsonschema.Schema
 }
 
+// Capabilities returns the read-only capability catalog; callers must not mutate it.
 func (p *MCPPack) Capabilities() map[string]CapabilityDescription { return p.capabilities }
-func (p *MCPPack) Skills() map[string]Skill                       { return p.skills }
-func (p *MCPPack) SystemPrompt() string                           { return AgentPrompt(p.Manifest.Guidance) }
-func (p *MCPPack) Close() error                                   { return p.transport.Close() }
+
+// Skills returns read-only pinned usage guides; callers must not mutate the map.
+func (p *MCPPack) Skills() map[string]Skill { return p.skills }
+
+// SystemPrompt returns fixed usage guidance without connection credentials.
+func (p *MCPPack) SystemPrompt() string { return AgentPrompt(p.Manifest.Guidance) }
+
+// Close releases owned connection resources after outstanding calls have stopped.
+func (p *MCPPack) Close() error { return p.transport.Close() }
+
+// MCPContractDigest computes the canonical digest of a JSON tool contract.
+// It returns an empty string for an invalid JSON contract.
 func MCPContractDigest(tool JSON) string {
-	raw, _ := CanonicalJSON(tool)
+	raw, err := CanonicalJSON(tool)
+	if err != nil {
+		return ""
+	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
+
+// OpenMCPPack opens and initializes a transport, rejecting any pinned tool contract drift.
+// The caller must close the returned pack.
 func OpenMCPPack(ctx context.Context, path string, environment map[string]string) (*MCPPack, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -465,14 +515,12 @@ func OpenMCPPack(ctx context.Context, path string, environment map[string]string
 	seen := map[string]bool{}
 	for _, ex := range manifest.Tools {
 		if seen[ex.Name] {
-			_ = transport.Close()
-			return nil, errors.New("duplicate capability: " + ex.Name)
+			return nil, errors.Join(errors.New("duplicate capability: "+ex.Name), transport.Close())
 		}
 		seen[ex.Name] = true
 		for _, skill := range ex.Skills {
 			if _, ok := skills[skill]; !ok {
-				_ = transport.Close()
-				return nil, errors.New("unknown skill for capability: " + ex.Name)
+				return nil, errors.Join(errors.New("unknown skill for capability: "+ex.Name), transport.Close())
 			}
 		}
 		tool, ok := remote[ex.Name]
@@ -480,32 +528,26 @@ func OpenMCPPack(ctx context.Context, path string, environment map[string]string
 			if ex.Optional {
 				continue
 			}
-			_ = transport.Close()
-			return nil, errors.New("required capability unavailable: " + ex.Name)
+			return nil, errors.Join(errors.New("required capability unavailable: "+ex.Name), transport.Close())
 		}
 		if !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(ex.ContractSHA256) || MCPContractDigest(tool) != ex.ContractSHA256 {
-			_ = transport.Close()
-			return nil, errors.New("capability contract changed: " + ex.Name)
+			return nil, errors.Join(errors.New("capability contract changed: "+ex.Name), transport.Close())
 		}
 		input, ok := tool["inputSchema"].(map[string]any)
 		if !ok {
-			_ = transport.Close()
-			return nil, errors.New("input schema required")
+			return nil, errors.Join(errors.New("input schema required"), transport.Close())
 		}
 		output, ok := tool["outputSchema"].(map[string]any)
 		if !ok {
-			_ = transport.Close()
-			return nil, errors.New("structured output schema required: " + ex.Name)
+			return nil, errors.Join(errors.New("structured output schema required: "+ex.Name), transport.Close())
 		}
 		iv, e := validateLocalSchema(input, false)
 		if e != nil {
-			_ = transport.Close()
-			return nil, e
+			return nil, errors.Join(e, transport.Close())
 		}
 		ov, e := validateLocalSchema(output, false)
 		if e != nil {
-			_ = transport.Close()
-			return nil, e
+			return nil, errors.Join(e, transport.Close())
 		}
 		description, _ := tool["description"].(string)
 		if description == "" {
@@ -524,6 +566,9 @@ func OpenMCPPack(ctx context.Context, path string, environment map[string]string
 	}
 	return pack, nil
 }
+
+// Invoke validates and executes the selected capability with request cancellation.
+// Provider failures use the structured ErrorCode channel when their outcome is known.
 func (p *MCPPack) Invoke(ctx context.Context, name string, args map[string]any, _ *InvocationContext) (CapabilityResult, error) {
 	if p.capabilities[name].Name == "" {
 		return CapabilityResult{ErrorCode: "capability_unknown"}, nil
@@ -621,10 +666,10 @@ func openMCPSource(ctx context.Context, source MCPSource, env map[string]string)
 		}
 		stdout, e := cmd.StdoutPipe()
 		if e != nil {
-			return nil, nil, e
+			return nil, nil, errors.Join(e, stdin.Close())
 		}
 		if e := cmd.Start(); e != nil {
-			return nil, nil, e
+			return nil, nil, errors.Join(e, stdin.Close(), stdout.Close())
 		}
 		transport = &stdioMCP{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}
 	} else if source.Transport == "streamable_http" {
@@ -658,8 +703,7 @@ func openMCPSource(ctx context.Context, source MCPSource, env map[string]string)
 	initialized, err := transport.Request(requestCtx, "initialize", initParams)
 	cancel()
 	if err != nil {
-		_ = transport.Close()
-		return nil, nil, err
+		return nil, nil, errors.Join(err, transport.Close())
 	}
 	if client, ok := transport.(*httpMCP); ok {
 		if version, ok := initialized["protocolVersion"].(string); ok && version != "" {
@@ -670,8 +714,7 @@ func openMCPSource(ctx context.Context, source MCPSource, env map[string]string)
 	err = transport.Notify(requestCtx, "notifications/initialized", JSON{})
 	cancel()
 	if err != nil {
-		_ = transport.Close()
-		return nil, nil, err
+		return nil, nil, errors.Join(err, transport.Close())
 	}
 	remote := map[string]JSON{}
 	cursors := map[string]bool{}
@@ -685,24 +728,20 @@ func openMCPSource(ctx context.Context, source MCPSource, env map[string]string)
 		page, e := transport.Request(requestCtx, "tools/list", params)
 		cancel()
 		if e != nil {
-			_ = transport.Close()
-			return nil, nil, e
+			return nil, nil, errors.Join(e, transport.Close())
 		}
 		items, ok := page["tools"].([]any)
 		if !ok {
-			_ = transport.Close()
-			return nil, nil, errors.New("invalid MCP tools list")
+			return nil, nil, errors.Join(errors.New("invalid MCP tools list"), transport.Close())
 		}
 		for _, x := range items {
 			tool, ok := x.(map[string]any)
 			if !ok {
-				_ = transport.Close()
-				return nil, nil, errors.New("invalid MCP tool")
+				return nil, nil, errors.Join(errors.New("invalid MCP tool"), transport.Close())
 			}
 			name, _ := tool["name"].(string)
 			if name == "" || remote[name] != nil {
-				_ = transport.Close()
-				return nil, nil, errors.New("duplicate remote capability")
+				return nil, nil, errors.Join(errors.New("duplicate remote capability"), transport.Close())
 			}
 			remote[name] = tool
 		}
@@ -711,8 +750,7 @@ func openMCPSource(ctx context.Context, source MCPSource, env map[string]string)
 			break
 		}
 		if cursors[next] {
-			_ = transport.Close()
-			return nil, nil, errors.New("capability pagination repeated cursor")
+			return nil, nil, errors.Join(errors.New("capability pagination repeated cursor"), transport.Close())
 		}
 		cursors[next] = true
 		cursor = next

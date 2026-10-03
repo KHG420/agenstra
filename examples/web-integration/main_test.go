@@ -32,18 +32,28 @@ func TestDemoConfigurationAndBrowserContract(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	p.Close()
+	if err := p.Close(); err != nil {
+		t.Error(err)
+	}
 	store, e := agenstra.NewSQLiteStore(d.DatabasePath())
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer store.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(store.Close)
 	h := agenstra.NewAgentHost(store, d.ProviderFactory, demoModel{}, d.PolicyResolver)
 	s, e := agenstra.NewHTTPServer(h, d, false, time.Second)
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer s.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(s.Close)
 	_, _, e = s.Web.CreateBrowserSession(t.Context(), "demo", "orders-web", "1", []string{"ui.show_orders", "ui.open_order"})
 	if e != nil {
 		t.Fatal(e)

@@ -16,7 +16,11 @@ func newDraftRegistry(t *testing.T) *CapabilityRegistry {
 	if err := r.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { r.Close() })
+	t.Cleanup(func() {
+		if err := r.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	return r
 }
 func intRef(n int) *int { return &n }
@@ -52,7 +56,9 @@ func TestDraftIncrementalPersistenceAndPublish(t *testing.T) {
 	if err != nil || restored.Revision != d.Revision || len(restored.Issues) != 0 {
 		t.Fatalf("restart: %v %v", restored, err)
 	}
-	if active, _ := r.ActiveRelease("records"); active != "" {
+	if active, callErr := r.ActiveRelease("records"); callErr != nil {
+		t.Error(callErr)
+	} else if active != "" {
 		t.Fatal("draft activated a release")
 	}
 	result, err := r.Publish("records", "1.0.0", restored.Manifest, restored.Skills)
@@ -86,7 +92,10 @@ func TestDraftMergeConflictAtomicityAndSkills(t *testing.T) {
 	if _, err = r.EditDraft("draft", edit); !registryHasCode(err, "draft_item_conflict") {
 		t.Fatalf("skill conflict: %v", err)
 	}
-	unchanged, _ := r.Draft("draft")
+	unchanged, callErr2 := r.Draft("draft")
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	if unchanged.Revision != d.Revision || len(unchanged.Manifest["capabilities"].([]any)) != 1 {
 		t.Fatal("partial import escaped rollback")
 	}
@@ -153,7 +162,11 @@ func TestDraftHTTPAuthAndPublication(t *testing.T) {
 	call := func(method, path, key string, body any) *httptest.ResponseRecorder {
 		var raw []byte
 		if body != nil {
-			raw, _ = json.Marshal(body)
+			var callErr3 error
+			raw, callErr3 = json.Marshal(body)
+			if callErr3 != nil {
+				t.Error(callErr3)
+			}
 		}
 		req := httptest.NewRequest(method, path, bytes.NewReader(raw))
 		req.Header.Set("Authorization", "Bearer "+key)
@@ -180,7 +193,9 @@ func TestDraftHTTPAuthAndPublication(t *testing.T) {
 	if w := call("POST", "/admin/api/drafts/draft/publish", key, map[string]any{"expected_revision": 2}); w.Code != 200 {
 		t.Fatalf("publish: %d %s", w.Code, w.Body.String())
 	}
-	if active, _ := r.ActiveRelease("records"); active != "" {
+	if active, callErr4 := r.ActiveRelease("records"); callErr4 != nil {
+		t.Error(callErr4)
+	} else if active != "" {
 		t.Fatal("publish activated automatically")
 	}
 	if w := call("GET", "/admin/assets/admin_drafts.js", "", nil); w.Code != 200 {

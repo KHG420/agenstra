@@ -70,7 +70,10 @@ func TestHostIndependentConcurrencyIsBoundedJournaledAndOrdered(t *testing.T) {
 	if r.err != nil || r.run.Status != "completed" || peak.Load() != 2 || active.Load() != 0 {
 		t.Fatal(r.run.Status, r.err, peak.Load(), active.Load())
 	}
-	state, _ := h.restore(r.run)
+	state, callErr := h.restore(r.run)
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	for i, observation := range state.Observations {
 		if observation.CallRef != fmt.Sprintf("read-%d", i) {
 			t.Fatal("result application reordered", state.Observations)
@@ -108,12 +111,18 @@ func TestConcurrencyCancellationJoinsWorkersAndRecoversJournal(t *testing.T) {
 	if err != nil || run.Status != "completed" {
 		t.Fatal(run.Status, err)
 	}
-	state, _ := h.restore(run)
+	state, callErr2 := h.restore(run)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	if len(state.Facts) != 4 {
 		t.Fatal("lost recovered calls", len(state.Facts))
 	}
 	for _, call := range concurrentDecision().Calls {
-		journal, _ := h.Store.GetInvocation(run.RunID, deterministicInvocationID(run.RunID, call.CallRef), "alice")
+		journal, callErr3 := h.Store.GetInvocation(run.RunID, deterministicInvocationID(run.RunID, call.CallRef), "alice")
+		if callErr3 != nil {
+			t.Error(callErr3)
+		}
 		if journal["status"] != "succeeded" {
 			t.Fatal(journal)
 		}
@@ -175,7 +184,10 @@ func TestConcurrentUnknownCallRetainsWakeAndOtherResults(t *testing.T) {
 	if err != nil || run.Status != "waiting" || run.NextWakeAt == nil {
 		t.Fatal(run.Status, run.NextWakeAt, err)
 	}
-	state, _ := h.restore(run)
+	state, callErr4 := h.restore(run)
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	if len(state.Facts) != 3 || state.Pending[0].Status != "unknown" {
 		t.Fatal(state)
 	}

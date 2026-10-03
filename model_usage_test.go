@@ -15,10 +15,17 @@ import (
 func TestModelTokenReservationSurvivesLostResponseCheckpoint(t *testing.T) {
 	m := &coreTestModel{decisions: []Decision{{Kind: "final", AnswerMarkdown: "hello"}}}
 	r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{}}, Model: m, MaxModelTokens: 5000}
-	state, _ := r.NewState("hello", "")
+	state, callErr := r.NewState("hello", "")
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	var checkpoint []byte
 	err := r.Step(t.Context(), state, func() error {
-		checkpoint, _ = CanonicalJSON(state)
+		var callErr2 error
+		checkpoint, callErr2 = CanonicalJSON(state)
+		if callErr2 != nil {
+			t.Error(callErr2)
+		}
 		return errors.New("simulate crash before response checkpoint")
 	})
 	if err == nil || m.calls != 0 {
@@ -41,7 +48,9 @@ func TestModelUsageTracksRetriesOutputLimitAndPrice(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		var payload JSON
-		_ = json.NewDecoder(r.Body).Decode(&payload)
+		if callErr3 := json.NewDecoder(r.Body).Decode(&payload); callErr3 != nil {
+			t.Error(callErr3)
+		}
 		if payload["max_tokens"] != float64(512) {
 			t.Fatalf("limit: %+v", payload)
 		}
@@ -50,10 +59,15 @@ func TestModelUsageTracksRetriesOutputLimitAndPrice(t *testing.T) {
 			return
 		}
 		w.Header().Set("X-Request-ID", "request-42")
-		_ = json.NewEncoder(w).Encode(JSON{"usage": JSON{"prompt_tokens": 100, "completion_tokens": 20}, "choices": []any{JSON{"finish_reason": "stop", "message": JSON{"content": `{"kind":"final","answer_markdown":"hello","fact_ids":[]}`}}}})
+		if callErr4 := json.NewEncoder(w).Encode(JSON{"usage": JSON{"prompt_tokens": 100, "completion_tokens": 20}, "choices": []any{JSON{"finish_reason": "stop", "message": JSON{"content": `{"kind":"final","answer_markdown":"hello","fact_ids":[]}`}}}}); callErr4 != nil {
+			t.Error(callErr4)
+		}
 	}))
 	defer server.Close()
-	m, _ := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	m, callErr5 := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	if callErr5 != nil {
+		t.Error(callErr5)
+	}
 	m.MaxOutputTokens = 512
 	m.InputPricePerMillion = 1
 	m.OutputPricePerMillion = 2
@@ -73,7 +87,10 @@ func TestModelUsageTracksRetriesOutputLimitAndPrice(t *testing.T) {
 	if result.ModelUsage.EstimatedRequests != 1 || result.ModelUsage.Requests != 2 {
 		t.Fatalf("%+v", result.ModelUsage)
 	}
-	raw, _ := CanonicalJSON(result.Decisions)
+	raw, callErr6 := CanonicalJSON(result.Decisions)
+	if callErr6 != nil {
+		t.Error(callErr6)
+	}
 	if strings.Contains(string(raw), "model_call") || strings.Contains(string(raw), "request-42") {
 		t.Fatal("adapter metadata leaked into decision contract")
 	}
@@ -83,10 +100,15 @@ func TestModelUsageUnknownIsEstimatedAndBudgetStopsBeforeIO(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
-		_ = json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"message": JSON{"content": `{"kind":"final","answer_markdown":"hello","fact_ids":[]}`}}}})
+		if callErr7 := json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"message": JSON{"content": `{"kind":"final","answer_markdown":"hello","fact_ids":[]}`}}}}); callErr7 != nil {
+			t.Error(callErr7)
+		}
 	}))
 	defer server.Close()
-	m, _ := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	m, callErr8 := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	if callErr8 != nil {
+		t.Error(callErr8)
+	}
 	r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{}}, Model: m}
 	result, err := r.Run(t.Context(), "hello")
 	if err != nil || result.ModelCalls[0].UsageAvailable || result.ModelUsage.EstimatedRequests != 1 || result.ModelUsage.BudgetTokens <= 0 || result.ModelUsage.CostAvailable {

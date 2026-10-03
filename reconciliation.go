@@ -2,10 +2,12 @@ package agenstra
 
 import (
 	"context"
+	"log"
 	"strings"
 	"time"
 )
 
+// ReconciliationContext gives a verifier a detached copy of the original uncertain invocation and trusted identity.
 type ReconciliationContext struct {
 	RunID        string
 	OwnerID      string
@@ -25,10 +27,13 @@ type verifiedResultProvider struct {
 	result CapabilityResult
 }
 
+// Invoke returns the verified result without repeating the original external operation.
 func (p verifiedResultProvider) Invoke(context.Context, string, JSON, *InvocationContext) (CapabilityResult, error) {
 	return p.result, nil
 }
 
+// Reconcile rechecks identity, authorization, revision and arguments before verifying an uncertain outcome.
+// It retains the original invocation and never accepts client-authored success evidence.
 func (h *AgentHost) Reconcile(ctx context.Context, id, owner, invocationID, argsSHA string, revision int) (StoredRun, error) {
 	h.InitializeDefaults()
 	current, err := h.Get(ctx, id, owner)
@@ -52,7 +57,12 @@ func (h *AgentHost) Reconcile(ctx context.Context, id, owner, invocationID, args
 	if err != nil {
 		return run, err
 	}
-	defer h.Store.Release(id, owner, run.LeaseToken)
+	defer func() {
+		// The lease expires if release fails; keep the committed run outcome.
+		if err := h.Store.Release(id, owner, run.LeaseToken); err != nil {
+			log.Print("run lease release failed")
+		}
+	}()
 	// A lost HTTP acknowledgement can be retried after the original run has
 	// resumed and removed this invocation from Pending.
 	journal, err = h.Store.GetInvocation(id, invocationID, owner)
@@ -99,8 +109,17 @@ func (h *AgentHost) Reconcile(ctx context.Context, id, owner, invocationID, args
 	if err != nil {
 		return run, err
 	}
-	defer provider.Close()
-	if previous, ok := run.State["pack_fingerprint"].(string); ok && previous != fingerprint(provider) {
+	defer func() {
+		// Closing the connection does not change an already observed business outcome.
+		if err := provider.Close(); err != nil {
+			log.Print("provider cleanup failed")
+		}
+	}()
+	fp := fingerprint(provider)
+	if fp == "" {
+		return run, hostError("pack_changed")
+	}
+	if previous, ok := run.State["pack_fingerprint"].(string); ok && previous != fp {
 		return run, hostError("pack_changed")
 	}
 	cap, ok := provider.Capabilities()[item.Call.Capability]
@@ -118,7 +137,10 @@ func (h *AgentHost) Reconcile(ctx context.Context, id, owner, invocationID, args
 	identifyInvocation(&inv, run, provider, cap.Name, policy)
 	// Give the verifier an isolated copy: it cannot change the bound arguments
 	// or invocation status through the callback context.
-	raw, _ := CanonicalJSON(ReconciliationContext{RunID: id, OwnerID: owner, OriginPackID: run.PackID, Invocation: *item, Identity: inv, Capability: cap})
+	raw, err := CanonicalJSON(ReconciliationContext{RunID: id, OwnerID: owner, OriginPackID: run.PackID, Invocation: *item, Identity: inv, Capability: cap})
+	if err != nil {
+		return run, hostError("run_state_invalid")
+	}
 	var verification ReconciliationContext
 	if err = strictUnmarshal(raw, &verification); err != nil {
 		return run, hostError("run_state_invalid")

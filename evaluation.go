@@ -7,6 +7,7 @@ import (
 	"fmt"
 )
 
+// EvaluationCase specifies one explicit evaluation request and evidence requirements.
 type EvaluationCase struct {
 	Name                  string            `json:"name"`
 	PackID                string            `json:"pack_id"`
@@ -18,12 +19,16 @@ type EvaluationCase struct {
 	ForbiddenCapabilities []string          `json:"forbidden_capabilities,omitempty"`
 	Facts                 []FactRequirement `json:"facts,omitempty"`
 }
+
+// EvaluationCheck records whether a requested evidence assertion passed.
 type EvaluationCheck struct {
 	Kind   string `json:"kind"`
 	Target string `json:"target"`
 	Passed bool   `json:"passed"`
 	Code   string `json:"code,omitempty"`
 }
+
+// EvaluationResult combines persisted run evidence, diagnostics and evaluation checks.
 type EvaluationResult struct {
 	Name        string            `json:"name"`
 	Iteration   int               `json:"iteration,omitempty"`
@@ -37,6 +42,7 @@ type EvaluationResult struct {
 	Diagnostics *RunDiagnostics   `json:"diagnostics,omitempty"`
 }
 
+// Validate rejects unsupported evaluation scope and requirements before execution.
 func (c EvaluationCase) Validate() error {
 	if len(c.RequestID) > 128 {
 		return fmt.Errorf("evaluation request_id too long")
@@ -124,15 +130,21 @@ func EvaluateRun(ctx context.Context, run StoredRun, c EvaluationCase) (Evaluati
 	}
 	var citations []string
 	if len(state.Decisions) > 0 {
-		last, _ := json.Marshal(state.Decisions[len(state.Decisions)-1])
+		last, err := json.Marshal(state.Decisions[len(state.Decisions)-1])
+		if err != nil {
+			return result, hostError("run_state_invalid")
+		}
 		var decision Decision
 		if json.Unmarshal(last, &decision) == nil && decision.Kind == "final" {
 			citations = decision.FactIDs
 		}
 	}
 	for _, requirement := range c.Facts {
-		check, _ := RequireFactValues(requirement)
-		err := check(ctx, CompletionContext{RunID: run.RunID, OriginPackID: run.PackID, Instruction: state.Instruction, AnswerMarkdown: state.AnswerMarkdown, FactIDs: citations, Facts: state.Facts, Observations: state.Observations})
+		check, err := RequireFactValues(requirement)
+		if err != nil {
+			return result, err
+		}
+		err = check(ctx, CompletionContext{RunID: run.RunID, OriginPackID: run.PackID, Instruction: state.Instruction, AnswerMarkdown: state.AnswerMarkdown, FactIDs: citations, Facts: state.Facts, Observations: state.Observations})
 		code := ""
 		if err != nil {
 			code = ErrorCode(err)

@@ -37,7 +37,10 @@ func TestSteeringWaitsForActiveWriteAndSupersedesUnsentCalls(t *testing.T) {
 	done := make(chan result, 1)
 	go func() { r, err := h.Drive(t.Context(), run.RunID, "alice"); done <- result{r, err} }()
 	<-started
-	current, _ := h.Store.GetRun(run.RunID, "alice")
+	current, callErr := h.Store.GetRun(run.RunID, "alice")
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	requestID := NewID()
 	if _, err := h.Steer(t.Context(), run.RunID, "alice", requestID, "Stop after the first write", current.Revision); err != nil {
 		t.Fatal(err)
@@ -50,11 +53,17 @@ func TestSteeringWaitsForActiveWriteAndSupersedesUnsentCalls(t *testing.T) {
 	if r.err != nil || r.run.Status != "completed" || p.calls != 1 {
 		t.Fatalf("%+v calls=%d", r, p.calls)
 	}
-	state, _ := h.restore(r.run)
+	state, callErr2 := h.restore(r.run)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	if len(state.Followups) != 1 || len(state.Facts) != 1 || state.SteeringCursor == 0 {
 		t.Fatalf("%+v", state)
 	}
-	invocation, _ := h.Store.GetInvocation(run.RunID, deterministicInvocationID(run.RunID, "lookup-2"), "alice")
+	invocation, callErr3 := h.Store.GetInvocation(run.RunID, deterministicInvocationID(run.RunID, "lookup-2"), "alice")
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	if invocation["status"] != "failed" || invocation["error_code"] != "steering_superseded" {
 		t.Fatal("unsent call was not superseded", invocation)
 	}
@@ -67,7 +76,10 @@ func TestSteeringAcceptedDuringFinalReachesNextDecision(t *testing.T) {
 	h.Model = decisionModelFunc(func(ctx context.Context, packet ContextPacket, _ string) (Decision, error) {
 		calls++
 		if calls == 1 {
-			current, _ := h.Store.GetRun(run.RunID, "alice")
+			current, callErr4 := h.Store.GetRun(run.RunID, "alice")
+			if callErr4 != nil {
+				t.Error(callErr4)
+			}
 			if _, err := h.Steer(ctx, run.RunID, "alice", NewID(), "Answer in Chinese", current.Revision); err != nil {
 				t.Fatal(err)
 			}
@@ -79,11 +91,17 @@ func TestSteeringAcceptedDuringFinalReachesNextDecision(t *testing.T) {
 		return Decision{Kind: "final", AnswerMarkdown: "新回答"}, nil
 	})
 	run, err := h.Drive(t.Context(), run.RunID, "alice")
-	state, _ := h.restore(run)
+	state, callErr5 := h.restore(run)
+	if callErr5 != nil {
+		t.Error(callErr5)
+	}
 	if err != nil || calls != 2 || state.AnswerMarkdown != "新回答" {
 		t.Fatalf("%+v %v calls=%d", state, err, calls)
 	}
-	events, _ := h.Store.ListEvents(run.RunID, "alice", 0, 100)
+	events, callErr6 := h.Store.ListEvents(run.RunID, "alice", 0, 100)
+	if callErr6 != nil {
+		t.Error(callErr6)
+	}
 	found := false
 	for _, event := range events {
 		payload := event["event"].(JSON)
@@ -100,11 +118,18 @@ func TestSteeringPersistsThroughRestartAndInvalidatesApproval(t *testing.T) {
 	p := &hostProvider{caps: map[string]CapabilityDescription{"records.get": {Name: "records.get", Version: "1", InputSchema: JSON{}, Effect: "write", Replay: "never", ApprovalRequired: true}}}
 	h := testHost(t, testStore(t), p, &hostModel{decisions: []Decision{callDecision("records.get")}})
 	run := createTestHostRun(t, h)
-	run, _ = h.Drive(t.Context(), run.RunID, "alice")
+	var callErr7 error
+	run, callErr7 = h.Drive(t.Context(), run.RunID, "alice")
+	if callErr7 != nil {
+		t.Error(callErr7)
+	}
 	if run.Status != "needs_approval" {
 		t.Fatal(run.Status)
 	}
-	state, _ := h.restore(run)
+	state, callErr8 := h.restore(run)
+	if callErr8 != nil {
+		t.Error(callErr8)
+	}
 	old := state.Pending[0]
 	if _, err := h.Steer(t.Context(), run.RunID, "alice", NewID(), "Do not write; explain the capability", run.Revision); err != nil {
 		t.Fatal(err)
@@ -135,14 +160,27 @@ func TestSteeringOwnershipRevisionIdempotencyAndCompletionFence(t *testing.T) {
 	if _, err := h.Steer(t.Context(), run.RunID, "alice", id, "different", run.Revision); ErrorCode(err) != "steering_request_conflict" {
 		t.Fatal(err)
 	}
-	claimed, _ := h.Store.Claim(run.RunID, "alice", 60)
-	defer h.Store.Release(run.RunID, "alice", claimed.LeaseToken)
-	state, _ := h.restore(claimed)
+	claimed, callErr9 := h.Store.Claim(run.RunID, "alice", 60)
+	if callErr9 != nil {
+		t.Error(callErr9)
+	}
+	defer func(release func(string, string, string) error, id, owner, token string) {
+		if err := release(id, owner, token); err != nil {
+			t.Error(err)
+		}
+	}(h.Store.Release, run.RunID, "alice", claimed.LeaseToken)
+	state, callErr10 := h.restore(claimed)
+	if callErr10 != nil {
+		t.Error(callErr10)
+	}
 	state.Status = "completed"
 	if _, err := h.save(claimed, state, "", nil, nil); !errors.Is(err, errSteeringPending) {
 		t.Fatal("completion ignored accepted steering", err)
 	}
-	current, _ := h.Store.GetRun(run.RunID, "alice")
+	current, callErr11 := h.Store.GetRun(run.RunID, "alice")
+	if callErr11 != nil {
+		t.Error(callErr11)
+	}
 	if current.Status == "completed" {
 		t.Fatal("completion committed")
 	}
@@ -152,7 +190,7 @@ func TestSteeringHTTPContract(t *testing.T) {
 	h := testHost(t, testStore(t), &hostProvider{}, &hostModel{})
 	run := createTestHostRun(t, h)
 	s := &HTTPServer{Host: h}
-	body := fmtSteeringBody(NewID(), run.Revision)
+	body := fmtSteeringBody(t, NewID(), run.Revision)
 	req := httptest.NewRequest("POST", "/runs/"+run.RunID+"/steer", strings.NewReader(body))
 	out := httptest.NewRecorder()
 	s.runHTTP(out, req, "alice")
@@ -174,13 +212,20 @@ func TestSteeringQueueIsBoundedAndDoesNotBypassInput(t *testing.T) {
 	}
 	h.Model = &hostModel{decisions: []Decision{{Kind: "request_input", Field: "destination", Prompt: "Where?"}}}
 	other := createTestHostRun(t, h)
-	other, _ = h.Drive(t.Context(), other.RunID, "alice")
+	var callErr12 error
+	other, callErr12 = h.Drive(t.Context(), other.RunID, "alice")
+	if callErr12 != nil {
+		t.Error(callErr12)
+	}
 	if _, err := h.Steer(t.Context(), other.RunID, "alice", NewID(), "Shanghai", other.Revision); ErrorCode(err) != "steering_not_available" {
 		t.Fatal("steering bypassed requested input contract", err)
 	}
 }
 
-func fmtSteeringBody(id string, revision int) string {
-	raw, _ := CanonicalJSON(JSON{"request_id": id, "text": "Explain first", "revision": revision})
+func fmtSteeringBody(t *testing.T, id string, revision int) string {
+	raw, callErr13 := CanonicalJSON(JSON{"request_id": id, "text": "Explain first", "revision": revision})
+	if callErr13 != nil {
+		t.Error(callErr13)
+	}
 	return string(raw)
 }

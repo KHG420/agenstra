@@ -18,7 +18,11 @@ func scheduleServer(t *testing.T, worker bool) (*HTTPServer, *AgentHost) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	return s, h
 }
 func scheduleHTTP(t *testing.T, s *HTTPServer, method, path, owner, body string, want int) *httptest.ResponseRecorder {
@@ -174,7 +178,11 @@ func TestScheduleFailureDoesNotBlockOtherSchedulesOrRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(s.Close)
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		current, err := h.GetSchedule(t.Context(), good.ScheduleID, "alice")
@@ -186,7 +194,10 @@ func TestScheduleFailureDoesNotBlockOtherSchedulesOrRuns(t *testing.T) {
 			t.Fatal(err)
 		}
 		if current.LastExecution != nil && current.LastExecution.Status == "completed" && run.Status == "completed" {
-			failed, _ := h.GetSchedule(t.Context(), bad.ScheduleID, "alice")
+			failed, callErr := h.GetSchedule(t.Context(), bad.ScheduleID, "alice")
+			if callErr != nil {
+				t.Error(callErr)
+			}
 			if failed.LastExecution != nil || failed.Revision != 0 || *failed.NextRunAt != 1060 {
 				t.Fatalf("failure consumed occurrence: %+v", failed)
 			}

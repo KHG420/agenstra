@@ -70,7 +70,7 @@
 
 | 范围 | 自动执行 | 人工审查仍需确认 |
 | --- | --- | --- |
-| Go | `gofmt`、`govet`、Staticcheck `SA*`、`ineffassign`、`bodyclose`、`nolintlint`、竞态测试、命令构建。 | 授权边界、回执语义、Context 归属、SQL rows 关闭时机、错误码与错误链、导出文档。 |
+| Go | `gofmt`、`govet`、Staticcheck `SA*`、`ineffassign`、`errcheck`（包括赋给 `_` 的错误）、`bodyclose`、`nolintlint`、竞态测试、命令构建。 | 授权边界、回执语义、Context 归属、SQL rows 关闭时机、错误码与错误链、导出文档。 |
 | JavaScript | ESLint 推荐缺陷检查、未使用变量、`const`/`let`、比较、分号、动态执行禁用、浏览器 Node import 限制、无 UI 客户端的直接聊天组件 import 限制；现有 Web 测试。 | Promise 归属、恢复语义、文本渲染、传递依赖和新增 SDK 接线成本。 |
 | 类型声明、HTML/CSS、文档、配置 | 相关行为测试、构建、`git diff --check`；EditorConfig 提供编辑器格式约定。 | `.d.ts` 与实现一致、可访问性、契约兼容、来源和示例准确性。未配置独立 TS/HTML/CSS linter。 |
 

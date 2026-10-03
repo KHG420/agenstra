@@ -74,7 +74,10 @@ func TestCronCalendarTimezoneAndDST(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			after, _ := time.Parse(time.RFC3339, tc.after)
+			after, callErr := time.Parse(time.RFC3339, tc.after)
+			if callErr != nil {
+				t.Error(callErr)
+			}
 			got, err := rule.next(after)
 			if err != nil || got.UTC().Format(time.RFC3339) != tc.want {
 				t.Fatalf("got %s %v; want %s", got, err, tc.want)
@@ -114,7 +117,10 @@ func TestScheduleOnceDispatchAndResult(t *testing.T) {
 		t.Fatalf("result: %+v %v", task, err)
 	}
 	run, err := h.Get(t.Context(), task.LastExecution.RunID, "alice")
-	state, _ := h.restore(run)
+	state, callErr2 := h.restore(run)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	if err != nil || state == nil || state.AnswerMarkdown != "Done" {
 		t.Fatalf("run result: %+v %v", state, err)
 	}
@@ -136,7 +142,11 @@ func TestScheduleMissedIntervalOverlapAndHistory(t *testing.T) {
 	if n, err := h.DispatchDueSchedules(t.Context(), 100); err != nil || n != 1 {
 		t.Fatalf("catchup: %d %v", n, err)
 	}
-	task, _ = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	var callErr3 error
+	task, callErr3 = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	if *task.NextRunAt != 1300 || task.LastExecution.ScheduledAt != 1060 {
 		t.Fatalf("cadence: %+v", task)
 	}
@@ -144,11 +154,18 @@ func TestScheduleMissedIntervalOverlapAndHistory(t *testing.T) {
 	if _, err := h.DispatchDueSchedules(t.Context(), 100); err != nil {
 		t.Fatal(err)
 	}
-	task, _ = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	var callErr4 error
+	task, callErr4 = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	if task.LastExecution.Status != "skipped_overlap" || *task.NextRunAt != 1360 {
 		t.Fatalf("overlap: %+v", task)
 	}
-	runs, _ := h.Store.ListRuns("alice", 100)
+	runs, callErr5 := h.Store.ListRuns("alice", 100)
+	if callErr5 != nil {
+		t.Error(callErr5)
+	}
 	if len(runs) != 1 {
 		t.Fatalf("overlapping runs: %d", len(runs))
 	}
@@ -210,7 +227,11 @@ func TestScheduleOwnerRevisionPauseUpdateDelete(t *testing.T) {
 	if _, err = h.DispatchDueSchedules(t.Context(), 100); err != nil {
 		t.Fatal(err)
 	}
-	task, _ = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	var callErr6 error
+	task, callErr6 = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	if callErr6 != nil {
+		t.Error(callErr6)
+	}
 	if err = h.DeleteSchedule(t.Context(), task.ScheduleID, "alice", task.Revision-1); ErrorCode(err) != "revision_conflict" {
 		t.Fatal(err)
 	}
@@ -220,7 +241,10 @@ func TestScheduleOwnerRevisionPauseUpdateDelete(t *testing.T) {
 	if _, err = h.GetSchedule(t.Context(), task.ScheduleID, "alice"); ErrorCode(err) != "not_found" {
 		t.Fatal(err)
 	}
-	runs, _ := h.Store.ListRuns("alice", 100)
+	runs, callErr7 := h.Store.ListRuns("alice", 100)
+	if callErr7 != nil {
+		t.Error(callErr7)
+	}
 	if len(runs) != 1 {
 		t.Fatal("delete removed a dispatched run")
 	}
@@ -234,7 +258,11 @@ func TestScheduleReopenAndCompetingDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer secondStore.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(secondStore.Close)
 	if err = secondStore.Initialize(); err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +308,11 @@ func TestScheduleAuthorizationRecheckAndTransientRetry(t *testing.T) {
 	if _, err := h.DispatchDueSchedules(t.Context(), 100); ErrorCode(err) != "authorization_unavailable" {
 		t.Fatal(err)
 	}
-	task, _ = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	var callErr8 error
+	task, callErr8 = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	if callErr8 != nil {
+		t.Error(callErr8)
+	}
 	if task.Status != "active" || task.LastExecution != nil || *task.NextRunAt != 1010 {
 		t.Fatalf("transient failure consumed schedule: %+v", task)
 	}
@@ -290,14 +322,21 @@ func TestScheduleAuthorizationRecheckAndTransientRetry(t *testing.T) {
 	if n, err := h.DispatchDueSchedules(t.Context(), 100); err != nil || n != 1 {
 		t.Fatalf("denial: %d %v", n, err)
 	}
-	task, _ = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	var callErr9 error
+	task, callErr9 = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	if callErr9 != nil {
+		t.Error(callErr9)
+	}
 	if task.Status != "paused" || task.LastExecution.Status != "needs_authorization" || task.LastExecution.ErrorCode != "access_denied" {
 		t.Fatalf("denial state: %+v", task)
 	}
 	if _, err := h.ResumeSchedule(t.Context(), task.ScheduleID, "alice", task.Revision); ErrorCode(err) != "access_denied" {
 		t.Fatal(err)
 	}
-	runs, _ := h.Store.ListRuns("alice", 100)
+	runs, callErr10 := h.Store.ListRuns("alice", 100)
+	if callErr10 != nil {
+		t.Error(callErr10)
+	}
 	if len(runs) != 0 {
 		t.Fatal("unauthorized run created")
 	}
@@ -325,7 +364,10 @@ func TestSchedulePauseDuringAuthorizationFencesDispatch(t *testing.T) {
 	if n, err := h.DispatchDueSchedules(t.Context(), 100); err != nil || n != 0 {
 		t.Fatalf("stale dispatch: %d %v", n, err)
 	}
-	runs, _ := h.Store.ListRuns("alice", 100)
+	runs, callErr11 := h.Store.ListRuns("alice", 100)
+	if callErr11 != nil {
+		t.Error(callErr11)
+	}
 	if len(runs) != 0 {
 		t.Fatal("stale definition dispatched")
 	}
@@ -342,8 +384,15 @@ func TestScheduleDispatchRollbackAndCancellation(t *testing.T) {
 	if _, err := h.DispatchDueSchedules(t.Context(), 100); err == nil {
 		t.Fatal("expected transaction failure")
 	}
-	runs, _ := h.Store.ListRuns("alice", 100)
-	task, _ = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	runs, callErr12 := h.Store.ListRuns("alice", 100)
+	if callErr12 != nil {
+		t.Error(callErr12)
+	}
+	var callErr13 error
+	task, callErr13 = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	if callErr13 != nil {
+		t.Error(callErr13)
+	}
 	if len(runs) != 0 || task.Revision != 0 || *task.NextRunAt != 1060 || task.LastExecution != nil {
 		t.Fatalf("partial dispatch committed: %+v %v", task, runs)
 	}
@@ -358,7 +407,11 @@ func TestScheduleDispatchRollbackAndCancellation(t *testing.T) {
 	if _, err := h.DispatchDueSchedules(ctx, 100); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	runs, _ = h.Store.ListRuns("alice", 100)
+	var callErr14 error
+	runs, callErr14 = h.Store.ListRuns("alice", 100)
+	if callErr14 != nil {
+		t.Error(callErr14)
+	}
 	if len(runs) != 0 {
 		t.Fatal("canceled dispatch committed")
 	}
@@ -378,7 +431,11 @@ func TestScheduleUsesTriggerReleaseAndPreservesApproval(t *testing.T) {
 	if _, err := h.DispatchDueSchedules(t.Context(), 100); err != nil {
 		t.Fatal(err)
 	}
-	task, _ = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	var callErr15 error
+	task, callErr15 = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	if callErr15 != nil {
+		t.Error(callErr15)
+	}
 	run, err := h.Get(t.Context(), task.LastExecution.RunID, "alice")
 	if err != nil || run.State["pack_release"] != "release-at-trigger" {
 		t.Fatalf("release: %+v %v", run, err)
@@ -386,7 +443,11 @@ func TestScheduleUsesTriggerReleaseAndPreservesApproval(t *testing.T) {
 	if _, err = h.WakeDue(t.Context(), 100); err != nil {
 		t.Fatal(err)
 	}
-	task, _ = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	var callErr16 error
+	task, callErr16 = h.GetSchedule(t.Context(), task.ScheduleID, "alice")
+	if callErr16 != nil {
+		t.Error(callErr16)
+	}
 	if task.LastExecution.Status != "needs_approval" || p.calls != 0 {
 		t.Fatalf("approval bypassed: %+v calls=%d", task, p.calls)
 	}
@@ -394,12 +455,22 @@ func TestScheduleUsesTriggerReleaseAndPreservesApproval(t *testing.T) {
 	if _, err = h.DispatchDueSchedules(t.Context(), 100); err != nil {
 		t.Fatal(err)
 	}
-	history, _ := h.ListScheduleExecutions(t.Context(), task.ScheduleID, "alice", 0, 100)
+	history, callErr17 := h.ListScheduleExecutions(t.Context(), task.ScheduleID, "alice", 0, 100)
+	if callErr17 != nil {
+		t.Error(callErr17)
+	}
 	if len(history) != 2 || history[1].Status != "skipped_overlap" {
 		t.Fatalf("approval overlap: %+v", history)
 	}
-	run, _ = h.Get(t.Context(), run.RunID, "alice")
-	state, _ := h.restore(run)
+	var callErr18 error
+	run, callErr18 = h.Get(t.Context(), run.RunID, "alice")
+	if callErr18 != nil {
+		t.Error(callErr18)
+	}
+	state, callErr19 := h.restore(run)
+	if callErr19 != nil {
+		t.Error(callErr19)
+	}
 	item := state.Pending[0]
 	if _, err = h.Approve(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, run.Revision, true); err != nil {
 		t.Fatal(err)
@@ -407,7 +478,11 @@ func TestScheduleUsesTriggerReleaseAndPreservesApproval(t *testing.T) {
 	if _, err = h.WakeDue(t.Context(), 100); err != nil {
 		t.Fatal(err)
 	}
-	history, _ = h.ListScheduleExecutions(t.Context(), task.ScheduleID, "alice", 0, 100)
+	var callErr20 error
+	history, callErr20 = h.ListScheduleExecutions(t.Context(), task.ScheduleID, "alice", 0, 100)
+	if callErr20 != nil {
+		t.Error(callErr20)
+	}
 	if history[0].Status != "completed" || p.calls != 1 {
 		t.Fatalf("approved result: %+v calls=%d", history, p.calls)
 	}

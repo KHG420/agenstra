@@ -76,13 +76,21 @@ func TestMCPStdioStartupRespectsSourceTimeout(t *testing.T) {
 					t.Error(err)
 					return
 				}
-				defer process.Release()
+				defer func(close func() error) {
+					if err := close(); err != nil {
+						t.Error(err)
+					}
+				}(process.Release)
 				if err := process.Signal(syscall.Signal(0)); err == nil {
 					t.Error("MCP startup subprocess is still running")
 				}
 			})
 			if pack != nil {
-				t.Cleanup(func() { _ = pack.Close() })
+				t.Cleanup(func() {
+					if callErr := pack.Close(); callErr != nil {
+						t.Error(callErr)
+					}
+				})
 			}
 			if stage != "healthy" {
 				if !errors.Is(err, context.DeadlineExceeded) || elapsed > 2*time.Second || ctx.Err() != nil {

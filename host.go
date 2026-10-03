@@ -9,16 +9,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
 )
 
+// HostError carries a stable run lifecycle or authorization error code.
 type HostError struct{ Code string }
 
+// Error returns the safe error identifier.
 func (e *HostError) Error() string { return e.Code }
 func hostError(code string) error  { return &HostError{Code: code} }
 
+// ExecutionPolicy is the live authorization resolved from trusted host state.
+// Its maps must not be changed while a caller is using the policy.
 type ExecutionPolicy struct {
 	GrantedCapabilities  map[string]bool     `json:"granted_capabilities"`
 	ApprovalCapabilities map[string]bool     `json:"approval_capabilities"`
@@ -27,6 +32,9 @@ type ExecutionPolicy struct {
 	PermissionsVerified  bool                `json:"permissions_verified,omitempty"`
 	Delegations          map[string][]string `json:"delegations,omitempty"`
 }
+
+// HostSettings bounds execution, persistence and model context.
+// Configure settings before the host begins serving concurrent runs.
 type HostSettings struct {
 	MaxConversationHistoryMessages   int           `json:"max_conversation_history_messages,omitempty"`
 	MaxConversationHistoryCharacters int           `json:"max_conversation_history_characters,omitempty"`
@@ -59,9 +67,12 @@ type HostSettings struct {
 	MaxConcurrentTools               int           `json:"max_concurrent_tools,omitempty"`
 }
 
+// DefaultHostSettings returns independent default execution limits.
 func DefaultHostSettings() HostSettings {
 	return HostSettings{MaxConversationHistoryMessages: 6, MaxConversationHistoryCharacters: 1500, MaxConversationMessages: 500, LeaseSeconds: 60, MaxModelRounds: 30, MaxToolCalls: 80, MaxPollCalls: 720, MaxRunSeconds: 86400, MaxContextCharacters: 80000, MaxArtifactBytes: 8000000, MaxActiveArtifactBytes: 64000000, MaxStateBytes: 8000000, ModelTimeoutSeconds: 60, InvocationTimeoutSeconds: 300, MaxInvocationAttempts: 3, RetryIntervalSeconds: 5, ApprovalSeconds: 900, MaxConcurrentRuns: 4, MaxStagnantRounds: 8, MaxConcurrentTools: 4}
 }
+
+// Validate rejects execution limits outside the supported ranges.
 func (s HostSettings) Validate() error {
 	if s.MaxConversationHistoryMessages < 0 || s.MaxConversationHistoryMessages > 100 || s.MaxConversationHistoryCharacters < 0 || s.MaxConversationHistoryCharacters > 12000 || s.MaxConversationMessages < 0 || s.MaxConversationMessages > 500 {
 		return errors.New("host_settings_invalid")
@@ -90,10 +101,22 @@ func (s HostSettings) Validate() error {
 	return nil
 }
 
+// ProviderFactory opens an owner-specific capability connection for a pack.
+// The host closes each successfully opened provider.
 type ProviderFactory func(context.Context, string, string) (CapabilityProvider, error)
+
+// PolicyResolver reads current authorization; cached model data cannot replace it.
 type PolicyResolver func(context.Context, string, string) (ExecutionPolicy, error)
+
+// ReleaseResolver selects the immutable pack release bound to a new run.
 type ReleaseResolver func(context.Context, string, string) (string, error)
+
+// ReleaseProviderFactory opens the pinned release for an existing run.
+// The host closes each successfully opened provider.
 type ReleaseProviderFactory func(context.Context, string, string, string) (CapabilityProvider, error)
+
+// AgentHost owns run scheduling, authorization, leases and durable checkpoints.
+// It must not be copied after use; its store and model are supplied by the host app.
 type AgentHost struct {
 	Store                  *SQLiteStore
 	ProviderFactory        ProviderFactory
@@ -109,9 +132,12 @@ type AgentHost struct {
 	slots                  chan struct{}
 }
 
+// NewAgentHost wires host services with default limits without opening or owning their resources.
 func NewAgentHost(store *SQLiteStore, factory ProviderFactory, model DecisionModel, policy PolicyResolver) *AgentHost {
 	return &AgentHost{Store: store, ProviderFactory: factory, Model: model, PolicyResolver: policy, Settings: DefaultHostSettings(), Clock: unixNow}
 }
+
+// InitializeDefaults initializes run slots once, before driving work.
 func (h *AgentHost) InitializeDefaults() {
 	h.once.Do(func() {
 		if h.Settings == (HostSettings{}) {
@@ -158,7 +184,7 @@ func requestRunID(owner, request string) string {
 	if request == "" {
 		return NewID()
 	}
-	b, _ := CanonicalJSON([]string{owner, request})
+	b, _ := CanonicalJSON([]string{owner, request}) //nolint:errcheck // A slice of strings always encodes as JSON.
 	// UUIDv5, URL namespace; preserves request-id replay across Python and Go.
 	namespace := []byte{0x6b, 0xa7, 0xb8, 0x11, 0x9d, 0xad, 0x11, 0xd1, 0x80, 0xb4, 0, 0xc0, 0x4f, 0xd4, 0x30, 0xc8}
 	sum := sha1.Sum(append(namespace, b...))
@@ -238,12 +264,16 @@ func (h *AgentHost) prepareRun(ctx context.Context, owner, pack, instruction, id
 	}
 	return envelope, nil
 }
+
+// Create authorizes and persists a run, reusing the owner's supplied request identity.
 func (h *AgentHost) Create(ctx context.Context, owner, pack, instruction, requestID string) (StoredRun, error) {
 	return h.createWithMemoryInput(ctx, owner, pack, instruction, requestID, instruction)
 }
 func (h *AgentHost) createWithMemoryInput(ctx context.Context, owner, pack, instruction, requestID, input string) (StoredRun, error) {
 	return h.createWithSources(ctx, owner, pack, instruction, requestID, input, nil)
 }
+
+// Get returns an owner-scoped run after checking current access.
 func (h *AgentHost) Get(ctx context.Context, id, owner string) (StoredRun, error) {
 	r, e := h.Store.GetRun(id, owner)
 	if e != nil {
@@ -374,6 +404,8 @@ func (h *AgentHost) save(run StoredRun, state *RuntimeState, fingerprint string,
 	}
 	return saved, nil
 }
+
+// SupplyInput validates a requested answer and revision before queuing continuation.
 func (h *AgentHost) SupplyInput(ctx context.Context, id, owner, field, text string, revision int) (StoredRun, error) {
 	current, e := h.Get(ctx, id, owner)
 	if e != nil {
@@ -386,7 +418,12 @@ func (h *AgentHost) SupplyInput(ctx context.Context, id, owner, field, text stri
 	if e != nil {
 		return run, e
 	}
-	defer h.Store.Release(id, owner, run.LeaseToken)
+	defer func() {
+		// The lease expires if release fails; keep the committed run outcome.
+		if err := h.Store.Release(id, owner, run.LeaseToken); err != nil {
+			log.Print("run lease release failed")
+		}
+	}()
 	state, e := h.restore(run)
 	if e != nil {
 		return run, e
@@ -415,6 +452,8 @@ func (h *AgentHost) SupplyInput(ctx context.Context, id, owner, field, text stri
 	state.ErrorCode = nil
 	return h.save(run, state, "", nil, map[string]any{"kind": "input_received", "field": field})
 }
+
+// Approve binds an approval or rejection to the saved invocation, argument hash and revision.
 func (h *AgentHost) Approve(ctx context.Context, id, owner, invocationID, argsSHA string, revision int, approved bool) (StoredRun, error) {
 	if _, e := h.Get(ctx, id, owner); e != nil {
 		return StoredRun{}, e
@@ -423,7 +462,12 @@ func (h *AgentHost) Approve(ctx context.Context, id, owner, invocationID, argsSH
 	if e != nil {
 		return run, e
 	}
-	defer h.Store.Release(id, owner, run.LeaseToken)
+	defer func() {
+		// The lease expires if release fails; keep the committed run outcome.
+		if err := h.Store.Release(id, owner, run.LeaseToken); err != nil {
+			log.Print("run lease release failed")
+		}
+	}()
 	state, e := h.restore(run)
 	if e != nil {
 		return run, e
@@ -466,6 +510,8 @@ func (h *AgentHost) Approve(ctx context.Context, id, owner, invocationID, argsSH
 	state.Status = "queued"
 	return h.save(run, state, "", nil, map[string]any{"kind": kind, "invocation_id": invocationID, "arguments_sha256": argsSHA})
 }
+
+// Cancel requests local cancellation without claiming that external work was undone.
 func (h *AgentHost) Cancel(ctx context.Context, id, owner string) (StoredRun, error) {
 	r, e := h.Get(ctx, id, owner)
 	if e != nil || terminal(r.Status) {
@@ -482,7 +528,10 @@ func fingerprint(provider CapabilityProvider) string {
 	if p, ok := provider.(interface{ BindingID() string }); ok {
 		binding = p.BindingID()
 	}
-	b, _ := CanonicalJSON(map[string]any{"capabilities": provider.Capabilities(), "skills": skills, "prompt": provider.SystemPrompt(), "binding": binding})
+	b, err := CanonicalJSON(map[string]any{"capabilities": provider.Capabilities(), "skills": skills, "prompt": provider.SystemPrompt(), "binding": binding})
+	if err != nil {
+		return ""
+	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
@@ -666,7 +715,10 @@ func (h *AgentHost) settleInvocation(run StoredRun, state *RuntimeState, item *I
 		} else {
 			size := len(b)
 			for _, f := range state.Facts {
-				b, _ := CanonicalJSON(f)
+				b, err := CanonicalJSON(f)
+				if err != nil {
+					return run, hostError("run_state_invalid")
+				}
 				size += len(b)
 			}
 			if size > h.runSettings(run).MaxActiveArtifactBytes {
@@ -941,7 +993,10 @@ func (h *AgentHost) poll(ctx context.Context, run StoredRun, state *RuntimeState
 		facts := []Fact{}
 		for _, f := range state.Facts {
 			if f.FactID != *item.FactID {
-				b, _ := CanonicalJSON(f)
+				b, err := CanonicalJSON(f)
+				if err != nil {
+					return run, hostError("run_state_invalid")
+				}
 				size += len(b)
 				facts = append(facts, f)
 			}
@@ -1056,8 +1111,16 @@ func (h *AgentHost) work(ctx context.Context, run StoredRun) (result StoredRun, 
 	if e != nil {
 		return run, e
 	}
-	defer provider.Close()
+	defer func() {
+		// Closing the connection does not change an already observed business outcome.
+		if err := provider.Close(); err != nil {
+			log.Print("provider cleanup failed")
+		}
+	}()
 	fp := fingerprint(provider)
+	if fp == "" {
+		return run, hostError("pack_changed")
+	}
 	if previous, ok := run.State["pack_fingerprint"].(string); ok && previous != fp {
 		return run, hostError("pack_changed")
 	}
@@ -1269,6 +1332,8 @@ func (h *AgentHost) markCancelled(run StoredRun, state *RuntimeState) (StoredRun
 	}
 	return h.save(run, state, "", nil, map[string]any{"kind": "run_cancelled"})
 }
+
+// Drive claims a run, renews its lease and waits for execution workers to stop before release.
 func (h *AgentHost) Drive(ctx context.Context, id, owner string) (StoredRun, error) {
 	h.InitializeDefaults()
 	select {
@@ -1336,6 +1401,8 @@ func (h *AgentHost) Drive(ctx context.Context, id, owner string) (StoredRun, err
 	}
 	return result, e
 }
+
+// WakeDue drives a bounded set of due runs and waits for all started workers.
 func (h *AgentHost) WakeDue(ctx context.Context, limit int) (int, error) {
 	runs, e := h.Store.DueRuns(min(limit, h.Settings.MaxConcurrentRuns))
 	if e != nil {

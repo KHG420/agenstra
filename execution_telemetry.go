@@ -5,16 +5,20 @@ import (
 	"sort"
 )
 
+// HostOperationLimits reports live host-wide lease and concurrency bounds.
 type HostOperationLimits struct {
 	LeaseSeconds      float64 `json:"lease_seconds"`
 	MaxConcurrentRuns int     `json:"max_concurrent_runs"`
 }
 
+// ExecutionCheckpoint describes the saved run revision and any required continuation.
 type ExecutionCheckpoint struct {
 	Stage     string   `json:"stage"`
 	StartedAt float64  `json:"started_at"`
 	RetryAt   *float64 `json:"retry_at"`
 }
+
+// ExecutionTelemetry reports persisted execution status and active work without inventing a model plan.
 type ExecutionTelemetry struct {
 	Stage           string             `json:"stage"`
 	StartedAt       *float64           `json:"started_at"`
@@ -24,6 +28,8 @@ type ExecutionTelemetry struct {
 	CancelRequested bool               `json:"cancel_requested"`
 	Active          []ActiveInvocation `json:"active"`
 }
+
+// ActiveInvocation exposes the saved identity and status of work still requiring settlement.
 type ActiveInvocation struct {
 	ID                string   `json:"invocation_id"`
 	Capability        string   `json:"capability"`
@@ -101,6 +107,7 @@ func executionTelemetry(state RuntimeState, run StoredRun) ExecutionTelemetry {
 	return e
 }
 
+// RuntimeInfo reports the authorized integration's runtime and host limits.
 type RuntimeInfo struct {
 	Schema              string          `json:"schema"`
 	Settings            HostSettings    `json:"settings"`
@@ -109,6 +116,7 @@ type RuntimeInfo struct {
 	GrantedCapabilities []string        `json:"granted_capabilities"`
 }
 
+// GetRuntimeInfo reads authorized host limits without calling a model or business capability.
 func (h *AgentHost) GetRuntimeInfo(ctx context.Context, owner, pack string) (RuntimeInfo, error) {
 	p, err := h.policy(ctx, owner, pack, false)
 	if err != nil {
@@ -125,6 +133,7 @@ func (h *AgentHost) GetRuntimeInfo(ctx context.Context, owner, pack string) (Run
 	return RuntimeInfo{Schema: "agenstra.runtime-info.v1", Settings: normalizedRunSettings(h.Settings), Model: modelInfo(h.Model), Features: map[string]bool{"telemetry": true, "context_policy": p.AllowModelData, "steering": p.AllowModelData, "memory_extraction": extract, "reconciliation": h.Reconciler != nil, "pause": false, "single_step": false, "content_stream": false}, GrantedCapabilities: names}, nil
 }
 
+// ConversationContextSelection records which framework-owned history was selected for a message.
 type ConversationContextSelection struct {
 	HistoryLimit       int `json:"history_limit"`
 	PartCharacterLimit int `json:"part_character_limit"`

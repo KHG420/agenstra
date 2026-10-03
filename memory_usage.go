@@ -77,7 +77,7 @@ func (h *AgentHost) extractRunMemories(ctx context.Context, run StoredRun, reque
 		metrics.ElapsedMilliseconds = time.Since(started).Milliseconds()
 	}
 	if err != nil {
-		metrics.ErrorCode = strptr(ErrorCode(err))
+		metrics.ErrorCode = strptr(modelErrorCode(err))
 	}
 	state.ModelCalls[index] = metrics
 	rebuildModelUsage(state)

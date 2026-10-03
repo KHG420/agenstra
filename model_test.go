@@ -30,7 +30,9 @@ func TestHTTPJSONDecisionModelStrictBoundary(t *testing.T) {
 		if request["response_format"].(map[string]any)["type"] != "json_object" {
 			t.Error("missing JSON format")
 		}
-		_ = json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"message": JSON{"content": content}}}})
+		if callErr := json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"message": JSON{"content": content}}}}); callErr != nil {
+			t.Error(callErr)
+		}
 	}))
 	defer server.Close()
 	model, err := NewHTTPJSONDecisionModel("model", server.URL, "key", 0, server.Client())
@@ -59,7 +61,10 @@ func TestModelTransientRetriesPreserveRequest(t *testing.T) {
 	var first string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
-		body, _ := io.ReadAll(r.Body)
+		body, callErr2 := io.ReadAll(r.Body)
+		if callErr2 != nil {
+			t.Error(callErr2)
+		}
 		if requests == 1 {
 			first = string(body)
 		} else if string(body) != first {
@@ -73,10 +78,15 @@ func TestModelTransientRetriesPreserveRequest(t *testing.T) {
 			w.WriteHeader(503)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"message": JSON{"content": `{"kind":"final","answer_markdown":"ok","fact_ids":[]}`}}}})
+		if callErr3 := json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"message": JSON{"content": `{"kind":"final","answer_markdown":"ok","fact_ids":[]}`}}}}); callErr3 != nil {
+			t.Error(callErr3)
+		}
 	}))
 	defer server.Close()
-	m, _ := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	m, callErr4 := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	m.RetryBaseDelay = time.Nanosecond
 	d, err := m.Decide(t.Context(), ContextPacket{}, "system")
 	if err != nil || d.Kind != "final" || requests != 3 {
@@ -96,7 +106,10 @@ func TestModelRetryClassificationAndBounds(t *testing.T) {
 			requests := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++; w.WriteHeader(tc.status) }))
 			defer server.Close()
-			m, _ := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+			m, callErr5 := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+			if callErr5 != nil {
+				t.Error(callErr5)
+			}
 			m.RetryBaseDelay = time.Nanosecond
 			_, err := m.Decide(t.Context(), ContextPacket{}, "system")
 			if ErrorCode(err) != tc.code || requests != tc.requests {
@@ -114,7 +127,10 @@ func TestModelCancellationInterruptsRetryWait(t *testing.T) {
 		close(entered)
 	}))
 	defer server.Close()
-	m, _ := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	m, callErr6 := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	if callErr6 != nil {
+		t.Error(callErr6)
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { _, err := m.Decide(ctx, ContextPacket{}, "system"); done <- err }()
@@ -137,17 +153,26 @@ func TestModelServerRetryAfterBoundAndTruncatedOutput(t *testing.T) {
 		w.Header().Set("Retry-After", "60")
 		w.WriteHeader(429)
 	}))
-	m, _ := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	m, callErr7 := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	if callErr7 != nil {
+		t.Error(callErr7)
+	}
 	_, err := m.Decide(t.Context(), ContextPacket{}, "system")
 	server.Close()
 	if ErrorCode(err) != "model_rate_limited" || requests != 1 {
 		t.Fatalf("err=%v requests=%d", err, requests)
 	}
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"finish_reason": "length", "message": JSON{"content": `{"kind":"final","answer_markdown":"partial"}`}}}})
+		if callErr8 := json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"finish_reason": "length", "message": JSON{"content": `{"kind":"final","answer_markdown":"partial"}`}}}}); callErr8 != nil {
+			t.Error(callErr8)
+		}
 	}))
 	defer server.Close()
-	m, _ = NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	var callErr9 error
+	m, callErr9 = NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	if callErr9 != nil {
+		t.Error(callErr9)
+	}
 	_, err = m.Decide(t.Context(), ContextPacket{}, "system")
 	if ErrorCode(err) != "model_output_truncated" {
 		t.Fatal(err)

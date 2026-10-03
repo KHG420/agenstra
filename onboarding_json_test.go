@@ -45,7 +45,9 @@ func TestDirectPackLoadersRequireOneCompleteJSONDocument(t *testing.T) {
 						t.Errorf("unexpected method: %v", request["method"])
 					}
 					w.Header().Set("Content-Type", "application/json")
-					_ = json.NewEncoder(w).Encode(JSON{"jsonrpc": "2.0", "id": request["id"], "result": result})
+					if callErr := json.NewEncoder(w).Encode(JSON{"jsonrpc": "2.0", "id": request["id"], "result": result}); callErr != nil {
+						t.Error(callErr)
+					}
 				}))
 				defer server.Close()
 				var manifest JSON
@@ -77,7 +79,11 @@ func TestDirectPackLoadersRequireOneCompleteJSONDocument(t *testing.T) {
 				}
 				pack, err := load(t.Context(), path, map[string]string{"API_URL": server.URL})
 				if err == nil {
-					defer pack.Close()
+					defer func(close func() error) {
+						if err := close(); err != nil {
+							t.Error(err)
+						}
+					}(pack.Close)
 				}
 				if tc.valid {
 					if err != nil || len(pack.Capabilities()) != 1 {

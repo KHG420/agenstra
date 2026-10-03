@@ -49,16 +49,24 @@ func TestDraftCLISharedAPILifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(store.Close)
 	server, err := agenstra.NewHTTPServer(agenstra.NewAgentHost(store, nil, nil, nil), d, false, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer server.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(server.Close)
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
 	call := func(method, path string, body any) (any, error) {
-		return managementRequest(httpServer.URL, d.Environment["ADMIN_KEY"], method, path, body)
+		return managementRequest(t.Context(), httpServer.URL, d.Environment["ADMIN_KEY"], method, path, body)
 	}
 	run := func(args ...string) map[string]any {
 		t.Helper()
@@ -75,7 +83,10 @@ func TestDraftCLISharedAPILifecycle(t *testing.T) {
 	write := func(name string, v any) string {
 		t.Helper()
 		path := filepath.Join(dir, name)
-		raw, _ := json.Marshal(v)
+		raw, callErr := json.Marshal(v)
+		if callErr != nil {
+			t.Error(callErr)
+		}
 		if err := os.WriteFile(path, raw, 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -152,7 +163,11 @@ func TestDraftCLIEditRetainsFileOnConflict(t *testing.T) {
 		t.Fatal(readErr)
 	}
 	path := string(raw)
-	defer os.Remove(path)
+	defer func(path string) {
+		if err := os.Remove(path); err != nil {
+			t.Error(err)
+		}
+	}(path)
 	data, readErr := os.ReadFile(path)
 	if readErr != nil || !strings.Contains(string(data), "Unsent edit") || !strings.Contains(err.Error(), path) {
 		t.Fatalf("edited file lost: %s %v %v", data, readErr, err)

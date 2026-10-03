@@ -76,13 +76,19 @@ func TestChatInputHistorySurvivesCompletionAndReopen(t *testing.T) {
 	if e != nil || run.Status != "completed" {
 		t.Fatal(run, e)
 	}
-	f.w.Close()
+	if err := f.w.Close(); err != nil {
+		t.Error(err)
+	}
 	h := testHost(t, f.h.Store, f.p, &hostModel{})
 	w, e := NewWebIntegration(h, f.d, f.w.Config)
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer w.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(w.Close)
 	_, messages, e = w.Conversation(t.Context(), "alice", c.ID)
 	if e != nil || len(messages) != 1 {
 		t.Fatal(messages, e)

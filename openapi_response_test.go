@@ -37,7 +37,9 @@ func TestOpenAPIUnionAndComposedResponsesExecuteTheirDeclaredContract(t *testing
 			var payload string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(payload))
+				if _, callErr := w.Write([]byte(payload)); callErr != nil {
+					t.Error(callErr)
+				}
 			}))
 			defer server.Close()
 			doc := JSON{"openapi": tc.version, "components": JSON{"schemas": tc.components}, "paths": JSON{"/value": JSON{"get": JSON{
@@ -54,7 +56,11 @@ func TestOpenAPIUnionAndComposedResponsesExecuteTheirDeclaredContract(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer pack.Close()
+			defer func(close func() error) {
+				if err := close(); err != nil {
+					t.Error(err)
+				}
+			}(pack.Close)
 			for _, payload = range tc.payloads {
 				var value any
 				decoder := json.NewDecoder(bytes.NewBufferString(payload))

@@ -3,6 +3,7 @@ package agenstra
 import (
 	"embed"
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -82,7 +83,10 @@ func (s *HTTPServer) webHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		w.Write(raw)
+		if _, err := w.Write(raw); err != nil {
+			// The response may be partially sent; only record the transport failure.
+			log.Print("HTTP response write failed")
+		}
 		return
 	}
 	if p == "/web/v1/token" {

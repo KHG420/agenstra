@@ -79,7 +79,10 @@ func TestCapabilitySearchEmptyStableAndLegacy(t *testing.T) {
 	searchRuntime := &AgentRuntime{Provider: &coreTestProvider{caps: caps}, Grants: grants, MaxContextCapabilities: 1, Model: decisionModelFunc(func(context.Context, ContextPacket, string) (Decision, error) {
 		return Decision{Kind: "search_capabilities", Query: "unmatched_term"}, nil
 	})}
-	searchState, _ := searchRuntime.NewState("Help me", "")
+	searchState, callErr := searchRuntime.NewState("Help me", "")
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	if err := searchRuntime.Step(t.Context(), searchState, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +90,10 @@ func TestCapabilitySearchEmptyStableAndLegacy(t *testing.T) {
 		t.Fatal("empty search was not visible to model", packet.ContextOmissions)
 	}
 	r := &AgentRuntime{Provider: &coreTestProvider{caps: caps}, Grants: grants}
-	state, _ := r.NewState("Help me", "")
+	state, callErr2 := r.NewState("Help me", "")
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	packet := r.Context(state)
 	if len(packet.Capabilities) != 3 || packet.CapabilityCatalogTotal != 0 {
 		t.Fatal("default catalog changed", capabilityNames(packet), packet.CapabilityCatalogTotal)

@@ -11,7 +11,9 @@ import (
 
 func TestRESTModelOutputProjectionKeepsArtifactPrivate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"id":"R1","status":"ready","secret":"private-token"}`))
+		if _, callErr := w.Write([]byte(`{"id":"R1","status":"ready","secret":"private-token"}`)); callErr != nil {
+			t.Error(callErr)
+		}
 	}))
 	defer server.Close()
 	endpoint := JSON{
@@ -25,7 +27,11 @@ func TestRESTModelOutputProjectionKeepsArtifactPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pack.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(pack.Close)
 	outcome, err := ExecuteCall(context.Background(), pack, map[string]bool{"record.read": true}, ToolCall{CallRef: "read-1", Capability: "record.read", Arguments: JSON{}, Reason: "read"}, nil)
 	if err != nil || outcome.Fact == nil {
 		t.Fatalf("call: %+v %v", outcome, err)
@@ -94,7 +100,10 @@ func TestRESTModelOutputProjectionKeepsArtifactPrivate(t *testing.T) {
 	if err := runtime.Step(context.Background(), state, nil); err != nil {
 		t.Fatal(err)
 	}
-	inspected, _ := json.Marshal(state.InspectedFact)
+	inspected, callErr2 := json.Marshal(state.InspectedFact)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	if strings.Contains(string(inspected), "private-token") || !strings.Contains(string(inspected), "R1") {
 		t.Fatalf("ancestor inspection exposed secret: %s", inspected)
 	}

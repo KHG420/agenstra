@@ -19,6 +19,8 @@ func validateRawManifest(raw []byte, skills map[string]string) error {
 	return ValidatePackManifest(manifest, skills)
 }
 
+// OpenPack selects the declared provider from a trusted manifest.
+// The caller owns and closes the returned connection.
 func OpenPack(ctx context.Context, path string, environment map[string]string) (CapabilityProvider, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -45,6 +47,7 @@ func OpenPack(ctx context.Context, path string, environment map[string]string) (
 	}
 }
 
+// ValidatePackManifest checks a complete manifest and pinned skill contents without business IO.
 func ValidatePackManifest(manifest map[string]any, skillContents map[string]string) error {
 	raw, err := CanonicalJSON(manifest)
 	if err != nil {

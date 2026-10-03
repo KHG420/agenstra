@@ -18,17 +18,29 @@ func TestAdminAuthAndRevision(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer store.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(store.Close)
 	host := NewAgentHost(store, nil, nil, nil)
 	server, e := NewHTTPServer(host, d, false, time.Second)
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer server.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(server.Close)
 	call := func(method, path, key string, body any) *httptest.ResponseRecorder {
 		var b []byte
 		if body != nil {
-			b, _ = json.Marshal(body)
+			var callErr error
+			b, callErr = json.Marshal(body)
+			if callErr != nil {
+				t.Error(callErr)
+			}
 		}
 		req := httptest.NewRequest(method, path, bytes.NewReader(b))
 		if key != "" {
@@ -49,7 +61,9 @@ func TestAdminAuthAndRevision(t *testing.T) {
 		t.Fatalf("publish: %d %s", w.Code, w.Body.String())
 	}
 	var release map[string]any
-	json.Unmarshal(w.Body.Bytes(), &release)
+	if err := json.Unmarshal(w.Body.Bytes(), &release); err != nil {
+		t.Error(err)
+	}
 	digest := release["digest"].(string)
 	w = call("POST", "/admin/api/packs/records/activate", key, map[string]any{"digest": digest, "expected_revision": 0})
 	if w.Code != 200 {

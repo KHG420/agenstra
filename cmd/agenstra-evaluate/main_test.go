@@ -37,9 +37,13 @@ func TestEvaluationCreationRetriesTheSameIdentity(t *testing.T) {
 					if creates.Add(1) == 1 {
 						switch first {
 						case "broken_json":
-							_, _ = w.Write([]byte(`{"run_id":`))
+							if _, callErr := w.Write([]byte(`{"run_id":`)); callErr != nil {
+								t.Error(callErr)
+							}
 						case "missing_id":
-							_, _ = w.Write([]byte(`{}`))
+							if _, callErr2 := w.Write([]byte(`{}`)); callErr2 != nil {
+								t.Error(callErr2)
+							}
 						case "server_error":
 							w.WriteHeader(http.StatusBadGateway)
 						case "lost_connection":
@@ -48,7 +52,9 @@ func TestEvaluationCreationRetriesTheSameIdentity(t *testing.T) {
 								t.Error(err)
 								return
 							}
-							_ = connection.Close()
+							if callErr3 := connection.Close(); callErr3 != nil {
+								t.Error(callErr3)
+							}
 						case "rejected":
 							w.WriteHeader(http.StatusForbidden)
 						}
@@ -56,10 +62,14 @@ func TestEvaluationCreationRetriesTheSameIdentity(t *testing.T) {
 					}
 				}
 				if strings.HasSuffix(r.URL.Path, "/diagnostics") {
-					_ = json.NewEncoder(w).Encode(agenstra.RunDiagnostics{RunID: id, Status: "completed"})
+					if callErr4 := json.NewEncoder(w).Encode(agenstra.RunDiagnostics{RunID: id, Status: "completed"}); callErr4 != nil {
+						t.Error(callErr4)
+					}
 					return
 				}
-				_ = json.NewEncoder(w).Encode(agenstra.StoredRun{RunID: id, PackID: "orders", Status: "completed", State: agenstra.JSON{"runtime": agenstra.RuntimeState{RunID: id, Status: "completed"}}})
+				if callErr5 := json.NewEncoder(w).Encode(agenstra.StoredRun{RunID: id, PackID: "orders", Status: "completed", State: agenstra.JSON{"runtime": agenstra.RuntimeState{RunID: id, Status: "completed"}}}); callErr5 != nil {
+					t.Error(callErr5)
+				}
 			}))
 			defer server.Close()
 			client := evaluationClient{server.URL, "local-key", server.Client()}
@@ -98,7 +108,9 @@ func TestEvaluationRepeatUsesFreshRunsAndReportsFailures(t *testing.T) {
 				status = "failed"
 			}
 			statuses[id] = status
-			_ = json.NewEncoder(w).Encode(agenstra.StoredRun{RunID: id, PackID: "orders", Status: status})
+			if callErr6 := json.NewEncoder(w).Encode(agenstra.StoredRun{RunID: id, PackID: "orders", Status: status}); callErr6 != nil {
+				t.Error(callErr6)
+			}
 			return
 		}
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
@@ -109,10 +121,14 @@ func TestEvaluationRepeatUsesFreshRunsAndReportsFailures(t *testing.T) {
 		id := parts[1]
 		status := statuses[id]
 		if len(parts) == 3 && parts[2] == "diagnostics" {
-			_ = json.NewEncoder(w).Encode(agenstra.RunDiagnostics{RunID: id, Status: status, Findings: []agenstra.DiagnosticFinding{{Code: "business_failed"}}})
+			if callErr7 := json.NewEncoder(w).Encode(agenstra.RunDiagnostics{RunID: id, Status: status, Findings: []agenstra.DiagnosticFinding{{Code: "business_failed"}}}); callErr7 != nil {
+				t.Error(callErr7)
+			}
 			return
 		}
-		_ = json.NewEncoder(w).Encode(agenstra.StoredRun{RunID: id, PackID: "orders", Status: status, State: agenstra.JSON{"runtime": agenstra.RuntimeState{RunID: id, Status: status}}})
+		if callErr8 := json.NewEncoder(w).Encode(agenstra.StoredRun{RunID: id, PackID: "orders", Status: status, State: agenstra.JSON{"runtime": agenstra.RuntimeState{RunID: id, Status: status}}}); callErr8 != nil {
+			t.Error(callErr8)
+		}
 	}))
 	defer server.Close()
 	t.Setenv("EVALUATION_TEST_KEY", "local-key")
@@ -169,7 +185,9 @@ func TestEvaluationUnconfirmedCreationReportsIdentityWithoutCancelling(t *testin
 			cancels.Add(1)
 		}
 		creates.Add(1)
-		_, _ = w.Write([]byte(`{"run_id":`))
+		if _, callErr9 := w.Write([]byte(`{"run_id":`)); callErr9 != nil {
+			t.Error(callErr9)
+		}
 	}))
 	defer server.Close()
 	client := evaluationClient{server.URL, "local-key", server.Client()}
@@ -196,10 +214,14 @@ func TestEvaluationHTTPAssertionsAndAttention(t *testing.T) {
 				}
 				w.Header().Set("Content-Type", "application/json")
 				if strings.HasSuffix(r.URL.Path, "/diagnostics") {
-					_ = json.NewEncoder(w).Encode(agenstra.RunDiagnostics{RunID: id, Status: status})
+					if callErr10 := json.NewEncoder(w).Encode(agenstra.RunDiagnostics{RunID: id, Status: status}); callErr10 != nil {
+						t.Error(callErr10)
+					}
 					return
 				}
-				_ = json.NewEncoder(w).Encode(agenstra.StoredRun{RunID: id, PackID: "orders", Status: status, State: agenstra.JSON{"runtime": agenstra.RuntimeState{RunID: id, Status: status, Facts: []agenstra.Fact{{FactID: factID, SourceCapability: "orders.get", Value: agenstra.JSON{"id": json.Number("9007199254740993")}}}, Observations: []agenstra.Observation{{Capability: "orders.get", Status: "succeeded"}}, Decisions: []agenstra.JSON{{"kind": "final", "fact_ids": []string{factID}}}}}})
+				if callErr11 := json.NewEncoder(w).Encode(agenstra.StoredRun{RunID: id, PackID: "orders", Status: status, State: agenstra.JSON{"runtime": agenstra.RuntimeState{RunID: id, Status: status, Facts: []agenstra.Fact{{FactID: factID, SourceCapability: "orders.get", Value: agenstra.JSON{"id": json.Number("9007199254740993")}}}, Observations: []agenstra.Observation{{Capability: "orders.get", Status: "succeeded"}}, Decisions: []agenstra.JSON{{"kind": "final", "fact_ids": []string{factID}}}}}}); callErr11 != nil {
+					t.Error(callErr11)
+				}
 			}))
 			defer server.Close()
 			t.Setenv("EVALUATION_TEST_KEY", "local-user-key")
@@ -231,7 +253,9 @@ func TestEvaluationValidatesAllCasesBeforeCreatingAndCancelsOnlyOwnedTimeouts(t 
 		if strings.HasSuffix(r.URL.Path, "/cancel") {
 			cancels.Add(1)
 		}
-		_ = json.NewEncoder(w).Encode(agenstra.StoredRun{RunID: id, Status: "running"})
+		if callErr12 := json.NewEncoder(w).Encode(agenstra.StoredRun{RunID: id, Status: "running"}); callErr12 != nil {
+			t.Error(callErr12)
+		}
 	}))
 	defer server.Close()
 	t.Setenv("EVALUATION_TEST_KEY", "local-user-key")
@@ -249,8 +273,13 @@ func TestEvaluationValidatesAllCasesBeforeCreatingAndCancelsOnlyOwnedTimeouts(t 
 		if existing {
 			c.RunID = id
 		}
-		raw, _ := json.Marshal([]agenstra.EvaluationCase{c})
-		_ = os.WriteFile(path, raw, 0600)
+		raw, callErr13 := json.Marshal([]agenstra.EvaluationCase{c})
+		if callErr13 != nil {
+			t.Error(callErr13)
+		}
+		if callErr14 := os.WriteFile(path, raw, 0600); callErr14 != nil {
+			t.Error(callErr14)
+		}
 		output.Reset()
 		passed, err := run(args, &output)
 		if err != nil || passed {

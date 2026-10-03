@@ -66,12 +66,12 @@ func (s *SQLiteStore) getSchedule(id, owner string) (ScheduledTask, error) {
 	}
 	return task, err
 }
-func (s *SQLiteStore) querySchedules(query string, args ...any) ([]ScheduledTask, error) {
+func (s *SQLiteStore) querySchedules(query string, args ...any) (output []ScheduledTask, resultErr error) {
 	rows, err := s.DB.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	result := []ScheduledTask{}
 	for rows.Next() {
 		var raw string
@@ -189,7 +189,7 @@ func (s *SQLiteStore) dispatchSchedule(task ScheduledTask, runID string, state m
 	})
 }
 
-func (s *SQLiteStore) scheduleExecutions(id, owner string, after int64, limit int, latest bool) ([]ScheduleExecution, error) {
+func (s *SQLiteStore) scheduleExecutions(id, owner string, after int64, limit int, latest bool) (output []ScheduleExecution, resultErr error) {
 	order := "ASC"
 	if latest {
 		order = "DESC"
@@ -200,7 +200,7 @@ func (s *SQLiteStore) scheduleExecutions(id, owner string, after int64, limit in
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	result := []ScheduleExecution{}
 	for rows.Next() {
 		var execution ScheduleExecution

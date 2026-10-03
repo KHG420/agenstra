@@ -10,7 +10,11 @@ import (
 )
 
 func contextCharacters(value any) int {
-	raw, _ := CanonicalJSON(value)
+	raw, err := CanonicalJSON(value)
+	if err != nil {
+		// Invalid context cannot fit any supported budget; Step reports it before IO.
+		return int(^uint(0) >> 1)
+	}
 	return utf8.RuneCount(raw)
 }
 
@@ -66,7 +70,7 @@ func budgetContext(packet ContextPacket, state *RuntimeState, available int) Con
 	packet.Facts = views
 	packet = withNotes(packet, baseOmissions)
 	fitsRecent := func(candidate ContextPacket) bool {
-		return contextCharacters(candidate)+recentSize <= available
+		return contextCharacters(candidate) <= available-recentSize
 	}
 	// Repeated input payloads can be recovered from the audit trail. Keep outcomes.
 	packet.Observations = append([]Observation{}, packet.Observations...)
@@ -150,7 +154,9 @@ func budgetContext(packet ContextPacket, state *RuntimeState, available int) Con
 	omittedMemories := 0
 	for _, note := range baseOmissions {
 		if strings.HasPrefix(note, "memories:") {
-			_, _ = fmt.Sscanf(note, "memories: %d defaults omitted", &omittedMemories)
+			if _, err := fmt.Sscanf(note, "memories: %d defaults omitted", &omittedMemories); err != nil {
+				omittedMemories = 0 // A malformed optional notice does not change the evidence.
+			}
 		}
 	}
 	for i := len(packet.Memories) - 1; i >= 0 && contextCharacters(packet) > available; i-- {

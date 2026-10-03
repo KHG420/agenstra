@@ -63,7 +63,10 @@ func TestContextBudgetHistoryKeepsRecentEvidenceAndCompleteState(t *testing.T) {
 		state.Facts = append(state.Facts, fact)
 		state.ModelObservations = append(state.ModelObservations, Observation{CallRef: fmt.Sprintf("read-%d", i), Capability: "record.read", Status: "succeeded", FactID: &fact.FactID, Arguments: JSON{"query": strings.Repeat("y", 1700)}})
 	}
-	original, _ := CanonicalJSON(state)
+	original, callErr := CanonicalJSON(state)
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	packet := runtime.Context(state)
 	size := assertContextBudget(t, packet, runtime.systemPrompt(), runtime.MaxContextCharacters)
 	if len(packet.Facts) != 12 || len(packet.Observations) != 12 {
@@ -81,7 +84,10 @@ func TestContextBudgetHistoryKeepsRecentEvidenceAndCompleteState(t *testing.T) {
 	if packet.Observations[11].CallRef != "read-11" {
 		t.Fatal("latest outcome was lost")
 	}
-	after, _ := CanonicalJSON(state)
+	after, callErr2 := CanonicalJSON(state)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	if !bytes.Equal(original, after) {
 		t.Fatal("projection changed complete run state")
 	}
@@ -164,8 +170,14 @@ func TestContextBudgetCatalogDefersSchemasWithoutLosingInspectedContract(t *test
 			}
 		}
 	}
-	got, _ := CanonicalJSON(packet.InspectedCapability["input_schema"])
-	want, _ := CanonicalJSON(provider.caps["record.read-7"].InputSchema)
+	got, callErr3 := CanonicalJSON(packet.InspectedCapability["input_schema"])
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
+	want, callErr4 := CanonicalJSON(provider.caps["record.read-7"].InputSchema)
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	if deferred == 0 || !bytes.Equal(got, want) {
 		t.Fatal("inspection lost complete input schema", packet)
 	}
@@ -240,11 +252,17 @@ func TestContextBudgetRequiredInformationFailsBeforeModelIO(t *testing.T) {
 				provider.skills["current"] = Skill{Description: SkillDescription{Name: "current", Description: "Current"}, Content: strings.Repeat("x", 5000)}
 				state.LoadedSkills = []string{"current"}
 			}
-			before, _ := CanonicalJSON(runtime.Context(state))
+			before, callErr5 := CanonicalJSON(runtime.Context(state))
+			if callErr5 != nil {
+				t.Error(callErr5)
+			}
 			if err := runtime.Step(t.Context(), state, nil); err != nil {
 				t.Fatal(err)
 			}
-			after, _ := CanonicalJSON(runtime.Context(state))
+			after, callErr6 := CanonicalJSON(runtime.Context(state))
+			if callErr6 != nil {
+				t.Error(callErr6)
+			}
 			if state.Status != "failed" || state.ErrorCode == nil || *state.ErrorCode != "context_too_large" || state.RoundsUsed != 0 || model.calls != 0 || !bytes.Equal(before, after) {
 				t.Fatal("required information discarded or model called", state, model.calls)
 			}

@@ -13,8 +13,10 @@ import (
 	"unicode/utf8"
 )
 
-func memoryModelReply(w http.ResponseWriter, content string) {
-	_ = json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"message": JSON{"content": content}}}})
+func memoryModelReply(t *testing.T, w http.ResponseWriter, content string) {
+	if callErr := json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"message": JSON{"content": content}}}}); callErr != nil {
+		t.Error(callErr)
+	}
 }
 
 func TestMemoryHTTPJSONExtractorContractAndBudget(t *testing.T) {
@@ -49,7 +51,7 @@ func TestMemoryHTTPJSONExtractorContractAndBudget(t *testing.T) {
 				if err := strictUnmarshal([]byte(b.Messages[1].Content), &input); err != nil || input.Text != "用中文写报告" || len(input.Existing) >= 20 {
 					t.Error("full source lost or optional memories not trimmed", input, err)
 				}
-				memoryModelReply(w, tc.content)
+				memoryModelReply(t, w, tc.content)
 			}))
 			defer server.Close()
 			model, err := NewHTTPJSONDecisionModel("test", server.URL, "test-key", time.Second, server.Client())
@@ -69,7 +71,10 @@ func TestMemoryHTTPJSONExtractorContractAndBudget(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1) }))
 	defer server.Close()
-	model, _ := NewHTTPJSONDecisionModel("test", server.URL, "test-key", time.Second, server.Client())
+	model, callErr2 := NewHTTPJSONDecisionModel("test", server.URL, "test-key", time.Second, server.Client())
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	_, err := model.ExtractMemories(t.Context(), MemoryExtractionRequest{Text: strings.Repeat("过长", 2000), MaxCharacters: 3000})
 	if ErrorCode(err) != "memory_extraction_too_large" || requests.Load() != 0 {
 		t.Fatal("oversized extraction performed IO", err, requests.Load())
@@ -95,8 +100,11 @@ func TestMemoryHTTPJSONModelAutomaticallyLearnsAndRecallsAcrossRuns(t *testing.T
 			if strings.Contains(input.Text, "中文") {
 				proposals = memoryProposal(input, "user", "report.language", "zh-CN", "habit")
 			}
-			content, _ := CanonicalJSON(JSON{"proposals": proposals})
-			memoryModelReply(w, string(content))
+			content, callErr3 := CanonicalJSON(JSON{"proposals": proposals})
+			if callErr3 != nil {
+				t.Error(callErr3)
+			}
+			memoryModelReply(t, w, string(content))
 			return
 		}
 		n := decisions.Add(1)
@@ -114,10 +122,13 @@ func TestMemoryHTTPJSONModelAutomaticallyLearnsAndRecallsAcrossRuns(t *testing.T
 		if n >= 3 && !strings.Contains(b.Messages[0].Content, memoryUsagePrompt) {
 			t.Error("memory precedence instructions missing")
 		}
-		memoryModelReply(w, `{"schema":"agenstra.decision.v1","kind":"final","answer_markdown":"完成","fact_ids":[]}`)
+		memoryModelReply(t, w, `{"schema":"agenstra.decision.v1","kind":"final","answer_markdown":"完成","fact_ids":[]}`)
 	}))
 	defer server.Close()
-	model, _ := NewHTTPJSONDecisionModel("test", server.URL, "test-key", time.Second, server.Client())
+	model, callErr4 := NewHTTPJSONDecisionModel("test", server.URL, "test-key", time.Second, server.Client())
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	h := testHost(t, testStore(t), &hostProvider{}, &hostModel{})
 	h.Model = model
 	for i := 0; i < 3; i++ {

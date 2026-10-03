@@ -42,6 +42,28 @@ func memoryRun(t *testing.T, h *AgentHost, owner, pack, text, request string) St
 func memoryProposal(r MemoryExtractionRequest, scope, key, value, mode string) []MemoryProposal {
 	return []MemoryProposal{{Scope: scope, Key: key, Value: value, Kind: "preference", Mode: mode, Quote: r.Text}}
 }
+
+func TestMemoryExtractionTelemetryDoesNotExposeUncodedErrors(t *testing.T) {
+	model := &memoryTestModel{hostModel: &hostModel{}, extract: func(MemoryExtractionRequest) ([]MemoryProposal, error) {
+		return nil, errors.New("private endpoint and token details")
+	}}
+	host, _ := memoryTestHost(t, model)
+	run := memoryRun(t, host, "alice", "records", "use Chinese", "safe-memory-error")
+	state, err := host.restore(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range state.ModelCalls {
+		if call.Purpose == "memory_extraction" {
+			if call.ErrorCode == nil || *call.ErrorCode != "model_unavailable" {
+				t.Fatalf("memory telemetry leaked uncoded error: %+v", call)
+			}
+			return
+		}
+	}
+	t.Fatal("memory extraction telemetry missing")
+}
+
 func TestMemoryHabitsAutomaticallyBecomeDefaultsAndReplayDoesNotCount(t *testing.T) {
 	model := &memoryTestModel{hostModel: &hostModel{}, extract: func(r MemoryExtractionRequest) ([]MemoryProposal, error) {
 		return memoryProposal(r, "user", "report.language", "zh-CN", "habit"), nil
@@ -67,7 +89,10 @@ func TestMemoryHabitsAutomaticallyBecomeDefaultsAndReplayDoesNotCount(t *testing
 	if len(model.inputs) != 3 {
 		t.Fatal("replays were extracted again", model.inputs)
 	}
-	items, _ := h.ListMemories(t.Context(), "alice", "records", 100, 0)
+	items, callErr := h.ListMemories(t.Context(), "alice", "records", 100, 0)
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	history, err := h.MemoryHistory(t.Context(), "alice", "records", items[0].ID)
 	if err != nil || len(history.Evidence) != 3 || history.Evidence[0].Quote == "" {
 		t.Fatal("lost provenance", history, err)
@@ -76,7 +101,11 @@ func TestMemoryHabitsAutomaticallyBecomeDefaultsAndReplayDoesNotCount(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(reopened.Close)
 	if err = reopened.Initialize(); err != nil {
 		t.Fatal(err)
 	}
@@ -106,12 +135,19 @@ func TestMemoryExplicitCorrectionTemporaryExceptionsAndForget(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		memoryRun(t, h, "alice", "records", "这次报告用英文", fmt.Sprintf("temporary-%d", i))
 	}
-	items, _ := h.ListMemories(t.Context(), "alice", "records", 100, 0)
+	items, callErr2 := h.ListMemories(t.Context(), "alice", "records", 100, 0)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	if len(items) != 1 || items[0].Value != "zh-CN" || items[0].Origin != "explicit" {
 		t.Fatal("temporary input changed default", items)
 	}
 	memoryRun(t, h, "alice", "records", "以后报告改用英文", "correction")
-	items, _ = h.ListMemories(t.Context(), "alice", "records", 100, 0)
+	var callErr3 error
+	items, callErr3 = h.ListMemories(t.Context(), "alice", "records", 100, 0)
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	if items[0].Value != "en" || items[0].Revision <= 2 {
 		t.Fatal("correction not applied", items)
 	}
@@ -120,7 +156,11 @@ func TestMemoryExplicitCorrectionTemporaryExceptionsAndForget(t *testing.T) {
 		t.Fatal("outdated snapshot still visible", views, err)
 	}
 	memoryRun(t, h, "alice", "records", "忘记报告语言偏好", "forget")
-	items, _ = h.ListMemories(t.Context(), "alice", "records", 100, 0)
+	var callErr4 error
+	items, callErr4 = h.ListMemories(t.Context(), "alice", "records", 100, 0)
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	if items[0].Status != "forgotten" || items[0].Value != "" || items[0].Quote != "" || items[0].Origin != "explicit" {
 		t.Fatal("forgotten contents retained", items)
 	}
@@ -139,11 +179,18 @@ func TestMemoryHostManagementIsolationPrecedenceAndConcurrentRevisions(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, _ := h.ListMemories(t.Context(), "alice", "records", 100, 0)
+	items, callErr5 := h.ListMemories(t.Context(), "alice", "records", 100, 0)
+	if callErr5 != nil {
+		t.Error(callErr5)
+	}
 	if got := memoryViews(items); len(got) != 1 || got[0].Value != "en" {
 		t.Fatal("project default did not take precedence", got)
 	}
-	items, _ = h.ListMemories(t.Context(), "alice", "other", 100, 0)
+	var callErr6 error
+	items, callErr6 = h.ListMemories(t.Context(), "alice", "other", 100, 0)
+	if callErr6 != nil {
+		t.Error(callErr6)
+	}
 	if got := memoryViews(items); len(got) != 1 || got[0].Value != "zh-CN" {
 		t.Fatal("project leaked", got)
 	}
@@ -211,7 +258,11 @@ func TestMemoryManualDefaultsResistHabitAndForgettingResetsEvidence(t *testing.T
 	}
 	for i := 0; i < 3; i++ {
 		memoryRun(t, h, "alice", "records", "Write an English report", fmt.Sprintf("new-%d", i))
-		current, _ = h.GetMemory(t.Context(), "alice", "records", current.ID)
+		var callErr7 error
+		current, callErr7 = h.GetMemory(t.Context(), "alice", "records", current.ID)
+		if callErr7 != nil {
+			t.Error(callErr7)
+		}
 		if i < 2 && current.Status == "active" || i == 2 && (current.Status != "active" || current.Value != "en") {
 			t.Fatal("old evidence reactivated forgotten default", current)
 		}
@@ -279,7 +330,10 @@ func TestMemoryExtractionFailuresAndInvalidEvidenceDoNotBreakBusinessRun(t *test
 			if errs, ok := r.State["memory_errors"].([]any); !ok || len(errs) != 1 {
 				t.Fatal("learning failure hidden", r.State["memory_errors"])
 			}
-			items, _ := h.ListMemories(t.Context(), "alice", "records", 100, 0)
+			items, callErr8 := h.ListMemories(t.Context(), "alice", "records", 100, 0)
+			if callErr8 != nil {
+				t.Error(callErr8)
+			}
 			if len(items) != 0 {
 				t.Fatal("invalid evidence was persisted", items)
 			}
@@ -334,7 +388,10 @@ func TestMemorySnapshotSurvivesResumeButForgetInvalidatesIt(t *testing.T) {
 	if err != nil || r.Status != "needs_input" {
 		t.Fatal(r, err)
 	}
-	frozen, _ := CanonicalJSON(r.State["memory_snapshot"])
+	frozen, callErr9 := CanonicalJSON(r.State["memory_snapshot"])
+	if callErr9 != nil {
+		t.Error(callErr9)
+	}
 	// Adding another memory cannot change the already-published snapshot.
 	if _, err = h.SetMemory(t.Context(), "alice", "records", MemoryUpdate{Scope: "user", Key: "report.format", Value: "table", Kind: "preference"}); err != nil {
 		t.Fatal(err)
@@ -352,7 +409,10 @@ func TestMemorySnapshotSurvivesResumeButForgetInvalidatesIt(t *testing.T) {
 	if err != nil || r.Status != "completed" {
 		t.Fatal(r.Status, err)
 	}
-	after, _ := CanonicalJSON(r.State["memory_snapshot"])
+	after, callErr10 := CanonicalJSON(r.State["memory_snapshot"])
+	if callErr10 != nil {
+		t.Error(callErr10)
+	}
 	if string(frozen) != string(after) {
 		t.Fatal("saved memory snapshot changed")
 	}

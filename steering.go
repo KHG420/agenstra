@@ -79,7 +79,7 @@ func (s *SQLiteStore) queueSteering(id, owner, requestID, text string, revision 
 	return
 }
 
-func (s *SQLiteStore) pendingSteering(id, owner string, after int) ([]steeringMessage, error) {
+func (s *SQLiteStore) pendingSteering(id, owner string, after int) (result []steeringMessage, resultErr error) {
 	if _, err := s.GetRun(id, owner); err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (s *SQLiteStore) pendingSteering(id, owner string, after int) ([]steeringMe
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	var messages []steeringMessage
 	for rows.Next() {
 		var message steeringMessage
@@ -99,6 +99,7 @@ func (s *SQLiteStore) pendingSteering(id, owner string, after int) ([]steeringMe
 	return messages, rows.Err()
 }
 
+// Steer appends authorized user input under a stable request identity and expected run revision.
 func (h *AgentHost) Steer(ctx context.Context, id, owner, requestID, text string, revision int) (StoredRun, error) {
 	if _, err := h.Get(ctx, id, owner); err != nil {
 		return StoredRun{}, err
@@ -121,7 +122,10 @@ func (h *AgentHost) applySteering(run StoredRun, state *RuntimeState) (StoredRun
 	}
 	var inputs []memoryInput
 	if run.State["memory_inputs"] != nil {
-		raw, _ := CanonicalJSON(run.State["memory_inputs"])
+		raw, err := CanonicalJSON(run.State["memory_inputs"])
+		if err != nil {
+			return run, false, hostError("run_state_invalid")
+		}
 		if err = strictUnmarshal(raw, &inputs); err != nil {
 			return run, false, hostError("run_state_invalid")
 		}

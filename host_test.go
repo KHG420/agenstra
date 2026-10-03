@@ -150,7 +150,10 @@ func TestHostApprovalBindsArgumentsPolicyRevisionExpiry(t *testing.T) {
 	if e != nil || r.Status != "needs_approval" || p.calls != 0 {
 		t.Fatalf("approval: %+v %v", r, e)
 	}
-	state, _ := h.restore(r)
+	state, callErr := h.restore(r)
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	item := state.Pending[0]
 	for _, tc := range []struct {
 		owner, hash string
@@ -307,7 +310,10 @@ func TestHostJobPollingSurvivesRestart(t *testing.T) {
 	if e != nil || r.Status != "waiting" || m.calls != 1 {
 		t.Fatalf("job: %+v %v", r, e)
 	}
-	state, _ := h.restore(r)
+	state, callErr2 := h.restore(r)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	firstFact := state.Facts[0].FactID
 	h = testHost(t, s, p, m)
 	now += 2
@@ -316,7 +322,11 @@ func TestHostJobPollingSurvivesRestart(t *testing.T) {
 	if e != nil || r.Status != "completed" || m.calls != 2 || p.calls != 2 {
 		t.Fatalf("poll: %+v %v", r, e)
 	}
-	state, _ = h.restore(r)
+	var callErr3 error
+	state, callErr3 = h.restore(r)
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	if len(state.Facts) != 1 || state.Facts[0].FactID == firstFact || state.PollCallsUsed != 1 {
 		t.Fatalf("latest status: %+v", state)
 	}
@@ -354,7 +364,10 @@ func TestHostConcurrentDriversAndCancellation(t *testing.T) {
 		if e := <-failure; e != nil || got.Status != "cancelled" {
 			t.Fatalf("cancel: %+v %v", got, e)
 		}
-		state, _ := h.restore(got)
+		state, callErr4 := h.restore(got)
+		if callErr4 != nil {
+			t.Error(callErr4)
+		}
 		if state.Pending[0].Status != "unknown" || p.calls != 1 {
 			t.Fatalf("cancel outcome: %+v calls=%d", state, p.calls)
 		}
@@ -455,7 +468,10 @@ func TestHostModelDataPolicyAndFingerprint(t *testing.T) {
 	if e != nil || r.Status != "failed" {
 		t.Fatalf("pack change: %+v %v", r, e)
 	}
-	state, _ := h.restore(r)
+	state, callErr5 := h.restore(r)
+	if callErr5 != nil {
+		t.Error(callErr5)
+	}
 	if state.ErrorCode == nil || *state.ErrorCode != "pack_changed" {
 		t.Fatalf("change code: %+v", state)
 	}
@@ -512,7 +528,10 @@ func TestHostModelRepairCheckpoint(t *testing.T) {
 	if e != nil || r.Status != "completed" || m.calls != 2 {
 		t.Fatalf("repair: %+v %v calls=%d", r, e, m.calls)
 	}
-	state, _ := h.restore(r)
+	state, callErr6 := h.restore(r)
+	if callErr6 != nil {
+		t.Error(callErr6)
+	}
 	if state.RoundsUsed != 2 {
 		t.Fatalf("charged rounds %d", state.RoundsUsed)
 	}
@@ -530,7 +549,11 @@ func TestPythonProviderFingerprintCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer provider.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(provider.Close)
 	want, err := os.ReadFile("testdata/python-rest-fingerprint.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -545,7 +568,11 @@ func TestPythonOperationFingerprintCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer provider.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(provider.Close)
 	want, err := os.ReadFile("testdata/python-operation-fingerprint.txt")
 	if err != nil {
 		t.Fatal(err)

@@ -2,6 +2,7 @@ package agenstra
 
 import "context"
 
+// ModelRequestProgress reports transport attempts and retry timing without upstream response text.
 type ModelRequestProgress struct {
 	Kind      string  `json:"kind"`
 	Attempt   int     `json:"attempt"`

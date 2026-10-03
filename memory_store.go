@@ -45,12 +45,12 @@ func scanMemory(row scanner) (Memory, error) {
 func (s *SQLiteStore) getMemory(owner, pack, id string) (Memory, error) {
 	return scanMemory(s.DB.QueryRow("SELECT payload FROM memories WHERE id=? AND owner=? AND (scope='' OR scope=?)", id, owner, pack))
 }
-func (s *SQLiteStore) listMemories(owner, pack string, limit, offset int) ([]Memory, error) {
+func (s *SQLiteStore) listMemories(owner, pack string, limit, offset int) (result []Memory, resultErr error) {
 	rows, err := s.DB.Query("SELECT payload FROM memories WHERE owner=? AND (scope='' OR scope=?) ORDER BY scope,topic LIMIT ? OFFSET ?", owner, pack, limit, offset)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	items := []Memory{}
 	for rows.Next() {
 		m, err := scanMemory(rows)
@@ -152,7 +152,7 @@ func (s *SQLiteStore) forgetMemory(owner, pack, id string, revision int) (m Memo
 	})
 	return
 }
-func (s *SQLiteStore) memoryHistory(owner, pack, id string) (MemoryHistory, error) {
+func (s *SQLiteStore) memoryHistory(owner, pack, id string) (result MemoryHistory, resultErr error) {
 	out := MemoryHistory{Revisions: []Memory{}, Evidence: []MemoryEvidence{}}
 	// Ownership is part of each query, including concurrent delete/update races.
 	rows, err := s.DB.Query("SELECT r.payload FROM memory_revisions r JOIN memories m ON m.id=r.memory WHERE m.id=? AND m.owner=? AND (m.scope='' OR m.scope=?) ORDER BY r.revision DESC LIMIT 100", id, owner, pack)
@@ -162,13 +162,11 @@ func (s *SQLiteStore) memoryHistory(owner, pack, id string) (MemoryHistory, erro
 	for rows.Next() {
 		m, e := scanMemory(rows)
 		if e != nil {
-			rows.Close()
-			return out, e
+			return out, errors.Join(e, rows.Close())
 		}
 		out.Revisions = append(out.Revisions, m)
 	}
-	err = rows.Err()
-	rows.Close()
+	err = errors.Join(rows.Err(), rows.Close())
 	if err != nil {
 		return out, err
 	}
@@ -176,7 +174,7 @@ func (s *SQLiteStore) memoryHistory(owner, pack, id string) (MemoryHistory, erro
 	if err != nil {
 		return out, err
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	for rows.Next() {
 		var raw string
 		var evidence MemoryEvidence

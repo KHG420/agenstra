@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -178,6 +179,7 @@ func safeHeaderValue(v any) (string, error) {
 }
 func traversePath(v any, path []any) (any, error) { return valueAt(v, path) }
 
+// RestEndpoint fixes an HTTP operation's input, output and execution contract.
 type RestEndpoint struct {
 	Name                string             `json:"name"`
 	Description         string             `json:"description"`
@@ -210,6 +212,7 @@ type RestBusinessCheck struct {
 	ErrorCode string `json:"error_code"`
 }
 
+// UnmarshalJSON strictly decodes an endpoint and applies the default timeout.
 func (e *RestEndpoint) UnmarshalJSON(raw []byte) error {
 	type endpoint RestEndpoint
 	var parsed endpoint
@@ -217,7 +220,9 @@ func (e *RestEndpoint) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	var keys map[string]json.RawMessage
-	_ = json.Unmarshal(raw, &keys)
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return err
+	}
 	if _, ok := keys["timeout_seconds"]; !ok {
 		parsed.TimeoutSeconds = 20
 	}
@@ -225,6 +230,7 @@ func (e *RestEndpoint) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+// RestManifest declares trusted REST endpoints and credential references.
 type RestManifest struct {
 	Schema       string            `json:"schema"`
 	Name         string            `json:"name"`
@@ -236,6 +242,9 @@ type RestManifest struct {
 	Capabilities []RestEndpoint    `json:"capabilities"`
 	Skills       []SkillFile       `json:"skills"`
 }
+
+// RestPack is an opened REST provider with compiled request and response contracts.
+// Catalogs and configuration are read-only during invocation; the HTTP client remains caller-owned.
 type RestPack struct {
 	Manifest     RestManifest
 	BaseURL      string
@@ -249,11 +258,20 @@ type RestPack struct {
 	statuses     map[string]map[string]*jsonschema.Schema
 }
 
+// Capabilities returns the read-only capability catalog; callers must not mutate it.
 func (p *RestPack) Capabilities() map[string]CapabilityDescription { return p.capabilities }
-func (p *RestPack) Skills() map[string]Skill                       { return p.skills }
-func (p *RestPack) SystemPrompt() string                           { return AgentPrompt(p.Manifest.Guidance) }
-func (p *RestPack) Close() error                                   { return nil }
-func (p *RestPack) ConcurrentInvocation(string) bool               { return true }
+
+// Skills returns read-only pinned usage guides; callers must not mutate the map.
+func (p *RestPack) Skills() map[string]Skill { return p.skills }
+
+// SystemPrompt returns fixed usage guidance without connection credentials.
+func (p *RestPack) SystemPrompt() string { return AgentPrompt(p.Manifest.Guidance) }
+
+// Close is a no-op; REST providers do not own the supplied HTTP client or transport.
+func (p *RestPack) Close() error { return nil }
+
+// ConcurrentInvocation declares that REST calls and request validation support parallel reads.
+func (p *RestPack) ConcurrentInvocation(string) bool { return true }
 func validateRestEndpoint(e RestEndpoint, headers map[string]string) error {
 	if err := validateModelOutput(e.ModelOutput); err != nil {
 		return err
@@ -449,6 +467,8 @@ func requiredProperty(schema JSON, property string) bool {
 	}
 	return false
 }
+
+// LoadRestPack validates a manifest and resolves its configured connection references.
 func LoadRestPack(path string, environment map[string]string, client *http.Client) (*RestPack, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -556,6 +576,9 @@ func LoadRestPack(path string, environment map[string]string, client *http.Clien
 	}
 	return p, nil
 }
+
+// Invoke validates and executes the selected capability with request cancellation.
+// Provider failures use the structured ErrorCode channel when their outcome is known.
 func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any, inv *InvocationContext) (CapabilityResult, error) {
 	endpoint, ok := p.endpoints[name]
 	if !ok {
@@ -642,7 +665,11 @@ func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any,
 	if e != nil {
 		return CapabilityResult{ErrorCode: "provider_outcome_unknown"}, nil
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			log.Print("HTTP response cleanup failed")
+		}
+	}()
 	status := strconv.Itoa(response.StatusCode)
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		if response.StatusCode >= 500 && endpoint.Effect != "read" {
@@ -680,7 +707,10 @@ func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any,
 		if err != nil {
 			return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
 		}
-		expected, _ := CanonicalJSON(check.Value)
+		expected, err := CanonicalJSON(check.Value)
+		if err != nil {
+			return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
+		}
 		if !bytes.Equal(actual, expected) {
 			return CapabilityResult{ErrorCode: check.ErrorCode}, nil
 		}
@@ -702,12 +732,14 @@ func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any,
 	return CapabilityResult{Data: object, ReferenceScope: "durable"}, nil
 }
 
+// RestField describes a primitive field in the legacy REST contract.
 type RestField struct {
 	Type        string `json:"type"`
 	Description string `json:"description"`
 	Required    bool   `json:"required"`
 }
 
+// UnmarshalJSON strictly decodes a field and makes it required by default.
 func (f *RestField) UnmarshalJSON(raw []byte) error {
 	var holder struct {
 		Type        string `json:"type"`
@@ -726,6 +758,7 @@ func (f *RestField) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+// LegacyRestCapability declares a fixed endpoint and flat input/output fields.
 type LegacyRestCapability struct {
 	Name           string               `json:"name"`
 	Version        string               `json:"version"`
@@ -740,6 +773,7 @@ type LegacyRestCapability struct {
 	MaxAttempts    int                  `json:"max_attempts"`
 }
 
+// UnmarshalJSON strictly decodes a legacy endpoint and applies its defaults.
 func (c *LegacyRestCapability) UnmarshalJSON(raw []byte) error {
 	type capability LegacyRestCapability
 	var parsed capability
@@ -747,7 +781,9 @@ func (c *LegacyRestCapability) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	var keys map[string]json.RawMessage
-	_ = json.Unmarshal(raw, &keys)
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return err
+	}
 	if _, ok := keys["method"]; !ok {
 		parsed.Method = "POST"
 	}
@@ -761,6 +797,7 @@ func (c *LegacyRestCapability) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+// LegacyPackManifest is the original flat REST capability pack format.
 type LegacyPackManifest struct {
 	Schema       string                 `json:"schema"`
 	Name         string                 `json:"name"`
@@ -776,6 +813,9 @@ type legacyBinding struct {
 	InputValidator  *jsonschema.Schema
 	OutputValidator *jsonschema.Schema
 }
+
+// LegacyRestPack adapts a validated legacy pack to the provider contract.
+// Its configuration and catalogs must remain read-only during invocation.
 type LegacyRestPack struct {
 	Manifest     LegacyPackManifest
 	Client       *http.Client
@@ -783,10 +823,17 @@ type LegacyRestPack struct {
 	capabilities map[string]CapabilityDescription
 }
 
+// Capabilities returns the read-only capability catalog; callers must not mutate it.
 func (p *LegacyRestPack) Capabilities() map[string]CapabilityDescription { return p.capabilities }
-func (p *LegacyRestPack) Skills() map[string]Skill                       { return map[string]Skill{} }
-func (p *LegacyRestPack) SystemPrompt() string                           { return AgentPrompt(p.Manifest.Guidance) }
-func (p *LegacyRestPack) Close() error                                   { return nil }
+
+// Skills returns an empty catalog because legacy packs do not declare pinned guides.
+func (p *LegacyRestPack) Skills() map[string]Skill { return map[string]Skill{} }
+
+// SystemPrompt returns fixed usage guidance without connection credentials.
+func (p *LegacyRestPack) SystemPrompt() string { return AgentPrompt(p.Manifest.Guidance) }
+
+// Close is a no-op; legacy REST providers do not own the supplied HTTP client or transport.
+func (p *LegacyRestPack) Close() error { return nil }
 func fieldsSchema(fields map[string]RestField, forOutput bool, method string) (JSON, error) {
 	properties := JSON{}
 	required := []any{}
@@ -818,6 +865,8 @@ func fieldsSchema(fields map[string]RestField, forOutput bool, method string) (J
 	}
 	return schema, nil
 }
+
+// LoadLegacyPack validates and opens a legacy pack without taking ownership of a supplied HTTP client.
 func LoadLegacyPack(path string, environment map[string]string, client *http.Client) (*LegacyRestPack, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -906,6 +955,9 @@ func LoadLegacyPack(path string, environment map[string]string, client *http.Cli
 	}
 	return pack, nil
 }
+
+// Invoke validates and executes the selected capability with request cancellation.
+// Provider failures use the structured ErrorCode channel when their outcome is known.
 func (p *LegacyRestPack) Invoke(ctx context.Context, name string, args map[string]any, _ *InvocationContext) (CapabilityResult, error) {
 	binding, ok := p.bindings[name]
 	if !ok {
@@ -933,7 +985,10 @@ func (p *LegacyRestPack) Invoke(ctx context.Context, name string, args map[strin
 			query := url.Values{}
 			for key, v := range args {
 				if v != nil {
-					s, _ := scalarValue(v)
+					s, err := scalarValue(v)
+					if err != nil {
+						return CapabilityResult{ErrorCode: "capability_input_invalid"}, nil
+					}
 					query.Set(key, s)
 				}
 			}
@@ -951,7 +1006,10 @@ func (p *LegacyRestPack) Invoke(ctx context.Context, name string, args map[strin
 					payload[key] = value
 				}
 			}
-			raw, _ := CanonicalJSON(payload)
+			raw, err := CanonicalJSON(payload)
+			if err != nil {
+				return CapabilityResult{ErrorCode: "capability_input_invalid"}, nil
+			}
 			body = bytes.NewReader(raw)
 		}
 		request, err := http.NewRequestWithContext(ctx, binding.Definition.Method, target, body)
@@ -972,7 +1030,9 @@ func (p *LegacyRestPack) Invoke(ctx context.Context, name string, args map[strin
 			return CapabilityResult{ErrorCode: "upstream_unavailable"}, nil
 		}
 		raw, readErr := io.ReadAll(io.LimitReader(response.Body, (16<<20)+1))
-		response.Body.Close()
+		if err := response.Body.Close(); err != nil {
+			log.Print("HTTP response cleanup failed")
+		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
 			if attempt+1 < binding.Definition.MaxAttempts && (response.StatusCode == 429 || response.StatusCode == 502 || response.StatusCode == 503 || response.StatusCode == 504) {
 				continue

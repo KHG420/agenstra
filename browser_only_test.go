@@ -13,14 +13,21 @@ import (
 
 func TestBrowserOnlyIntegrationUsesExplicitConnectionPolicy(t *testing.T) {
 	dir := t.TempDir()
-	raw, _ := json.Marshal(frontendTestProfile(true))
+	raw, callErr := json.Marshal(frontendTestProfile(true))
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "frontend.json"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
 	h := testHost(t, testStore(t), &hostProvider{}, &hostModel{decisions: browserDecisions()})
 	cfg := WebIntegrationConfig{DatabasePath: "web.sqlite3", BrowserBridge: true, Chat: true, SessionKeyEnv: "WEB_KEY", Integrations: map[string]WebProfileConfig{"app": {FrontendProfilePath: "frontend.json"}}}
 	config := DeploymentConfig{Settings: DefaultHostSettings(), DatabasePath: h.Store.Path, WebIntegration: &cfg, Users: map[string]UserConfig{"alice": {APIKeyEnv: "ALICE_KEY", Packs: map[string]ConnectionConfig{"app": {AllowModelData: true, GrantedCapabilities: []string{"ui.navigate"}}}}}}
-	raw, _ = json.Marshal(config)
+	var callErr2 error
+	raw, callErr2 = json.Marshal(config)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	path := filepath.Join(dir, "deployment.json")
 	if err := os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatal(err)
@@ -43,7 +50,11 @@ func TestBrowserOnlyIntegrationUsesExplicitConnectionPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { server.Close() })
+	t.Cleanup(func() {
+		if err := server.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	w := server.Web
 	policy, err := w.policy(t.Context(), "alice", "app")
 	if err != nil || !policy.AllowModelData || !policy.GrantedCapabilities["ui.navigate"] {
@@ -104,7 +115,11 @@ func TestBrowserOnlyIntegrationUsesExplicitConnectionPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer provider.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(provider.Close)
 	if !strings.Contains(provider.SystemPrompt(), "agenstra.decision.v1") || !strings.Contains(provider.SystemPrompt(), "tool_batch") {
 		t.Fatal("browser-only provider must include the framework decision protocol")
 	}
@@ -129,7 +144,9 @@ func TestBrowserAliasCannotChangeIntegrationModeOnRestart(t *testing.T) {
 	cfg.Integrations = map[string]WebProfileConfig{"records-web": {FrontendProfilePath: "frontend.json"}}
 	h := testHost(t, f.h.Store, f.p, &hostModel{})
 	if w, err := NewWebIntegration(h, f.d, cfg); err == nil {
-		w.Close()
+		if err := w.Close(); err != nil {
+			t.Error(err)
+		}
 		t.Fatal("existing alias silently changed its business identity")
 	}
 }
@@ -145,7 +162,10 @@ func TestLiveBrowserOnlyIntegration(t *testing.T) {
 		t.Fatal("live evaluation requires AGENT_MODEL credentials")
 	}
 	dir := t.TempDir()
-	raw, _ := json.Marshal(frontendTestProfile(false))
+	raw, callErr3 := json.Marshal(frontendTestProfile(false))
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	if err = os.WriteFile(filepath.Join(dir, "frontend.json"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -158,10 +178,13 @@ func TestLiveBrowserOnlyIntegration(t *testing.T) {
 	d.Config.DatabasePath = h.Store.Path
 	// The action Fact is the initial queued receipt. The authoritative completed
 	// receipt is produced by the operation's ui.command_status poll.
-	evidence, _ := RequireFactValues(
+	evidence, callErr4 := RequireFactValues(
 		FactRequirement{Capability: "ui.command_status", Path: []any{"data", "status"}, Value: "succeeded"},
 		FactRequirement{Capability: "ui.command_status", Path: []any{"data", "result", "page"}, Value: "orders"},
 	)
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	h.CompletionValidator = func(ctx context.Context, result CompletionContext) error {
 		if err := evidence(ctx, result); err != nil {
 			return err
@@ -175,7 +198,11 @@ func TestLiveBrowserOnlyIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer w.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(w.Close)
 	now := unixNow()
 	h.Clock = func() float64 { return now }
 	h.Store.Clock = h.Clock

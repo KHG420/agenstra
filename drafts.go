@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Drafts share the registry, but never take part in runtime resolution.
+// CapabilityDraft shares the registry but never takes part in runtime resolution.
 type CapabilityDraft struct {
 	DraftID   string            `json:"draft_id"`
 	Revision  int               `json:"revision"`
@@ -21,11 +21,15 @@ type CapabilityDraft struct {
 	UpdatedAt float64           `json:"updated_at"`
 	Issues    []DraftIssue      `json:"issues"`
 }
+
+// DraftIssue identifies a validation problem at a specific manifest field.
 type DraftIssue struct {
 	Section string `json:"section"`
 	Path    string `json:"path"`
 	Message string `json:"message"`
 }
+
+// DraftEdit describes one revision-checked edit to a capability draft.
 type DraftEdit struct {
 	ExpectedRevision *int              `json:"expected_revision"`
 	Section          string            `json:"section"`
@@ -202,6 +206,7 @@ func draftIssues(m map[string]any, skills map[string]string) []DraftIssue {
 	return issues
 }
 
+// Draft reads an independent editable manifest and its current management revision.
 func (r *CapabilityRegistry) Draft(id string) (*CapabilityDraft, error) {
 	if !registryID.MatchString(id) {
 		return nil, registryError("invalid_draft_id")
@@ -226,12 +231,14 @@ func (r *CapabilityRegistry) Draft(id string) (*CapabilityDraft, error) {
 	d.Issues = draftIssues(d.Manifest, d.Skills)
 	return d, nil
 }
-func (r *CapabilityRegistry) ListDrafts() ([]map[string]any, error) {
+
+// ListDrafts returns saved draft summaries without opening business connections.
+func (r *CapabilityRegistry) ListDrafts() (result []map[string]any, resultErr error) {
 	rows, err := r.db.Query(`SELECT draft_id,revision,manifest_json,updated_at FROM drafts ORDER BY updated_at DESC,draft_id`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	out := []map[string]any{}
 	for rows.Next() {
 		var id, m string
@@ -248,7 +255,9 @@ func (r *CapabilityRegistry) ListDrafts() ([]map[string]any, error) {
 	}
 	return out, rows.Err()
 }
-func (r *CapabilityRegistry) SaveDraft(id string, expected *int, m map[string]any, skills map[string]string) (*CapabilityDraft, error) {
+
+// SaveDraft validates serialization and saves a draft under its expected revision.
+func (r *CapabilityRegistry) SaveDraft(id string, expected *int, m map[string]any, skills map[string]string) (output *CapabilityDraft, resultErr error) {
 	if !registryID.MatchString(id) {
 		return nil, registryError("invalid_draft_id")
 	}
@@ -290,7 +299,12 @@ func (r *CapabilityRegistry) SaveDraft(id string, expected *int, m map[string]an
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		// A committed transaction is already closed; other rollback failures remain visible.
+		if rollbackErr := tx.Rollback(); !errors.Is(rollbackErr, sql.ErrTxDone) {
+			resultErr = errors.Join(resultErr, rollbackErr)
+		}
+	}()
 	var result sql.Result
 	if *expected == 0 {
 		result, err = tx.Exec(`INSERT INTO drafts VALUES(?,1,?,?,?) ON CONFLICT(draft_id) DO NOTHING`, id, string(mb), string(sb), now)
@@ -362,6 +376,8 @@ func mergeDraftItems(existing, incoming []any, conflict string) ([]any, error) {
 	}
 	return out, nil
 }
+
+// EditDraft applies one supported edit under the draft's expected revision.
 func (r *CapabilityRegistry) EditDraft(id string, edit DraftEdit) (*CapabilityDraft, error) {
 	d, err := r.Draft(id)
 	if err != nil {
@@ -400,7 +416,10 @@ func (r *CapabilityRegistry) EditDraft(id string, edit DraftEdit) (*CapabilityDr
 			if key != "capabilities" {
 				return nil, registryError("unsupported_pack_schema")
 			}
-			raw, _ := json.Marshal(edit.Value)
+			raw, encodeErr := json.Marshal(edit.Value)
+			if encodeErr != nil {
+				return nil, registryError("invalid_request")
+			}
 			var args struct {
 				Spec       JSON              `json:"spec"`
 				Operations []string          `json:"operations"`

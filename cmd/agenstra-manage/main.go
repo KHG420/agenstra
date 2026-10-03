@@ -2,16 +2,20 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -31,9 +35,11 @@ func main() {
 	if key == "" {
 		fail(fmt.Errorf("missing administrator key in %s", *keyEnv))
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	if args[0] == "model" {
 		out, err := modelCommand(args[1:], func(method, path string, body any) (any, error) {
-			return managementRequest(base, key, method, path, body)
+			return managementRequest(ctx, base, key, method, path, body)
 		})
 		if err != nil {
 			fail(err)
@@ -43,7 +49,7 @@ func main() {
 	}
 	if args[0] == "draft" {
 		out, err := draftCommand(args[1:], func(method, path string, body any) (any, error) {
-			return managementRequest(base, key, method, path, body)
+			return managementRequest(ctx, base, key, method, path, body)
 		})
 		if err != nil {
 			fail(err)
@@ -69,7 +75,9 @@ func main() {
 		}
 		fs := flag.NewFlagSet(args[0], flag.ExitOnError)
 		version := fs.String("version", "", "version for legacy pack")
-		_ = fs.Parse(args[2:])
+		if e = fs.Parse(args[2:]); e != nil {
+			fail(e)
+		}
 		body, e = packageBody(args[1], *version)
 		if e != nil {
 			fail(e)
@@ -86,7 +94,9 @@ func main() {
 		}
 		fs := flag.NewFlagSet("activate", flag.ExitOnError)
 		revision := fs.Int("revision", -1, "expected current revision")
-		_ = fs.Parse(args[3:])
+		if e = fs.Parse(args[3:]); e != nil {
+			fail(e)
+		}
 		var rev any
 		if *revision >= 0 {
 			rev = *revision
@@ -121,13 +131,13 @@ func main() {
 	default:
 		fail(fmt.Errorf("unknown command: %s", args[0]))
 	}
-	out, e := managementRequest(base, key, method, path, body)
+	out, e := managementRequest(ctx, base, key, method, path, body)
 	if e != nil {
 		fail(e)
 	}
 	printResult(out)
 }
-func managementRequest(base, key, method, path string, body any) (any, error) {
+func managementRequest(ctx context.Context, base, key, method, path string, body any) (any, error) {
 	var payload io.Reader
 	if body != nil {
 		b, e := json.Marshal(body)
@@ -136,7 +146,7 @@ func managementRequest(base, key, method, path string, body any) (any, error) {
 		}
 		payload = bytes.NewReader(b)
 	}
-	req, e := http.NewRequest(method, base+path, payload)
+	req, e := http.NewRequestWithContext(ctx, method, base+path, payload)
 	if e != nil {
 		return nil, e
 	}
@@ -149,10 +159,17 @@ func managementRequest(base, key, method, path string, body any) (any, error) {
 	if e != nil {
 		return nil, e
 	}
-	defer resp.Body.Close()
-	data, e := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Print("HTTP response cleanup failed")
+		}
+	}()
+	data, e := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
 	if e != nil {
 		return nil, e
+	}
+	if len(data) > 4<<20 {
+		return nil, errors.New("management API response too large")
 	}
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("management API returned %d: %s", resp.StatusCode, string(data))
@@ -168,18 +185,17 @@ func printResult(out any) {
 	if e != nil {
 		fail(e)
 	}
-	fmt.Println(string(pretty))
+	if _, e := fmt.Println(string(pretty)); e != nil {
+		fail(e)
+	}
 }
 func packageBody(path, version string) (map[string]any, error) {
-	b, e := os.ReadFile(path)
-	if e != nil {
+	var manifest map[string]any
+	if e := readJSON(path, &manifest); e != nil {
 		return nil, e
 	}
-	var manifest map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(b))
-	decoder.UseNumber()
-	if e = decoder.Decode(&manifest); e != nil {
-		return nil, e
+	if manifest == nil {
+		return nil, errors.New("manifest must be a JSON object")
 	}
 	root, e := filepath.Abs(filepath.Dir(path))
 	if e != nil {

@@ -13,6 +13,8 @@ import (
 	"unicode/utf8"
 )
 
+// InvocationContext carries the trusted identity and stable idempotency key of a call.
+// Project routing may fill target identity fields before a provider invocation.
 type InvocationContext struct {
 	RunID          string `json:"run_id"`
 	InvocationID   string `json:"invocation_id"`
@@ -24,6 +26,8 @@ type InvocationContext struct {
 	TargetSubject  string `json:"target_subject,omitempty"`
 	TargetRelease  string `json:"target_release,omitempty"`
 }
+
+// OperationBinding declares how to read and poll an external asynchronous receipt.
 type OperationBinding struct {
 	IDPath               []any    `json:"id_path"`
 	StatusPath           []any    `json:"status_path"`
@@ -38,6 +42,7 @@ type OperationBinding struct {
 	ReconcileOnTimeout   bool     `json:"reconcile_on_timeout,omitempty"`
 }
 
+// MarshalJSON preserves canonical floating point units for operation timing.
 func (b OperationBinding) MarshalJSON() ([]byte, error) {
 	type binding OperationBinding
 	raw, err := json.Marshal(binding(b))
@@ -63,6 +68,7 @@ func (b OperationBinding) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
+// UnmarshalJSON rejects unknown fields and invalid timing or overlapping states.
 func (b *OperationBinding) UnmarshalJSON(raw []byte) error {
 	type binding OperationBinding
 	var parsed binding
@@ -112,6 +118,8 @@ func (b *OperationBinding) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+// CapabilityDescription declares a capability's contract and execution guarantees.
+// Catalog values are immutable after a provider is opened.
 type CapabilityDescription struct {
 	Name                string            `json:"name"`
 	Version             string            `json:"version"`
@@ -130,6 +138,7 @@ type CapabilityDescription struct {
 	SourcePackID        string            `json:"source_pack_id,omitempty"`
 }
 
+// MarshalJSON includes default effect, replay and reference scope values.
 func (c CapabilityDescription) MarshalJSON() ([]byte, error) {
 	type alias CapabilityDescription
 	if c.SkillsList == nil {
@@ -146,10 +155,17 @@ func (c CapabilityDescription) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(alias(c))
 }
+
+// ModelView returns a model catalog entry with bounded input schema detail.
 func (c CapabilityDescription) ModelView() JSON {
-	b, _ := json.Marshal(c)
+	b, err := json.Marshal(c)
+	if err != nil {
+		return JSON{}
+	}
 	var m JSON
-	_ = json.Unmarshal(b, &m)
+	if err := json.Unmarshal(b, &m); err != nil {
+		return JSON{}
+	}
 	delete(m, "output_schema")
 	if strings.HasPrefix(c.Name, "ui.") && c.Operation != nil && c.Operation.PollCapability == "ui.command_status" {
 		// The host, rather than the model, applies this browser poll binding.
@@ -163,7 +179,10 @@ func (c CapabilityDescription) ModelView() JSON {
 			delete(m, k)
 		}
 	}
-	raw, _ := json.Marshal(c.InputSchema)
+	raw, err := json.Marshal(c.InputSchema)
+	if err != nil {
+		return JSON{}
+	}
 	if utf8.RuneCount(raw) > 2000 {
 		delete(m, "input_schema")
 		fields := []string{}
@@ -181,20 +200,30 @@ func (c CapabilityDescription) ModelView() JSON {
 	return m
 }
 
+// SkillDescription identifies a pinned usage guide without its full text.
 type SkillDescription struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 }
+
+// Skill contains usage guidance; its content cannot expand the caller's grants.
 type Skill struct {
 	Description SkillDescription
 	Content     string
 }
+
+// CapabilityResult contains provider data or a safe error code, never both.
+// An unknown external outcome must remain distinguishable from a definite failure.
 type CapabilityResult struct {
 	Data           JSON       `json:"data,omitempty"`
 	ErrorCode      string     `json:"error_code,omitempty"`
 	ReferenceScope string     `json:"reference_scope,omitempty"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 }
+
+// CapabilityProvider owns an opened capability connection.
+// Capabilities and Skills return read-only catalogs; Invoke must respect cancellation.
+// The opener closes the provider after all invocation goroutines have exited.
 type CapabilityProvider interface {
 	Capabilities() map[string]CapabilityDescription
 	Skills() map[string]Skill
@@ -208,15 +237,22 @@ type CapabilityProvider interface {
 type ConcurrentCapabilityProvider interface {
 	ConcurrentInvocation(capability string) bool
 }
+
+// DecisionModel chooses one validated action from a bounded context.
+// Implementations must respect cancellation and return errors without exposing secrets.
+// Errors with Code() string deliberately expose that safe code; unknown uncoded errors become model_unavailable.
 type DecisionModel interface {
 	Decide(context.Context, ContextPacket, string) (Decision, error)
 }
 
+// CallOutcome carries retained evidence or a structured execution error code.
 type CallOutcome struct {
 	Fact      *Fact
 	ErrorCode string
 }
 
+// BindIdempotency copies arguments before binding the existing invocation key.
+// It rejects malformed paths or arguments without changing the caller's map.
 func BindIdempotency(call ToolCall, cap CapabilityDescription, inv InvocationContext) (ToolCall, error) {
 	if cap.IdempotencyArgument == nil {
 		return call, nil
@@ -253,6 +289,9 @@ func BindIdempotency(call ToolCall, cap CapabilityDescription, inv InvocationCon
 	call.Arguments = args
 	return call, nil
 }
+
+// ExecuteCall checks catalog access and invokes a provider with owned arguments.
+// It copies returned evidence and converts provider failures to safe outcome codes.
 func ExecuteCall(ctx context.Context, provider CapabilityProvider, grants map[string]bool, call ToolCall, inv *InvocationContext) (CallOutcome, error) {
 	cap, ok := provider.Capabilities()[call.Capability]
 	if !ok {
@@ -271,20 +310,44 @@ func ExecuteCall(ctx context.Context, provider CapabilityProvider, grants map[st
 			return CallOutcome{ErrorCode: err.Error()}, nil
 		}
 	}
-	result, err := provider.Invoke(ctx, call.Capability, call.Arguments, inv)
+	// Provider code receives its own arguments, so it cannot alter the saved
+	// invocation or the caller's data after the parameter digest was checked.
+	arguments, err := cloneJSON(call.Arguments)
+	if err != nil || arguments == nil {
+		return CallOutcome{ErrorCode: "capability_input_invalid"}, nil
+	}
+	var providerInvocation *InvocationContext
+	if inv != nil {
+		copy := *inv
+		providerInvocation = &copy
+	}
+	projection, err := cloneJSON(cap.ModelOutput)
+	if err != nil {
+		return CallOutcome{ErrorCode: "model_output_config_invalid"}, nil
+	}
+	result, err := provider.Invoke(ctx, call.Capability, arguments, providerInvocation)
 	if err != nil {
 		return CallOutcome{ErrorCode: "provider_outcome_unknown"}, nil
 	}
 	if result.ErrorCode != "" || result.Data == nil {
 		return CallOutcome{ErrorCode: firstNonempty(result.ErrorCode, "upstream_response_invalid")}, nil
 	}
+	data, err := cloneJSON(result.Data)
+	if err != nil {
+		return CallOutcome{ErrorCode: "upstream_response_invalid"}, nil
+	}
 	scope := "durable"
 	if result.ReferenceScope == "connection" || cap.ReferenceScope == "connection" {
 		scope = "connection"
 	}
-	fact := Fact{FactID: NewID(), SourceCapability: cap.Name, SourceVersion: cap.Version, Value: JSON{"data": result.Data}, ModelOutput: cap.ModelOutput, Quality: "provider_reported", ObservedAt: time.Now().UTC(), ReferenceScope: scope, ExpiresAt: result.ExpiresAt}
+	fact := Fact{FactID: NewID(), SourceCapability: cap.Name, SourceVersion: cap.Version, Value: JSON{"data": data}, ModelOutput: projection, Quality: "provider_reported", ObservedAt: time.Now().UTC(), ReferenceScope: scope}
+	if result.ExpiresAt != nil {
+		expiresAt := *result.ExpiresAt
+		fact.ExpiresAt = &expiresAt
+	}
 	if inv != nil {
-		fact.ConnectionID = &inv.ConnectionID
+		connectionID := inv.ConnectionID
+		fact.ConnectionID = &connectionID
 		fact.SourcePackID, fact.SourceRelease, fact.SourceSubject = inv.TargetPackID, inv.TargetRelease, inv.TargetSubject
 	}
 	return CallOutcome{Fact: &fact}, nil
@@ -295,6 +358,8 @@ func firstNonempty(a, b string) string {
 	}
 	return b
 }
+
+// Observe appends evidence and observations and settles the supplied invocation.
 func Observe(state *RuntimeState, item *Invocation, outcome CallOutcome) {
 	obs := Observation{CallRef: item.Call.CallRef, Capability: item.Call.Capability, Arguments: item.Call.Arguments}
 	modelObs := obs
@@ -318,8 +383,14 @@ func Observe(state *RuntimeState, item *Invocation, outcome CallOutcome) {
 	state.Observations = append(state.Observations, obs)
 	state.ModelObservations = append(state.ModelObservations, modelObs)
 }
+
+// ArgumentsDigest computes the canonical SHA-256 of a JSON capability call.
+// It returns an empty string when the call cannot be encoded as JSON.
 func ArgumentsDigest(call ToolCall) string {
-	raw, _ := CanonicalJSON(JSON{"capability": call.Capability, "arguments": call.Arguments})
+	raw, err := CanonicalJSON(JSON{"capability": call.Capability, "arguments": call.Arguments})
+	if err != nil {
+		return ""
+	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }

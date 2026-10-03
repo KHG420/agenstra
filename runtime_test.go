@@ -39,6 +39,46 @@ func (m *coreTestModel) Decide(_ context.Context, _ ContextPacket, _ string) (De
 	}
 	return m.decisions[i], nil
 }
+
+func TestRuntimeReducesUncodedModelErrorsToSafeCodes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"uncoded", errors.New("private endpoint and token details"), "model_unavailable"},
+		{"local measurement code", errors.New("model_context_measurement_failed"), "model_context_measurement_failed"},
+		{"wrapped code", fmt.Errorf("private endpoint: %w", ModelDecisionError{"model_refused"}), "model_refused"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := &coreTestModel{errs: []error{tc.err}}
+			runtime := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{}}, Model: model}
+			result, err := runtime.Run(t.Context(), "run task")
+			if err != nil || result.Status != "failed" || result.ErrorCode == nil || *result.ErrorCode != tc.want {
+				t.Fatalf("model failure: %+v, %v", result, err)
+			}
+			if len(result.ModelCalls) != 1 || result.ModelCalls[0].ErrorCode == nil || *result.ModelCalls[0].ErrorCode != tc.want {
+				t.Fatalf("model telemetry leaked uncoded error: %+v", result.ModelCalls)
+			}
+		})
+	}
+}
+
+type failedMeasurementModel struct{ *coreTestModel }
+
+func (failedMeasurementModel) MeasureInput(ContextPacket, string) (InputMeasurement, error) {
+	return InputMeasurement{}, errors.New("private tokenizer endpoint and token details")
+}
+
+func TestRuntimeMeasurementErrorsStayPrivate(t *testing.T) {
+	model := failedMeasurementModel{&coreTestModel{}}
+	runtime := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{}}, Model: model, MaxModelInputTokens: 1000}
+	result, err := runtime.Run(t.Context(), "run task")
+	if err != nil || result.Status != "failed" || result.ErrorCode == nil || *result.ErrorCode != "model_unavailable" || model.calls != 0 {
+		t.Fatalf("measurement failure: %+v, %v, model calls=%d", result, err, model.calls)
+	}
+}
+
 func TestCoreRuntimeRepairAndRepeat(t *testing.T) {
 	cap := CapabilityDescription{Name: "calc.sum", Version: "1", Description: "calculate", InputSchema: JSON{"type": "object"}, Effect: "compute"}
 	provider := &coreTestProvider{caps: map[string]CapabilityDescription{cap.Name: cap}}
@@ -126,7 +166,10 @@ func TestCoreFactPreviewDoesNotInventNullOrEmptyValues(t *testing.T) {
 	if len(items) != 3 || items[0] != nil || items[1] != nil || len(items[2].(map[string]any)) != 0 {
 		t.Fatalf("array indices or actual null/empty values changed: %v", items)
 	}
-	omitted, _ := CanonicalJSON(array.OmittedPaths)
+	omitted, callErr := CanonicalJSON(array.OmittedPaths)
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	if !strings.Contains(string(omitted), `["notes",0]`) {
 		t.Fatalf("array placeholder lost its omission path: %s", omitted)
 	}

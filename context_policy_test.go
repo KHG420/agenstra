@@ -12,7 +12,9 @@ func TestContextPolicySoftTargetAndRequiredInformation(t *testing.T) {
 		state.Facts = append(state.Facts, contextBudgetFact(JSON{"body": strings.Repeat("x", 1000)}))
 	}
 	r.Model = &coreTestModel{decisions: []Decision{{Kind: "request_input", Field: "x", Prompt: "x"}}}
-	_ = r.Step(t.Context(), state, nil)
+	if callErr := r.Step(t.Context(), state, nil); callErr != nil {
+		t.Error(callErr)
+	}
 	c := state.ContextTelemetry
 	if c.ProjectionReason != "soft_threshold" || !c.TargetMet || float64(c.InputCharacters) > float64(c.CharacterLimit)*.3 || len(state.Facts) != 10 {
 		t.Fatalf("%+v", c)
@@ -37,7 +39,10 @@ func TestContextPolicyJournalReplayAndSafeApplication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, _ := h.restore(run)
+	state, callErr2 := h.restore(run)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	if state.ContextPolicy == nil || *state.ContextPolicy != policy || state.ContextPolicyCursor == 0 {
 		t.Fatalf("%+v", state)
 	}
@@ -66,7 +71,10 @@ func TestContextPolicyAcceptedDuringModelCannotBeOvertakenByCompletion(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, _ := h.restore(run)
+	state, callErr3 := h.restore(run)
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	if run.Status != "completed" || state.ContextPolicyCursor == 0 {
 		t.Fatalf("%+v", state)
 	}

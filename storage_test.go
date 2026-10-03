@@ -17,7 +17,11 @@ func testStore(t *testing.T) *SQLiteStore {
 	if e = s.Initialize(); e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	return s
 }
 func testRun(t *testing.T, s *SQLiteStore, id string) StoredRun {
@@ -38,7 +42,11 @@ func TestStoreReopenOwnerScope(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer second.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(second.Close)
 	if e = second.Initialize(); e != nil {
 		t.Fatal(e)
 	}
@@ -151,7 +159,9 @@ func TestPythonV1DatabaseRestoresFactsAndContinues(t *testing.T) {
 		t.Fatal(e)
 	}
 	// Import into a separate empty database because the fixture contains CREATEs.
-	s.Close()
+	if err := s.Close(); err != nil {
+		t.Error(err)
+	}
 	if e = os.Remove(s.Path); e != nil {
 		t.Fatal(e)
 	}
@@ -159,7 +169,11 @@ func TestPythonV1DatabaseRestoresFactsAndContinues(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer s.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(s.Close)
 	if _, e = s.DB.Exec("PRAGMA foreign_keys=OFF;\n" + string(dump) + "\nPRAGMA foreign_keys=ON;"); e != nil {
 		t.Fatal(e)
 	}

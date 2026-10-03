@@ -35,6 +35,7 @@ type ContextTelemetry struct {
 	Omissions                ContextOmissionCounts `json:"omissions"`
 }
 
+// ContextOmissionCounts records how much context was excluded from the model projection.
 type ContextOmissionCounts struct {
 	Observations    int `json:"observations"`
 	Arguments       int `json:"arguments"`
@@ -45,15 +46,15 @@ type ContextOmissionCounts struct {
 }
 
 func measureContext(state *RuntimeState, prompt string, candidate, packet ContextPacket, limit int) *ContextTelemetry {
-	raw, _ := CanonicalJSON(packet)
-	before, _ := CanonicalJSON(candidate)
+	raw, _ := CanonicalJSON(packet)       //nolint:errcheck // Step validates the packet before projection; projection retains JSON values.
+	before, _ := CanonicalJSON(candidate) //nolint:errcheck // Step validates this candidate before projection.
 	promptSize := utf8.RuneCountInString(prompt)
 	size := promptSize + utf8.RuneCount(raw)
 	c := &ContextTelemetry{Schema: "agenstra.context-telemetry.v1", ProjectionID: NewID(), Round: state.RoundsUsed + 1, MeasuredAt: float64(time.Now().UnixNano()) / 1e9, InputCharacters: size, CharacterLimit: limit, CharactersRemaining: max(0, limit-size), OverLimit: size > limit, CandidateCharacters: promptSize + utf8.RuneCount(before), Components: map[string]int{"system_prompt": promptSize}}
 	if limit > 0 {
 		c.Utilization = float64(size) / float64(limit)
 	}
-	obj, _ := objectOf(packet)
+	obj, _ := objectOf(packet) //nolint:errcheck // The validated ContextPacket encodes to an object.
 	valuesSize := 0
 	for key, value := range obj {
 		n := contextCharacters(value)

@@ -17,7 +17,10 @@ func TestCompletionReviewsSuccessfulWriteBeforePublishingAnswer(t *testing.T) {
 	correct := Decision{Kind: "final", AnswerMarkdown: "I successfully started the session. It is now active.", FactIDs: []string{afterID}}
 	calls, checkpoints := 0, 0
 	r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{capability: {Name: capability, Effect: "write"}}}}
-	s, _ := r.NewState("Start a session after approval", "")
+	s, callErr := r.NewState("Start a session after approval", "")
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	s.Facts = []Fact{
 		{FactID: beforeID, SourceCapability: "session.read", Value: JSON{"data": JSON{"revision": 0, "active_session": nil}}},
 		{FactID: afterID, SourceCapability: capability, Value: JSON{"data": JSON{"revision": 1, "active_session": "S-1"}}},
@@ -30,7 +33,10 @@ func TestCompletionReviewsSuccessfulWriteBeforePublishingAnswer(t *testing.T) {
 		if calls == 1 {
 			return wrong, nil
 		}
-		raw, _ := CanonicalJSON(packet)
+		raw, callErr2 := CanonicalJSON(packet)
+		if callErr2 != nil {
+			t.Error(callErr2)
+		}
 		if !strings.Contains(string(raw), "completion_review") || !strings.Contains(string(raw), wrong.AnswerMarkdown) || !strings.Contains(string(raw), "action_outcomes") || !strings.Contains(prompt, "post-action") {
 			t.Fatal("review lost the proposed answer or the causal execution evidence", string(raw), prompt)
 		}
@@ -53,7 +59,10 @@ func TestCompletionReviewsSuccessfulWriteBeforePublishingAnswer(t *testing.T) {
 func consistencyFixture(t *testing.T) (*AgentRuntime, *RuntimeState) {
 	t.Helper()
 	r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{"record.create": {Name: "record.create", Effect: "write"}}}}
-	s, _ := r.NewState("Create the record", "")
+	s, callErr3 := r.NewState("Create the record", "")
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	fact := Fact{FactID: NewID(), SourceCapability: "record.create", Value: JSON{"data": JSON{"id": "R-1"}}}
 	s.Facts = []Fact{fact}
 	s.Observations = []Observation{{CallRef: "create-1", Capability: "record.create", Status: "succeeded", FactID: &fact.FactID}}
@@ -173,16 +182,25 @@ func TestActionOutcomesUseCurrentReceiptWithoutLeakingPrivateBindings(t *testing
 	for i := 0; i < 20; i++ {
 		s.ModelObservations = append(s.ModelObservations, Observation{CallRef: "read", Capability: "record.read", Arguments: JSON{"large": strings.Repeat("x", 2000)}})
 	}
-	before, _ := CanonicalJSON(s)
+	before, callErr4 := CanonicalJSON(s)
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	packet := budgetContext(r.contextCandidate(s), s, 7000)
 	if len(packet.ActionOutcomes) != 1 || packet.ActionOutcomes[0].Status != "succeeded" || packet.ActionOutcomes[0].FactID != s.Facts[0].FactID || packet.ActionOutcomes[0].CallRef != "create-1" {
 		t.Fatal("projection lost the action/result relation", packet.ActionOutcomes)
 	}
-	raw, _ := CanonicalJSON(packet)
+	raw, callErr5 := CanonicalJSON(packet)
+	if callErr5 != nil {
+		t.Error(callErr5)
+	}
 	if strings.Contains(string(raw), "private-") || strings.Contains(string(raw), "R-1") {
 		t.Fatal("receipts bypassed model visibility", string(raw))
 	}
-	after, _ := CanonicalJSON(s)
+	after, callErr6 := CanonicalJSON(s)
+	if callErr6 != nil {
+		t.Error(callErr6)
+	}
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("projection mutated the checkpoint")
 	}
@@ -214,7 +232,10 @@ func TestHostCompletionReviewAfterApprovalDoesNotReplayWrite(t *testing.T) {
 	if err != nil || run.Status != "needs_approval" || p.calls != 0 {
 		t.Fatal("write ran before approval", err, run.Status)
 	}
-	s, _ := h.restore(run)
+	s, callErr7 := h.restore(run)
+	if callErr7 != nil {
+		t.Error(callErr7)
+	}
 	item := s.Pending[0]
 	run, err = h.Approve(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, run.Revision, true)
 	if err != nil {
@@ -252,7 +273,10 @@ func TestCompletionReviewsHistoricalLotteryDraft(t *testing.T) {
 	}
 	p := &coreTestProvider{caps: map[string]CapabilityDescription{"ui.start_round": {Name: "ui.start_round", Effect: "write", ApprovalRequired: true}}}
 	r := &AgentRuntime{Provider: p}
-	s, _ := r.NewState(fixture.Instruction, fixture.RunID)
+	s, callErr8 := r.NewState(fixture.Instruction, fixture.RunID)
+	if callErr8 != nil {
+		t.Error(callErr8)
+	}
 	s.Facts, s.Observations, s.ModelObservations, s.InvocationReceipts = fixture.Facts, fixture.Observations, fixture.ModelObservations, fixture.InvocationReceipts
 	r.Model = decisionModelFunc(func(_ context.Context, packet ContextPacket, _ string) (Decision, error) {
 		if packet.CompletionReview == nil {
@@ -275,7 +299,10 @@ func TestAsyncCompletionReviewUsesTerminalPollReceipt(t *testing.T) {
 	if err != nil || run.Status != "waiting" {
 		t.Fatal(run.Status, err)
 	}
-	initial, _ := h.restore(run)
+	initial, callErr9 := h.restore(run)
+	if callErr9 != nil {
+		t.Error(callErr9)
+	}
 	initialFact := initial.Facts[0].FactID
 	*now += 2
 	h.Model = decisionModelFunc(func(_ context.Context, packet ContextPacket, _ string) (Decision, error) {
@@ -283,7 +310,10 @@ func TestAsyncCompletionReviewUsesTerminalPollReceipt(t *testing.T) {
 		if len(outcomes) != 1 || outcomes[0].Status != "succeeded" || outcomes[0].FactID == initialFact || outcomes[0].FactID != packet.Facts[0].FactID {
 			t.Fatal("review used submission receipt instead of final poll", outcomes, packet.Facts)
 		}
-		raw, _ := CanonicalJSON(packet)
+		raw, callErr10 := CanonicalJSON(packet)
+		if callErr10 != nil {
+			t.Error(callErr10)
+		}
 		if strings.Contains(string(raw), "private-job-token") {
 			t.Fatal("poll binding leaked through completion review")
 		}

@@ -32,7 +32,10 @@ func frontendTestProfile(approval bool) FrontendProfile {
 func newWebFixture(t *testing.T, model *hostModel, approval bool) *webFixture {
 	t.Helper()
 	dir := t.TempDir()
-	raw, _ := json.Marshal(frontendTestProfile(approval))
+	raw, callErr := json.Marshal(frontendTestProfile(approval))
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	if e := os.WriteFile(filepath.Join(dir, "frontend.json"), raw, 0600); e != nil {
 		t.Fatal(e)
 	}
@@ -48,7 +51,11 @@ func newWebFixture(t *testing.T, model *hostModel, approval bool) *webFixture {
 	h.Clock = func() float64 { return f.now }
 	h.Store.Clock = h.Clock
 	w.Store.store.Clock = h.Clock
-	t.Cleanup(func() { w.Close() })
+	t.Cleanup(func() {
+		if err := w.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	f.session, f.key, e = w.CreateBrowserSession(t.Context(), "alice", "records-web", "1", []string{"ui.navigate"})
 	if e != nil {
 		t.Fatal(e)
@@ -116,7 +123,9 @@ func TestBrowserCommandExecutionAndDeduplication(t *testing.T) {
 		t.Fatalf("complete: %s %v", r.Status, e)
 	}
 	var count int
-	f.w.Store.store.DB.QueryRow("SELECT count(*) FROM web_commands").Scan(&count)
+	if err := f.w.Store.store.DB.QueryRow("SELECT count(*) FROM web_commands").Scan(&count); err != nil {
+		t.Error(err)
+	}
 	if count != 1 {
 		t.Fatal("duplicate command", count)
 	}
@@ -159,7 +168,9 @@ func TestBrowserLostAckReconciliationAndGenerationFence(t *testing.T) {
 		t.Fatalf("reconciled: %s %v", r.Status, e)
 	}
 	var count int
-	f.w.Store.store.DB.QueryRow("SELECT count(*) FROM web_commands").Scan(&count)
+	if err := f.w.Store.store.DB.QueryRow("SELECT count(*) FROM web_commands").Scan(&count); err != nil {
+		t.Error(err)
+	}
 	if count != 1 {
 		t.Fatal("reconciliation replayed handler")
 	}
@@ -299,7 +310,9 @@ func TestChatQueuePrebindingIdempotenceAndRecovery(t *testing.T) {
 		t.Fatal("cross owner", e)
 	}
 	var v int
-	f.h.Store.DB.QueryRow("PRAGMA user_version").Scan(&v)
+	if err := f.h.Store.DB.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+		t.Error(err)
+	}
 	if v != 1 {
 		t.Fatal("changed run schema", v)
 	}
@@ -316,7 +329,9 @@ func TestChatQueuePrebindingIdempotenceAndRecovery(t *testing.T) {
 		t.Fatal(e)
 	}
 	var count int
-	f.h.Store.DB.QueryRow("SELECT count(*) FROM runs").Scan(&count)
+	if err := f.h.Store.DB.QueryRow("SELECT count(*) FROM runs").Scan(&count); err != nil {
+		t.Error(err)
+	}
 	if count != 2 {
 		t.Fatal("recovery duplicated run", count)
 	}
@@ -336,21 +351,36 @@ func TestWebReleasePinningAndHeadlessFingerprint(t *testing.T) {
 	updated := frontendTestProfile(false)
 	updated.Version = "2"
 	updated.HandlerVersion = "2"
-	raw, _ := json.Marshal(updated)
-	os.WriteFile(filepath.Join(f.d.BaseDir, "frontend.json"), raw, 0600)
+	raw, callErr2 := json.Marshal(updated)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
+	if err := os.WriteFile(filepath.Join(f.d.BaseDir, "frontend.json"), raw, 0600); err != nil {
+		t.Error(err)
+	}
 	// A separate host simulates a process restart with a new configured profile.
-	f.w.Close()
+	if err := f.w.Close(); err != nil {
+		t.Error(err)
+	}
 	h := testHost(t, f.h.Store, f.p, &hostModel{decisions: browserDecisions()})
 	w, e := NewWebIntegration(h, f.d, *f.d.Config.WebIntegration)
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer w.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(w.Close)
 	old, e := h.ReleaseProviderFactory(t.Context(), "alice", "records-web", release)
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer old.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(old.Close)
 	if old.Capabilities()["ui.navigate"].Version != "1" {
 		t.Fatal("old run uses latest frontend contract")
 	}
@@ -358,7 +388,11 @@ func TestWebReleasePinningAndHeadlessFingerprint(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer current.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(current.Close)
 	if current.Capabilities()["ui.navigate"].Version != "2" {
 		t.Fatal("new run did not use new profile")
 	}
@@ -369,13 +403,19 @@ func TestWebReleasePinningAndHeadlessFingerprint(t *testing.T) {
 func TestWebHTTPAuthenticationAndOptionalRoutes(t *testing.T) {
 	f := newWebFixture(t, &hostModel{}, false)
 	// NewHTTPServer attaches the extension itself, so use a fresh unwrapped host.
-	f.w.Close()
+	if err := f.w.Close(); err != nil {
+		t.Error(err)
+	}
 	h := testHost(t, f.h.Store, f.p, &hostModel{})
 	s, e := NewHTTPServer(h, f.d, false, time.Second)
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer s.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(s.Close)
 	request := func(method, path, token, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
 		if token != "" {
@@ -392,7 +432,9 @@ func TestWebHTTPAuthenticationAndOptionalRoutes(t *testing.T) {
 	var data struct {
 		Token string `json:"token"`
 	}
-	json.Unmarshal(minted.Body.Bytes(), &data)
+	if err := json.Unmarshal(minted.Body.Bytes(), &data); err != nil {
+		t.Error(err)
+	}
 	if out := request("GET", "/runs", data.Token, ""); out.Code != 401 {
 		t.Fatal("web ticket accessed headless API", out.Code)
 	}
@@ -428,9 +470,18 @@ func TestWebHTTPAuthenticationAndOptionalRoutes(t *testing.T) {
 
 func TestChatConcurrentCreateFailureKeepsActiveSlot(t *testing.T) {
 	f := newWebFixture(t, &hostModel{}, false)
-	c, _ := f.w.CreateConversation(t.Context(), "alice", "records")
-	first, _ := f.w.SubmitMessage(t.Context(), "alice", c.ID, "first", "One", "")
-	second, _ := f.w.SubmitMessage(t.Context(), "alice", c.ID, "second", "Two", "")
+	c, callErr3 := f.w.CreateConversation(t.Context(), "alice", "records")
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
+	first, callErr4 := f.w.SubmitMessage(t.Context(), "alice", c.ID, "first", "One", "")
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
+	second, callErr5 := f.w.SubmitMessage(t.Context(), "alice", c.ID, "second", "Two", "")
+	if callErr5 != nil {
+		t.Error(callErr5)
+	}
 	entered, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int32
 	f.w.baseRelease = func(context.Context, string, string) (string, error) {
@@ -490,8 +541,14 @@ func TestChatCancellationReportsUnpublishedRunStorageFailure(t *testing.T) {
 
 func TestChatCancellationFencesConcurrentUnpublishedCreate(t *testing.T) {
 	f := newWebFixture(t, &hostModel{}, false)
-	c, _ := f.w.CreateConversation(t.Context(), "alice", "records")
-	m, _ := f.w.SubmitMessage(t.Context(), "alice", c.ID, "first", "Do not execute", "")
+	c, callErr6 := f.w.CreateConversation(t.Context(), "alice", "records")
+	if callErr6 != nil {
+		t.Error(callErr6)
+	}
+	m, callErr7 := f.w.SubmitMessage(t.Context(), "alice", c.ID, "first", "Do not execute", "")
+	if callErr7 != nil {
+		t.Error(callErr7)
+	}
 	entered, release := make(chan struct{}), make(chan struct{})
 	f.w.baseRelease = func(context.Context, string, string) (string, error) { close(entered); <-release; return "", nil }
 	done := make(chan error, 1)
@@ -553,7 +610,11 @@ func TestBrowserResultSchemaAndIsolation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer p.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(p.Close)
 	resultSchema := p.Capabilities()["ui.navigate"].OutputSchema["properties"].(JSON)["result"]
 	if webHash(resultSchema) != webHash(frontendTestProfile(false).Actions[0].OutputSchema) {
 		t.Fatal("action result schema hidden")
@@ -562,14 +623,20 @@ func TestBrowserResultSchemaAndIsolation(t *testing.T) {
 
 func TestWebDisabledKeepsLegacyRoutes(t *testing.T) {
 	f := newWebFixture(t, &hostModel{}, false)
-	f.w.Close()
+	if err := f.w.Close(); err != nil {
+		t.Error(err)
+	}
 	f.d.Config.WebIntegration = nil
 	h := testHost(t, f.h.Store, f.p, &hostModel{})
 	s, e := NewHTTPServer(h, f.d, false, time.Second)
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer s.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(s.Close)
 	if s.Web != nil {
 		t.Fatal("extension enabled by default")
 	}

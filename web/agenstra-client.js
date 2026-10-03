@@ -18,7 +18,7 @@ export class AgenstraClient {
     this.actions = new Map();
     this.listeners = new Map();
     this.storage = options.storage;
-    if (this.storage === undefined) { try { this.storage = globalThis.sessionStorage; } catch { this.storage = null; } }
+    if (this.storage === undefined) { try { this.storage = globalThis.sessionStorage; } catch { /* Storage is optional; server claims still fence execution. */ this.storage = null; } }
     this.prefix = "agenstra:v1:" + this.endpoint + ":" + options.integration;
     this.token = null;
     this.closed = false;
@@ -30,7 +30,7 @@ export class AgenstraClient {
     this.browserRecovery = this.load("browser_recovery");
     this.browserResume = this.load("browser_resume");
     this.chatWatchers = 0;
-  this.runWatchers = new Set();
+    this.runWatchers = new Set();
     this.aborters = new Set();
     this.browserEpoch = 0;
     this.browserConnected = false;
@@ -43,7 +43,7 @@ export class AgenstraClient {
     return () => this.listeners.get(name)?.delete(callback);
   }
   emit(name, value) { for (const fn of this.listeners.get(name) || []) { try { fn(value); } catch (error) { this.options.onListenerError?.(error); } } }
-  load(key) { try { return JSON.parse(this.storage?.getItem(this.prefix + ":" + key) || "null"); } catch { return null; } }
+  load(key) { try { return JSON.parse(this.storage?.getItem(this.prefix + ":" + key) || "null"); } catch { /* Unavailable or corrupt optional storage is recovered through the server. */ return null; } }
   save(key, value) { try { this.storage?.setItem(this.prefix + ":" + key, JSON.stringify(value)); } catch { /* Server claims still prevent execution on replay. */ } }
   remove(key) { try { this.storage?.removeItem(this.prefix + ":" + key); } catch { /* Storage may be disabled by the host. */ } }
   id() {
@@ -175,11 +175,11 @@ export class AgenstraClient {
     if (this.recoveryPromise) return this.recoveryPromise;
     const connecting = this.browserPromise;
     this.recoveryPromise = (async () => {
-      if (connecting) await connecting.catch(() => {});
+      if (connecting) await connecting.catch(() => { /* Recovery retries a failed connection using its saved identity. */ });
       if (this.executing) throw new AgenstraError("browser_recovery_busy");
       this.browserEpoch++; clearTimeout(this.browserTimer);
-      await this.observationChain.catch(() => {});
-      if (this.flushPromise) await this.flushPromise.catch(() => {});
+      await this.observationChain.catch(() => { /* Drain old work; publish current page data after replacement. */ });
+      if (this.flushPromise) await this.flushPromise.catch(() => { /* Saved receipts remain available after recovery. */ });
       await this.replaceBrowser(acknowledgeUnknown);
       await this.publishPageObservation();
       if (!this.closed) this.browserTimer = setTimeout(() => this.pollBrowser(), 0);
@@ -202,7 +202,7 @@ export class AgenstraClient {
     return this.publishPageObservation();
   }
   publishPageObservation() {
-    this.observationChain = this.observationChain.catch(() => {}).then(() => this.publishPageObservationOnce());
+    this.observationChain = this.observationChain.catch(() => { /* The prior caller received the error; permit the next upload. */ }).then(() => this.publishPageObservationOnce());
     return this.observationChain;
   }
   async publishPageObservationOnce() {
@@ -348,7 +348,7 @@ export class AgenstraClient {
       if (this.closed) throw new AgenstraError("client_closed");
       return operation();
     });
-    this.selectionChain = pending.catch(() => {});
+    this.selectionChain = pending.catch(() => { /* Return rejection to this caller without blocking later selections. */ });
     return pending;
   }
   rememberConversation(conversation) {
@@ -407,6 +407,7 @@ export class AgenstraClient {
     catch (error) { error.clientId = clientId; throw error; }
   }
   watchConversation(callback) {
+    if (this.closed) throw new AgenstraError("client_closed");
     const off = this.on("conversation", callback);
     this.chatWatchers++;
     if (this.chatWatchers === 1) { void this.connectBrowser().catch(error => this.emit("error", error)); this.pollChat(); }
@@ -457,11 +458,13 @@ export class AgenstraClient {
         const events = page.filter(item => Number.isSafeInteger(item.sequence) && item.sequence > cursor);
         for (const item of events) cursor = Math.max(cursor, item.sequence);
         try { callback({ run, telemetry: run.telemetry ?? null, events, cursor }); } catch (error) { this.options.onListenerError?.(error); }
+        if (stopped || this.closed) return;
         if (["completed", "failed", "cancelled"].includes(run.status) && page.length < 100) { stop(); return; }
         timer = setTimeout(poll, page.length === 100 ? 0 : (this.options.pollInterval || 1000));
       } catch (error) {
         if (stopped || this.closed) return;
         this.emit("error", error);
+        if (stopped || this.closed) return;
         timer = setTimeout(poll, this.options.pollInterval || 1000);
       }
     };
@@ -484,7 +487,7 @@ export class AgenstraClient {
     if (this.closed) return;
     this.closed = true;
     clearTimeout(this.browserTimer);clearTimeout(this.chatTimer);
-  for (const stop of this.runWatchers) stop();
+    for (const stop of this.runWatchers) stop();
     globalThis.removeEventListener?.("pagehide", this.pagehide);
     for (const aborter of this.aborters) aborter.abort();
     this.listeners.clear();

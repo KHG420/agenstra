@@ -6,7 +6,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	agenstra "github.com/KHG420/agenstra"
@@ -23,7 +26,7 @@ func main() {
 	}
 	os.Exit(code)
 }
-func run() (int, error) {
+func run() (code int, resultErr error) {
 	pack := flag.String("pack", "", "pack.json path")
 	instruction := flag.String("instruction", "", "task instruction")
 	inspect := flag.Bool("inspect", false, "inspect catalog")
@@ -59,11 +62,18 @@ func run() (int, error) {
 	if *pack == "" {
 		return 2, errors.New("--pack is required")
 	}
-	provider, e := agenstra.OpenPack(context.Background(), *pack, nil)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	provider, e := agenstra.OpenPack(ctx, *pack, nil)
 	if e != nil {
 		return 2, e
 	}
-	defer provider.Close()
+	defer func() {
+		if err := provider.Close(); err != nil {
+			// Preserve the result and exit code already determined from business evidence.
+			log.Print("provider cleanup failed")
+		}
+	}()
 	if *inspect {
 		caps := []any{}
 		for _, v := range provider.Capabilities() {
@@ -82,7 +92,7 @@ func run() (int, error) {
 	if e != nil {
 		return 2, e
 	}
-	defer model.Close()
+	defer func() { resultErr = errors.Join(resultErr, model.Close()) }()
 	model.MaxOutputTokens = *maxOutput
 	grantMap := map[string]bool{}
 	for _, v := range g {
@@ -98,7 +108,7 @@ func run() (int, error) {
 	runtime.MaxModelOutputTokens = *maxOutput
 	runtime.MaxModelTokens = *maxTokens
 	runtime.MaxConcurrentTools = *concurrentTools
-	result, e := runtime.Run(context.Background(), *instruction)
+	result, e := runtime.Run(ctx, *instruction)
 	if e != nil {
 		return 2, e
 	}
@@ -115,6 +125,6 @@ func printJSON(v any) error {
 	if e != nil {
 		return e
 	}
-	fmt.Println(string(b))
-	return nil
+	_, e = fmt.Println(string(b))
+	return e
 }

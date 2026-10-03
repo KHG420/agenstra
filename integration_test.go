@@ -63,13 +63,21 @@ func TestHTTPModelRESTDurableEndToEnd(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer model.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(model.Close)
 	host := NewAgentHost(store, dep.ProviderFactory, model, dep.PolicyResolver)
 	server, e := NewHTTPServer(host, dep, true, 10*time.Millisecond)
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer server.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(server.Close)
 	api := httptest.NewServer(server.Handler())
 	defer api.Close()
 	request := func(method, path string, data any) (int, map[string]any) {
@@ -92,7 +100,11 @@ func TestHTTPModelRESTDurableEndToEnd(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		defer response.Body.Close()
+		defer func() {
+			if err := response.Body.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
 		var result map[string]any
 		if e = json.NewDecoder(response.Body).Decode(&result); e != nil {
 			t.Fatal(e)

@@ -27,7 +27,11 @@ func (s *HTTPServer) discoverDraftMCP(w http.ResponseWriter, r *http.Request, id
 		registryHTTPError(w, registryError("unsupported_pack_schema"))
 		return
 	}
-	raw, _ := json.Marshal(draft.Manifest["source"])
+	raw, err := json.Marshal(draft.Manifest["source"])
+	if err != nil {
+		apiError(w, 422, "mcp_discovery_source_invalid", true)
+		return
+	}
 	var source MCPSource
 	if strictUnmarshal(raw, &source) != nil {
 		apiError(w, 422, "mcp_discovery_source_invalid", true)

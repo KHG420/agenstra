@@ -6,6 +6,8 @@ import (
 
 // ModelInfoProvider is optional. Unknown capacities stay nil; no model-name guesses.
 type ModelInfoProvider interface{ ModelInfo() ModelInfo }
+
+// ModelInfo describes known model capacities; nil limits mean unknown capacity.
 type ModelInfo struct {
 	ProtocolReserveTokens int64  `json:"protocol_reserve_tokens"`
 	Name                  string `json:"name,omitempty"`
@@ -13,12 +15,18 @@ type ModelInfo struct {
 	MaxInputTokens        *int64 `json:"max_input_tokens"`
 	MaxOutputTokens       *int64 `json:"max_output_tokens"`
 }
+
+// InputMeasurement records input token measurement and projection evidence.
 type InputMeasurement struct {
 	Tokens           int64
 	Source           string
 	ProjectionReason string
 	TargetMet        bool
 }
+
+// ModelInputMeasurer optionally measures the same packet and prompt sent to Decide.
+// Implementations treat the packet as read-only.
+// Unknown uncoded failures become model_unavailable; a coded error exposes its deliberate safe code.
 type ModelInputMeasurer interface {
 	MeasureInput(ContextPacket, string) (InputMeasurement, error)
 }
@@ -35,10 +43,13 @@ func modelInfo(model DecisionModel) ModelInfo {
 	}
 	return ModelInfo{}
 }
+
+// ModelInfo returns independent pointers to the configured model limits.
 func (m *HTTPJSONDecisionModel) ModelInfo() ModelInfo {
 	return ModelInfo{ProtocolReserveTokens: m.ProtocolReserveTokens, Name: m.Model, ContextWindowTokens: knownTokens(m.ContextWindowTokens), MaxInputTokens: knownTokens(m.MaxInputTokens), MaxOutputTokens: knownTokens(int64(m.MaxOutputTokens))}
 }
 
+// MeasureInput measures the configured request body using a tokenizer or the bounded byte estimate.
 func (m *HTTPJSONDecisionModel) MeasureInput(packet ContextPacket, prompt string) (InputMeasurement, error) {
 	input, err := CanonicalJSON(packet)
 	if err != nil {
@@ -128,10 +139,17 @@ func (r *AgentRuntime) tokenProjection(state *RuntimeState, packet ContextPacket
 		packet.MaxModelOutputTokens = int(reserve)
 	}
 	measure := func(p ContextPacket) (InputMeasurement, error) {
-		if model, ok := r.Model.(ModelInputMeasurer); ok {
-			return model.MeasureInput(p, prompt)
+		raw, err := CanonicalJSON(p)
+		if err != nil {
+			return InputMeasurement{}, hostError("run_state_invalid")
 		}
-		raw, _ := CanonicalJSON(p)
+		if model, ok := r.Model.(ModelInputMeasurer); ok {
+			measuredPacket, err := cloneJSON(p)
+			if err != nil {
+				return InputMeasurement{}, hostError("run_state_invalid")
+			}
+			return model.MeasureInput(measuredPacket, prompt)
+		}
 		return InputMeasurement{Tokens: int64(len(raw) + len(prompt) + 128), Source: "utf8_bytes_estimate"}, nil
 	}
 	if limit > 0 {

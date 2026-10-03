@@ -17,11 +17,16 @@ import (
 )
 
 var (
+	// ErrStoreConflict reports that a run cannot be claimed in its current state.
 	ErrStoreConflict = errors.New("store conflict")
-	ErrRunNotFound   = errors.New("run not found")
-	ErrLeaseLost     = errors.New("lease lost")
+	// ErrRunNotFound reports that no run belongs to the requested owner and identity.
+	ErrRunNotFound = errors.New("run not found")
+	// ErrLeaseLost reports that a worker no longer owns the live fencing token.
+	ErrLeaseLost = errors.New("lease lost")
 )
 
+// StoredRun is an owner-scoped snapshot with revision and lease fencing metadata.
+// Timestamps and lease deadlines use Unix seconds.
 type StoredRun struct {
 	RunID           string         `json:"run_id"`
 	OwnerID         string         `json:"owner_id"`
@@ -48,6 +53,8 @@ type SQLiteStore struct {
 
 func unixNow() float64 { return float64(time.Now().UnixNano()) / 1e9 }
 
+// NewSQLiteStore opens a single-connection disk store; Initialize sets up WAL and tables.
+// The caller owns the store and must close it.
 func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	if path == "" || path == ":memory:" {
 		return nil, errors.New("SQLiteStore requires a disk path")
@@ -74,7 +81,11 @@ func (s *SQLiteStore) now() float64 {
 	}
 	return unixNow()
 }
+
+// Close releases the database connection after its users have stopped.
 func (s *SQLiteStore) Close() error { return s.DB.Close() }
+
+// Initialize verifies WAL and prepares the supported existing schema.
 func (s *SQLiteStore) Initialize() error {
 	var mode string
 	if err := s.DB.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode); err != nil {
@@ -122,12 +133,17 @@ func (s *SQLiteStore) Initialize() error {
 	})
 }
 
-func (s *SQLiteStore) write(action func(*sql.Tx) error) error {
+func (s *SQLiteStore) write(action func(*sql.Tx) error) (resultErr error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		// A committed transaction is already closed; other rollback failures remain visible.
+		if rollbackErr := tx.Rollback(); !errors.Is(rollbackErr, sql.ErrTxDone) {
+			resultErr = errors.Join(resultErr, rollbackErr)
+		}
+	}()
 	if err = action(tx); err != nil {
 		return err
 	}
@@ -187,6 +203,8 @@ func (s *SQLiteStore) leased(tx *sql.Tx, runID, ownerID, token string) (StoredRu
 	}
 	return r, nil
 }
+
+// CreateRun atomically stores a new run and its initial state.
 func (s *SQLiteStore) CreateRun(ownerID, packID string, state map[string]any, runID string) (r StoredRun, err error) {
 	if runID == "" {
 		runID = NewID()
@@ -213,9 +231,13 @@ func (s *SQLiteStore) CreateRun(ownerID, packID string, state map[string]any, ru
 	})
 	return
 }
+
+// GetRun reads an independent run snapshot only for its owner.
 func (s *SQLiteStore) GetRun(runID, ownerID string) (StoredRun, error) {
 	return owned(s.DB, runID, ownerID)
 }
+
+// Claim acquires an expiring lease or returns ErrStoreConflict.
 func (s *SQLiteStore) Claim(runID, ownerID string, seconds float64) (r StoredRun, err error) {
 	if seconds <= 0 {
 		return r, errors.New("lease_seconds must be positive")
@@ -238,6 +260,8 @@ func (s *SQLiteStore) Claim(runID, ownerID string, seconds float64) (r StoredRun
 	})
 	return
 }
+
+// Renew extends the matching live lease or returns ErrLeaseLost.
 func (s *SQLiteStore) Renew(runID, ownerID, token string, seconds float64) error {
 	if seconds <= 0 {
 		return errors.New("lease_seconds must be positive")
@@ -251,6 +275,8 @@ func (s *SQLiteStore) Renew(runID, ownerID, token string, seconds float64) error
 		return e
 	})
 }
+
+// Release clears a matching lease without changing the run's business result.
 func (s *SQLiteStore) Release(runID, ownerID, token string) error {
 	return s.write(func(tx *sql.Tx) error {
 		if _, e := s.leased(tx, runID, ownerID, token); e != nil {
@@ -260,6 +286,8 @@ func (s *SQLiteStore) Release(runID, ownerID, token string) error {
 		return e
 	})
 }
+
+// RequestCancel persists local cancellation intent for an owner-scoped run.
 func (s *SQLiteStore) RequestCancel(runID, ownerID string) (r StoredRun, err error) {
 	err = s.write(func(tx *sql.Tx) error {
 		var e error
@@ -281,6 +309,8 @@ func (s *SQLiteStore) RequestCancel(runID, ownerID string) (r StoredRun, err err
 	})
 	return
 }
+
+// Checkpoint atomically saves state, evidence and events under the current lease token.
 func (s *SQLiteStore) Checkpoint(runID, ownerID, token string, state map[string]any, status string, wake *float64, invocations []map[string]any, artifacts map[string]map[string]any, events []map[string]any) (r StoredRun, err error) {
 	payload, err := CanonicalJSON(state)
 	if err != nil {
@@ -362,6 +392,8 @@ func (s *SQLiteStore) Checkpoint(runID, ownerID, token string, state map[string]
 	})
 	return
 }
+
+// GetInvocation reads persisted call evidence after checking run ownership.
 func (s *SQLiteStore) GetInvocation(runID, invocationID, ownerID string) (map[string]any, error) {
 	if _, e := s.GetRun(runID, ownerID); e != nil {
 		return nil, e
@@ -376,7 +408,9 @@ func (s *SQLiteStore) GetInvocation(runID, invocationID, ownerID string) (map[st
 	}
 	return decodeObject(payload)
 }
-func (s *SQLiteStore) ListInvocations(runID, ownerID string) ([]map[string]any, error) {
+
+// ListInvocations returns the owner's persisted invocation journals.
+func (s *SQLiteStore) ListInvocations(runID, ownerID string) (output []map[string]any, resultErr error) {
 	if _, e := s.GetRun(runID, ownerID); e != nil {
 		return nil, e
 	}
@@ -384,7 +418,7 @@ func (s *SQLiteStore) ListInvocations(runID, ownerID string) ([]map[string]any, 
 	if e != nil {
 		return nil, e
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	result := []map[string]any{}
 	for rows.Next() {
 		var payload string
@@ -399,6 +433,8 @@ func (s *SQLiteStore) ListInvocations(runID, ownerID string) ([]map[string]any, 
 	}
 	return result, rows.Err()
 }
+
+// GetArtifact reads retained evidence after checking run ownership.
 func (s *SQLiteStore) GetArtifact(runID, artifactID, ownerID string) (map[string]any, error) {
 	if _, e := s.GetRun(runID, ownerID); e != nil {
 		return nil, e
@@ -413,7 +449,9 @@ func (s *SQLiteStore) GetArtifact(runID, artifactID, ownerID string) (map[string
 	}
 	return decodeObject(payload)
 }
-func (s *SQLiteStore) ListEvents(runID, ownerID string, after, limit int) ([]map[string]any, error) {
+
+// ListEvents returns a bounded owner-scoped page after a sequence cursor.
+func (s *SQLiteStore) ListEvents(runID, ownerID string, after, limit int) (output []map[string]any, resultErr error) {
 	if _, e := s.GetRun(runID, ownerID); e != nil {
 		return nil, e
 	}
@@ -421,7 +459,7 @@ func (s *SQLiteStore) ListEvents(runID, ownerID string, after, limit int) ([]map
 	if e != nil {
 		return nil, e
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	result := []map[string]any{}
 	for rows.Next() {
 		var sequence int
@@ -438,12 +476,12 @@ func (s *SQLiteStore) ListEvents(runID, ownerID string, after, limit int) ([]map
 	}
 	return result, rows.Err()
 }
-func (s *SQLiteStore) queryRuns(query string, args ...any) ([]StoredRun, error) {
+func (s *SQLiteStore) queryRuns(query string, args ...any) (output []StoredRun, resultErr error) {
 	rows, e := s.DB.Query(query, args...)
 	if e != nil {
 		return nil, e
 	}
-	defer rows.Close()
+	defer func() { resultErr = errors.Join(resultErr, rows.Close()) }()
 	result := []StoredRun{}
 	for rows.Next() {
 		r, e := scanRun(rows)
@@ -454,10 +492,14 @@ func (s *SQLiteStore) queryRuns(query string, args ...any) ([]StoredRun, error) 
 	}
 	return result, rows.Err()
 }
+
+// DueRuns selects a bounded set of runs eligible for a worker claim.
 func (s *SQLiteStore) DueRuns(limit int) ([]StoredRun, error) {
 	now := s.now()
 	return s.queryRuns("SELECT "+runColumns+" FROM runs WHERE (lease_until IS NULL OR lease_until<=?) AND (status IN ('queued','running') OR (cancel_requested=1 AND status NOT IN ('completed','failed','cancelled')) OR (status='waiting' AND next_wake_at IS NOT NULL AND next_wake_at<=?)) ORDER BY created_at,run_id LIMIT ?", now, now, limit)
 }
+
+// ListRuns returns a bounded list of the owner's newest runs.
 func (s *SQLiteStore) ListRuns(ownerID string, limit int) ([]StoredRun, error) {
 	return s.queryRuns("SELECT "+runColumns+" FROM runs WHERE owner_id=? ORDER BY created_at DESC,run_id LIMIT ?", ownerID, limit)
 }

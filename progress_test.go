@@ -44,13 +44,19 @@ func TestStagnationDetectsInspectionCyclesAndSurvivesRestore(t *testing.T) {
 	})
 	p := &coreTestProvider{caps: map[string]CapabilityDescription{"a.read": {Name: "a.read"}, "b.read": {Name: "b.read"}}}
 	r := &AgentRuntime{Provider: p, Model: m, Grants: map[string]bool{"a.read": true, "b.read": true}, MaxStagnantRounds: 3}
-	state, _ := r.NewState("inspect", "")
+	state, callErr := r.NewState("inspect", "")
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	for i := 0; i < 5; i++ {
 		if err := r.Step(t.Context(), state, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	raw, _ := CanonicalJSON(state)
+	raw, callErr2 := CanonicalJSON(state)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	var restored RuntimeState
 	if err := json.Unmarshal(raw, &restored); err != nil {
 		t.Fatal(err)
@@ -93,12 +99,18 @@ func TestProgressProjectionIsBoundedAndDoesNotMutateState(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		state.Observations = append(state.Observations, Observation{CallRef: fmt.Sprintf("ref-%d", i), Capability: fmt.Sprintf("tool.%02d", i), Status: "succeeded"})
 	}
-	before, _ := CanonicalJSON(state)
+	before, callErr3 := CanonicalJSON(state)
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	view := runProgress(state, 8)
 	if len(view.Completed) != 8 || view.CompletedCount != 40 || view.OmittedItems != 32 {
 		t.Fatalf("%+v", view)
 	}
-	after, _ := CanonicalJSON(state)
+	after, callErr4 := CanonicalJSON(state)
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
 	if string(before) != string(after) {
 		t.Fatal("projection mutated audit state")
 	}

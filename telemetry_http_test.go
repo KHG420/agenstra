@@ -11,7 +11,10 @@ func TestTelemetryHTTPReadAndWebBinding(t *testing.T) {
 	f := newWebFixture(t, &hostModel{}, false)
 	run := f.run(t)
 	s := &HTTPServer{Host: f.h, Web: f.w, Deployment: f.d}
-	token, _ := f.w.MintSession("alice")
+	token, callErr := f.w.MintSession("alice")
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	get := func(id string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("GET", "/web/v1/runs/"+id+"/telemetry", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -31,9 +34,15 @@ func TestTelemetryHTTPReadAndWebBinding(t *testing.T) {
 	if out = get(unbound.RunID); out.Code != 404 {
 		t.Fatal(out.Code)
 	}
-	before, _ := f.h.Store.GetRun(run.RunID, "alice")
+	before, callErr2 := f.h.Store.GetRun(run.RunID, "alice")
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	_ = get(run.RunID)
-	after, _ := f.h.Store.GetRun(run.RunID, "alice")
+	after, callErr3 := f.h.Store.GetRun(run.RunID, "alice")
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	if before.Revision != after.Revision {
 		t.Fatal("read mutated run")
 	}
@@ -41,7 +50,9 @@ func TestTelemetryHTTPReadAndWebBinding(t *testing.T) {
 	out = httptest.NewRecorder()
 	s.runHTTP(out, request, "alice")
 	var view JSON
-	_ = json.Unmarshal(out.Body.Bytes(), &view)
+	if callErr4 := json.Unmarshal(out.Body.Bytes(), &view); callErr4 != nil {
+		t.Error(callErr4)
+	}
 	if view["telemetry"] == nil {
 		t.Fatal("run snapshot omitted telemetry")
 	}

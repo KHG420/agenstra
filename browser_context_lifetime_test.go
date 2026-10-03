@@ -19,7 +19,11 @@ func TestBrowserContextReferenceSurvivesAnUnchangedLivePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer provider.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(provider.Close)
 	result, err := provider.Invoke(t.Context(), "ui.get_context", JSON{}, &InvocationContext{OwnerID: "alice", RunID: run.RunID, InvocationID: NewID()})
 	if err != nil || result.ErrorCode != "" {
 		t.Fatal(result, err)
@@ -98,7 +102,11 @@ func TestBrowserResumeRefreshesRunBindingAndRequiresFreshObservation(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer provider.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(provider.Close)
 	invoke := func(name string, args JSON) CapabilityResult {
 		t.Helper()
 		result, err := provider.Invoke(t.Context(), name, args, &InvocationContext{OwnerID: "alice", RunID: run.RunID, InvocationID: NewID()})

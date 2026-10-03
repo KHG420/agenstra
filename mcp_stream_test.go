@@ -41,7 +41,9 @@ func TestMCPHTTPReadsCompleteSSEEventsForTheCurrentRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-				_, _ = w.Write([]byte(tc.stream))
+				if _, callErr := w.Write([]byte(tc.stream)); callErr != nil {
+					t.Error(callErr)
+				}
 			}))
 			defer server.Close()
 			transport := &httpMCP{url: server.URL, client: server.Client()}
@@ -75,7 +77,9 @@ func TestMCPHTTPJSONResponseRequiresOneCompleteBoundedValue(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(tc.payload))
+				if _, callErr2 := w.Write([]byte(tc.payload)); callErr2 != nil {
+					t.Error(callErr2)
+				}
 			}))
 			defer server.Close()
 			transport := &httpMCP{url: server.URL, client: server.Client()}
@@ -94,7 +98,9 @@ func TestMCPHTTPJSONResponseRequiresOneCompleteBoundedValue(t *testing.T) {
 func TestMCPHTTPReturnsOnCompleteEventWithoutWaitingForStreamClosure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capacity\":2400}}\n\n")
+		if _, callErr3 := fmt.Fprint(w, "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capacity\":2400}}\n\n"); callErr3 != nil {
+			t.Error(callErr3)
+		}
 		w.(http.Flusher).Flush()
 		<-r.Context().Done()
 	}))
@@ -113,7 +119,9 @@ func TestMCPHTTPRecognizesSSEMediaTypes(t *testing.T) {
 		t.Run(contentType, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", contentType)
-				_, _ = fmt.Fprint(w, "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capacity\":2400}}\n\n")
+				if _, callErr4 := fmt.Fprint(w, "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capacity\":2400}}\n\n"); callErr4 != nil {
+					t.Error(callErr4)
+				}
 			}))
 			defer server.Close()
 			transport := &httpMCP{url: server.URL, client: server.Client()}
@@ -150,16 +158,22 @@ func TestMCPPackConnectsAndInvokesUsingMultilineSSE(t *testing.T) {
 			t.Errorf("unexpected method: %v", request["method"])
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}\n\n")
+		if _, callErr5 := fmt.Fprint(w, "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}\n\n"); callErr5 != nil {
+			t.Error(callErr5)
+		}
 		raw, err := json.MarshalIndent(JSON{"jsonrpc": "2.0", "id": request["id"], "result": result}, "", "  ")
 		if err != nil {
 			t.Error(err)
 			return
 		}
 		for _, line := range strings.Split(string(raw), "\n") {
-			_, _ = fmt.Fprintf(w, "data: %s\n", line)
+			if _, callErr6 := fmt.Fprintf(w, "data: %s\n", line); callErr6 != nil {
+				t.Error(callErr6)
+			}
 		}
-		_, _ = fmt.Fprint(w, "\n")
+		if _, callErr7 := fmt.Fprint(w, "\n"); callErr7 != nil {
+			t.Error(callErr7)
+		}
 	}))
 	defer server.Close()
 	manifest := JSON{"schema": "agenstra.mcp-pack.v1", "name": "records", "version": "1", "guidance": "Read records", "source": JSON{"transport": "streamable_http", "url_env": "MCP_URL"}, "tools": []any{JSON{"name": tool["name"], "effect": "read", "contract_sha256": MCPContractDigest(tool)}}}
@@ -167,7 +181,11 @@ func TestMCPPackConnectsAndInvokesUsingMultilineSSE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid streaming server cannot be connected: %v", err)
 	}
-	defer pack.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(pack.Close)
 	result, err := pack.Invoke(t.Context(), "record.read", JSON{}, nil)
 	if err != nil || result.ErrorCode != "" || result.Data["id"] != "R1" {
 		t.Fatalf("streaming business result lost: %+v %v", result, err)
@@ -207,8 +225,13 @@ func testMCPInvalidWriteReceipt(t *testing.T, responseCase string) {
 			switch responseCase {
 			case "incomplete-sse":
 				w.Header().Set("Content-Type", "text/event-stream")
-				raw, _ := json.Marshal(reply)
-				_, _ = fmt.Fprintf(w, "data: %s\ndata: incomplete\n\n", raw)
+				raw, callErr8 := json.Marshal(reply)
+				if callErr8 != nil {
+					t.Error(callErr8)
+				}
+				if _, callErr9 := fmt.Fprintf(w, "data: %s\ndata: incomplete\n\n", raw); callErr9 != nil {
+					t.Error(callErr9)
+				}
 				return
 			case "missing-version":
 				delete(reply, "jsonrpc")
@@ -220,13 +243,17 @@ func testMCPInvalidWriteReceipt(t *testing.T, responseCase string) {
 				reply["method"] = "ping"
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(reply)
+			if callErr10 := json.NewEncoder(w).Encode(reply); callErr10 != nil {
+				t.Error(callErr10)
+			}
 			return
 		default:
 			t.Errorf("unexpected method: %v", request["method"])
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(JSON{"jsonrpc": "2.0", "id": request["id"], "result": result})
+		if callErr11 := json.NewEncoder(w).Encode(JSON{"jsonrpc": "2.0", "id": request["id"], "result": result}); callErr11 != nil {
+			t.Error(callErr11)
+		}
 	}))
 	defer server.Close()
 	manifest := JSON{"schema": "agenstra.mcp-pack.v1", "name": "records", "version": "1", "guidance": "Create records", "source": JSON{"transport": "streamable_http", "url_env": "MCP_URL"}, "tools": []any{JSON{"name": tool["name"], "effect": "write", "contract_sha256": MCPContractDigest(tool)}}}
@@ -234,7 +261,11 @@ func testMCPInvalidWriteReceipt(t *testing.T, responseCase string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pack.Close()
+	defer func(close func() error) {
+		if err := close(); err != nil {
+			t.Error(err)
+		}
+	}(pack.Close)
 	model := &hostModel{decisions: []Decision{{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []ToolCall{{CallRef: "create-1", Capability: "record.create", Arguments: JSON{}, Reason: "Create the requested record"}}}}}
 	host := NewAgentHost(testStore(t), func(context.Context, string, string) (CapabilityProvider, error) { return pack, nil }, model, func(context.Context, string, string) (ExecutionPolicy, error) {
 		return ExecutionPolicy{GrantedCapabilities: map[string]bool{"record.create": true}, AllowModelData: true}, nil

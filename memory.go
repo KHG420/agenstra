@@ -27,6 +27,8 @@ type Memory struct {
 	CreatedAt     float64 `json:"created_at"`
 	UpdatedAt     float64 `json:"updated_at"`
 }
+
+// MemoryView is a bounded active preference projection, never an authorization source.
 type MemoryView struct {
 	PackID   string `json:"pack_id,omitempty"`
 	ID       string `json:"id"`
@@ -36,6 +38,8 @@ type MemoryView struct {
 	Scope    string `json:"scope"`
 	Revision int    `json:"revision"`
 }
+
+// MemoryUpdate supplies a host edit with an optional expected revision.
 type MemoryUpdate struct {
 	Scope    string `json:"scope"`
 	Key      string `json:"key"`
@@ -43,6 +47,8 @@ type MemoryUpdate struct {
 	Kind     string `json:"kind"`
 	Revision int    `json:"revision"`
 }
+
+// MemoryEvidence records an independent input supporting a learned preference.
 type MemoryEvidence struct {
 	SourceID  string  `json:"source_id"`
 	Quote     string  `json:"quote"`
@@ -50,10 +56,14 @@ type MemoryEvidence struct {
 	Mode      string  `json:"mode"`
 	CreatedAt float64 `json:"created_at"`
 }
+
+// MemoryHistory contains retained revisions and supporting evidence for an owner-scoped entry.
 type MemoryHistory struct {
 	Revisions []Memory         `json:"revisions"`
 	Evidence  []MemoryEvidence `json:"evidence"`
 }
+
+// MemoryProposal is untrusted extracted input that the host validates before learning.
 type MemoryProposal struct {
 	Scope string `json:"scope"`
 	Key   string `json:"key"`
@@ -62,6 +72,8 @@ type MemoryProposal struct {
 	Mode  string `json:"mode"`
 	Quote string `json:"quote"`
 }
+
+// MemoryExtractionRequest contains the current input and bounded existing preferences.
 type MemoryExtractionRequest struct {
 	ContextWindowTokens   int64        `json:"-"`
 	MaxInputTokens        int64        `json:"-"`
@@ -116,6 +128,8 @@ func validateProposals(text string, proposals []MemoryProposal) error {
 	}
 	return nil
 }
+
+// ListMemories returns a bounded owner- and pack-scoped page after access checks.
 func (h *AgentHost) ListMemories(ctx context.Context, owner, pack string, limit, offset int) ([]Memory, error) {
 	if _, err := h.policy(ctx, owner, pack, false); err != nil {
 		return nil, err
@@ -125,12 +139,16 @@ func (h *AgentHost) ListMemories(ctx context.Context, owner, pack string, limit,
 	}
 	return h.Store.listMemories(owner, pack, limit, offset)
 }
+
+// GetMemory reads an entry only within the owner's allowed pack scope.
 func (h *AgentHost) GetMemory(ctx context.Context, owner, pack, id string) (Memory, error) {
 	if _, err := h.policy(ctx, owner, pack, false); err != nil {
 		return Memory{}, err
 	}
 	return h.Store.getMemory(owner, pack, id)
 }
+
+// SetMemory validates and saves a host-supplied preference under current access and revision.
 func (h *AgentHost) SetMemory(ctx context.Context, owner, pack string, update MemoryUpdate) (Memory, error) {
 	if _, err := h.policy(ctx, owner, pack, false); err != nil {
 		return Memory{}, err
@@ -143,6 +161,8 @@ func (h *AgentHost) SetMemory(ctx context.Context, owner, pack string, update Me
 	}
 	return h.Store.setMemory(owner, pack, update)
 }
+
+// DeleteMemory forgets an entry under current access and expected revision.
 func (h *AgentHost) DeleteMemory(ctx context.Context, owner, pack, id string, revision int) (Memory, error) {
 	if _, err := h.GetMemory(ctx, owner, pack, id); err != nil {
 		return Memory{}, err
@@ -152,6 +172,8 @@ func (h *AgentHost) DeleteMemory(ctx context.Context, owner, pack, id string, re
 	}
 	return h.Store.forgetMemory(owner, pack, id, revision)
 }
+
+// MemoryHistory reads revisions and evidence after verifying current scope and ownership.
 func (h *AgentHost) MemoryHistory(ctx context.Context, owner, pack, id string) (MemoryHistory, error) {
 	if _, err := h.GetMemory(ctx, owner, pack, id); err != nil {
 		return MemoryHistory{}, err
@@ -185,7 +207,10 @@ func setMemoryInput(envelope map[string]any, id, text string) {
 	envelope["memory_inputs"] = []memoryInput{{ID: id, Text: text}}
 }
 func (h *AgentHost) prepareMemories(ctx context.Context, run StoredRun) (StoredRun, error) {
-	raw, _ := CanonicalJSON(run.State["memory_inputs"])
+	raw, err := CanonicalJSON(run.State["memory_inputs"])
+	if err != nil {
+		return run, hostError("run_state_invalid")
+	}
 	inputs := []memoryInput{}
 	if run.State["memory_inputs"] != nil {
 		if err := strictUnmarshal(raw, &inputs); err != nil {

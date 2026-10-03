@@ -32,7 +32,9 @@ func TestIdentityPolicyRequiresCompleteBoundedJSON(t *testing.T) {
 					t.Error("identity authority did not receive the configured token")
 				}
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(tc.payload))
+				if _, callErr := w.Write([]byte(tc.payload)); callErr != nil {
+					t.Error(callErr)
+				}
 			}))
 			defer authority.Close()
 			identity := &IdentityConfig{URLEnv: "IDENTITY_URL", TokenEnv: "IDENTITY_TOKEN", SubjectPath: tc.subjectPath, CapabilitiesPath: []any{"capabilities"}}

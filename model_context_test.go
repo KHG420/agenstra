@@ -14,14 +14,21 @@ func TestModelContextWindowReservesOutputAndCountsSerializedInput(t *testing.T) 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		var payload JSON
-		_ = json.NewDecoder(r.Body).Decode(&payload)
+		if callErr := json.NewDecoder(r.Body).Decode(&payload); callErr != nil {
+			t.Error(callErr)
+		}
 		if payload["max_tokens"] != float64(128) {
 			t.Fatal(payload)
 		}
-		_ = json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"message": JSON{"content": `{"kind":"request_input","field":"confirm","prompt":"confirm"}`}}}})
+		if callErr2 := json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"message": JSON{"content": `{"kind":"request_input","field":"confirm","prompt":"confirm"}`}}}}); callErr2 != nil {
+			t.Error(callErr2)
+		}
 	}))
 	defer server.Close()
-	m, _ := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	m, callErr3 := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	m.CountInputTokens = func(_ string, raw []byte) (int64, error) {
 		var payload JSON
 		if json.Unmarshal(raw, &payload) != nil || payload["messages"] == nil {
@@ -44,8 +51,14 @@ func TestModelContextWindowReservesOutputAndCountsSerializedInput(t *testing.T) 
 	if requests != 1 || c.TokenMeasurementSource != "tokenizer" || c.InputTokens == nil || *c.InputTokens > 2308 || *c.EffectiveInputTokenLimit != 2308 || *c.ReservedOutputTokens != 128 || c.TokensRemaining == nil {
 		t.Fatalf("%+v requests=%d", c, requests)
 	}
-	state, _ = r.NewState(strings.Repeat("required", 3000), "")
-	_ = r.Step(t.Context(), state, nil)
+	var callErr4 error
+	state, callErr4 = r.NewState(strings.Repeat("required", 3000), "")
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
+	if callErr5 := r.Step(t.Context(), state, nil); callErr5 != nil {
+		t.Error(callErr5)
+	}
 	if requests != 1 || state.Status != "failed" || !state.ContextTelemetry.OverLimit {
 		t.Fatalf("%+v requests=%d", state, requests)
 	}
@@ -54,7 +67,9 @@ func TestModelContextWindowReservesOutputAndCountsSerializedInput(t *testing.T) 
 func TestUnknownModelWindowIsNotReportedAsZero(t *testing.T) {
 	r, state, _ := contextBudgetRuntime(t, 9000)
 	r.Model = &coreTestModel{decisions: []Decision{{Kind: "request_input", Field: "x", Prompt: "x"}}}
-	_ = r.Step(t.Context(), state, nil)
+	if callErr6 := r.Step(t.Context(), state, nil); callErr6 != nil {
+		t.Error(callErr6)
+	}
 	c := state.ContextTelemetry
 	if c.ModelContextWindowTokens != nil || c.EffectiveInputTokenLimit != nil || c.TokensRemaining != nil || c.InputTokens == nil {
 		t.Fatalf("%+v", c)

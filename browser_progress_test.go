@@ -23,11 +23,17 @@ func appendBrowserProgressResult(state *RuntimeState, action, ref string, result
 
 func TestBrowserProgressCountsActionsWithoutDuplicatePolls(t *testing.T) {
 	r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{}}}
-	state, _ := r.NewState("Read six independent results", "")
+	state, callErr := r.NewState("Read six independent results", "")
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	for i := 0; i < 6; i++ {
 		appendBrowserProgressResult(state, fmt.Sprintf("ui.read_%d", i), fmt.Sprintf("read-%d", i), JSON{"count": i})
 	}
-	before, _ := CanonicalJSON(state)
+	before, callErr2 := CanonicalJSON(state)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	packet := r.Context(state)
 	if len(packet.Observations) != 6 || packet.Progress.CompletedCount != 6 || len(packet.Progress.Completed) != 6 {
 		t.Fatalf("polls duplicated action evidence: observations=%d progress=%+v", len(packet.Observations), packet.Progress)
@@ -37,7 +43,10 @@ func TestBrowserProgressCountsActionsWithoutDuplicatePolls(t *testing.T) {
 			t.Fatalf("expected original action with current result: %+v", observation)
 		}
 	}
-	after, _ := CanonicalJSON(state)
+	after, callErr3 := CanonicalJSON(state)
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	if string(before) != string(after) {
 		t.Fatal("projection changed the audit trail")
 	}
@@ -58,7 +67,10 @@ func TestBrowserReadReceiptsDoNotDisguiseStagnation(t *testing.T) {
 				}
 				return Decision{Kind: "inspect_capability", Name: cap.Name}, nil
 			})
-			state, _ := r.NewState("Read current activity", "")
+			state, callErr4 := r.NewState("Read current activity", "")
+			if callErr4 != nil {
+				t.Error(callErr4)
+			}
 			for i := 0; i < 8 && state.Status != "failed"; i++ {
 				latest = appendBrowserProgressResult(state, cap.Name, fmt.Sprintf("read-%d", i), JSON{"count": 156})
 				if err := r.Step(t.Context(), state, nil); err != nil {
@@ -84,7 +96,10 @@ func TestBrowserProgressRecognizesBusinessChangesAndPreservesWrites(t *testing.T
 	if state.Progress.NoProgressRounds != 1 {
 		t.Fatal("identical read counted as progress")
 	}
-	before, _ := CanonicalJSON(state)
+	before, callErr5 := CanonicalJSON(state)
+	if callErr5 != nil {
+		t.Error(callErr5)
+	}
 	var restored RuntimeState
 	decoder := json.NewDecoder(bytes.NewReader(before))
 	decoder.UseNumber()

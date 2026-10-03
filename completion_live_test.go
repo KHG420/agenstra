@@ -49,7 +49,10 @@ func TestLiveWriteCompletionConsistencyReplay(t *testing.T) {
 			p := &hostProvider{caps: map[string]CapabilityDescription{"ui.start_round": {Name: "ui.start_round", Effect: "write", ApprovalRequired: true}}}
 			proposal := fixture.Proposal
 			r := &AgentRuntime{Provider: liveEvaluationProvider{p}, Model: &completionProposalModel{HTTPJSONDecisionModel: model, proposal: &proposal}, MaxModelRounds: 4}
-			s, _ := r.NewState(fixture.Instruction, fixture.RunID)
+			s, callErr := r.NewState(fixture.Instruction, fixture.RunID)
+			if callErr != nil {
+				t.Error(callErr)
+			}
 			s.Facts, s.Observations, s.ModelObservations, s.InvocationReceipts = fixture.Facts, fixture.Observations, fixture.ModelObservations, fixture.InvocationReceipts
 			started := time.Now()
 			if err = r.Step(t.Context(), s, nil); err != nil || s.Status != "completed" || s.AnswerMarkdown == proposal.AnswerMarkdown || p.calls != 0 || len(s.ModelCalls) != 2 || s.ModelCalls[1].Purpose != "completion_review" {
@@ -90,7 +93,10 @@ func TestLiveAgentCompletionEvaluation(t *testing.T) {
 			}
 			r := &AgentRuntime{Provider: liveEvaluationProvider{p}, Model: model, Grants: map[string]bool{"records.get": true}, MaxModelRounds: 8}
 			if tc.needsTool {
-				evidence, _ := RequireFactValues(FactRequirement{Capability: "records.get", Path: []any{"data", "count"}, Value: 42})
+				evidence, callErr2 := RequireFactValues(FactRequirement{Capability: "records.get", Path: []any{"data", "count"}, Value: 42})
+				if callErr2 != nil {
+					t.Error(callErr2)
+				}
 				r.CompletionValidator = func(ctx context.Context, c CompletionContext) error {
 					if err := evidence(ctx, c); err != nil {
 						return err

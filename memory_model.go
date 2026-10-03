@@ -37,11 +37,13 @@ func memoryExtractionInput(request *MemoryExtractionRequest) ([]byte, error) {
 	}
 }
 
+// ExtractMemories validates proposals derived from the supplied user input.
 func (m *HTTPJSONDecisionModel) ExtractMemories(ctx context.Context, request MemoryExtractionRequest) ([]MemoryProposal, error) {
 	proposals, _, err := m.ExtractMemoriesMeasured(ctx, request)
 	return proposals, err
 }
 
+// ExtractMemoriesMeasured retains model usage even when extraction fails.
 func (m *HTTPJSONDecisionModel) ExtractMemoriesMeasured(ctx context.Context, request MemoryExtractionRequest) (proposals []MemoryProposal, metrics ModelCallMetrics, resultErr error) {
 	started := time.Now()
 	ctx = context.WithValue(ctx, modelMetricsKey{}, &metrics)
@@ -49,7 +51,7 @@ func (m *HTTPJSONDecisionModel) ExtractMemoriesMeasured(ctx context.Context, req
 	defer func() {
 		metrics.ElapsedMilliseconds = time.Since(started).Milliseconds()
 		if resultErr != nil {
-			metrics.ErrorCode = strptr(ErrorCode(resultErr))
+			metrics.ErrorCode = strptr(modelErrorCode(resultErr))
 		}
 	}()
 	input, err := memoryExtractionInput(&request)

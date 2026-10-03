@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,6 +21,7 @@ type HostAuthConfig struct {
 	OwnerPath []string `json:"owner_path,omitempty"`
 }
 
+// Validate checks the authentication endpoint reference and owner path bounds.
 func (c HostAuthConfig) Validate() error {
 	if !deploymentEnvName.MatchString(c.URLEnv) || len(c.OwnerPath) > 16 {
 		return fmt.Errorf("invalid host_auth")
@@ -51,6 +53,8 @@ func validHostOwner(owner string) bool {
 	return true
 }
 
+// AuthenticateContext validates static or host-delegated tokens with request cancellation.
+// Authentication selects an owner; capability grants are resolved separately.
 func (d *Deployment) AuthenticateContext(ctx context.Context, token string) (string, error) {
 	if token == "" {
 		return "", deploymentError("unauthorized")
@@ -105,7 +109,11 @@ func (d *Deployment) authenticateHost(ctx context.Context, token string) (string
 	if err != nil {
 		return deny()
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			log.Print("HTTP response cleanup failed")
+		}
+	}()
 	if response.StatusCode != http.StatusOK {
 		return deny()
 	}

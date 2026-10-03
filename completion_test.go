@@ -34,7 +34,10 @@ func TestCompletionRejectsUnsupportedAnswerThenAllowsCorrection(t *testing.T) {
 		}
 		return nil
 	}}
-	s, _ := r.NewState("Report count", "")
+	s, callErr := r.NewState("Report count", "")
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	s.Facts = []Fact{{FactID: NewID(), SourceCapability: "records.get", Value: JSON{"data": JSON{"count": 1}}}}
 	if err = r.Step(t.Context(), s, nil); err != nil {
 		t.Fatal(err)
@@ -93,11 +96,17 @@ func TestHostCompletionValidatorUsesCompleteEvidence(t *testing.T) {
 
 func TestCompletionInternalErrorsDoNotLeak(t *testing.T) {
 	r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{}}, Model: &coreTestModel{decisions: []Decision{{Kind: "final", AnswerMarkdown: "hello"}}}, CompletionValidator: func(context.Context, CompletionContext) error { return errors.New("private connection details") }}
-	s, _ := r.NewState("hello", "")
+	s, callErr2 := r.NewState("hello", "")
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	if err := r.Step(t.Context(), s, nil); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := CanonicalJSON(s.ModelObservations)
+	raw, callErr3 := CanonicalJSON(s.ModelObservations)
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
 	if strings.Contains(string(raw), "private") || s.Status == "completed" {
 		t.Fatal(string(raw))
 	}

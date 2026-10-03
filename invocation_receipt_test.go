@@ -88,7 +88,10 @@ func TestCancelledAsyncOperationCanBeVerifiedAndIdentityCannotChange(t *testing.
 		t.Fatal(err)
 	}
 	run, err = h.Drive(t.Context(), run.RunID, "alice")
-	state, _ := h.restore(run)
+	state, callErr := h.restore(run)
+	if callErr != nil {
+		t.Error(callErr)
+	}
 	item := state.Pending[0]
 	if err != nil || item.Status != "unknown" || item.Receipt.Status != "accepted" || item.Receipt.OperationID != "job-1" {
 		t.Fatal(state, err)
@@ -106,7 +109,11 @@ func TestCancelledAsyncOperationCanBeVerifiedAndIdentityCannotChange(t *testing.
 	if err != nil || run.Status != "cancelled" || p.calls != 1 {
 		t.Fatal(run.Status, err, p.calls)
 	}
-	state, _ = h.restore(run)
+	var callErr2 error
+	state, callErr2 = h.restore(run)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
 	if state.InvocationReceipts[0].OperationStatus != "succeeded" || !state.InvocationReceipts[0].Reconciled {
 		t.Fatal(state.InvocationReceipts)
 	}
@@ -191,11 +198,17 @@ func TestPollValidatesOperationBeforeReplacingEvidence(t *testing.T) {
 				if err != nil || run.Status != "waiting" {
 					t.Fatal(run.Status, err)
 				}
-				before, _ := h.restore(run)
+				before, callErr3 := h.restore(run)
+				if callErr3 != nil {
+					t.Error(callErr3)
+				}
 				original := before.Pending[0]
 				*now += 2
 				run, err = h.Drive(t.Context(), run.RunID, "alice")
-				state, _ := h.restore(run)
+				state, callErr4 := h.restore(run)
+				if callErr4 != nil {
+					t.Error(callErr4)
+				}
 				item := state.Pending[0]
 				if err != nil || run.Status != "needs_reconciliation" || item.Status != "unknown" {
 					t.Fatal(run.Status, item, err)
@@ -234,7 +247,10 @@ func TestTerminalAsyncRunCanBeVerifiedAfterBudgetOrDeadline(t *testing.T) {
 			if err != nil || run.Status != "failed" {
 				t.Fatal(run.Status, err)
 			}
-			state, _ := h.restore(run)
+			state, callErr5 := h.restore(run)
+			if callErr5 != nil {
+				t.Error(callErr5)
+			}
 			item, calls := state.Pending[0], p.calls
 			h.Reconciler = func(context.Context, ReconciliationContext) (CapabilityResult, error) {
 				return CapabilityResult{Data: JSON{"id": "private-job-token", "status": "succeeded"}}, nil
@@ -243,7 +259,11 @@ func TestTerminalAsyncRunCanBeVerifiedAfterBudgetOrDeadline(t *testing.T) {
 			if err != nil || run.Status != "failed" || p.calls != calls {
 				t.Fatal("terminal run must be verified without resuming", run.Status, err, p.calls)
 			}
-			state, _ = h.restore(run)
+			var callErr6 error
+			state, callErr6 = h.restore(run)
+			if callErr6 != nil {
+				t.Error(callErr6)
+			}
 			if state.InvocationReceipts[0].Status != "succeeded" || !state.InvocationReceipts[0].Reconciled {
 				t.Fatal(state.InvocationReceipts)
 			}
@@ -277,14 +297,20 @@ func TestAutomaticPollArgumentsRespectModelProjection(t *testing.T) {
 	if err != nil || run.Status != "completed" {
 		t.Fatal(run.Status, err)
 	}
-	state, _ := h.restore(run)
+	state, callErr7 := h.restore(run)
+	if callErr7 != nil {
+		t.Error(callErr7)
+	}
 	lastAudit := state.Observations[len(state.Observations)-1]
 	lastModel := state.ModelObservations[len(state.ModelObservations)-1]
 	if lastAudit.Arguments["id"] != "private-job-token" || !lastModel.ArgumentsOmitted || len(lastModel.Arguments) != 0 {
 		t.Fatal("audit/model observation separation lost", lastAudit, lastModel)
 	}
 	artifact, err := h.Store.GetArtifact(run.RunID, state.Facts[0].FactID, "alice")
-	raw, _ := CanonicalJSON(artifact)
+	raw, callErr8 := CanonicalJSON(artifact)
+	if callErr8 != nil {
+		t.Error(callErr8)
+	}
 	if err != nil || !strings.Contains(string(raw), "private-job-token") {
 		t.Fatal("full business artifact was not retained", err)
 	}

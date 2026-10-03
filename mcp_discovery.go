@@ -2,6 +2,7 @@ package agenstra
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"time"
 )
@@ -22,7 +23,7 @@ type MCPDiscoveredTool struct {
 // DiscoverMCPTools initializes a connection, lists its tools and closes it. It
 // never calls tools/call. Selection and confirmation of business effects remain
 // explicit; the initial exposure requires approval and disallows replay.
-func DiscoverMCPTools(ctx context.Context, source MCPSource, environment map[string]string) ([]MCPDiscoveredTool, error) {
+func DiscoverMCPTools(ctx context.Context, source MCPSource, environment map[string]string) (result []MCPDiscoveredTool, resultErr error) {
 	seconds := source.TimeoutSeconds
 	if seconds == 0 {
 		seconds = 60
@@ -36,7 +37,7 @@ func DiscoverMCPTools(ctx context.Context, source MCPSource, environment map[str
 	if err != nil {
 		return nil, err
 	}
-	defer transport.Close()
+	defer func() { resultErr = errors.Join(resultErr, transport.Close()) }()
 	tools := make([]MCPDiscoveredTool, 0, len(remote))
 	for name, raw := range remote {
 		input, _ := raw["inputSchema"].(map[string]any)

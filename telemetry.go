@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 )
 
+// CounterBudget reports use and remaining allowance for a bounded execution counter.
 type CounterBudget struct {
 	Used      int64 `json:"used"`
 	Limit     int64 `json:"limit"`
 	Remaining int64 `json:"remaining"`
 }
+
+// TokenBudget reports token use while retaining unknown provider usage as unknown.
 type TokenBudget struct {
 	Limit           *int64 `json:"limit"`
 	Remaining       *int64 `json:"remaining"`
@@ -19,6 +22,8 @@ type TokenBudget struct {
 	UnknownTokens   int64  `json:"unknown_tokens"`
 	ChargedTokens   int64  `json:"charged_tokens"`
 }
+
+// RunBudget combines the run's frozen limits with measured execution usage.
 type RunBudget struct {
 	ModelRounds      CounterBudget         `json:"model_rounds"`
 	ToolCalls        CounterBudget         `json:"tool_calls"`
@@ -29,6 +34,8 @@ type RunBudget struct {
 	Deadline         float64               `json:"deadline"`
 	SecondsRemaining float64               `json:"seconds_remaining"`
 }
+
+// RunTelemetry is an owner-scoped evidence view of configuration, budgets and context projection.
 type RunTelemetry struct {
 	Execution       ExecutionTelemetry  `json:"execution"`
 	HostOperations  HostOperationLimits `json:"host_operations"`

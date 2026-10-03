@@ -7,11 +7,14 @@ linters:
   default: none
   enable:
     - bodyclose
+    - errcheck
     - govet
     - ineffassign
     - nolintlint
     - staticcheck
   settings:
+    errcheck:
+      check-blank: true
     staticcheck:
       # Correctness checks; stylistic rewrites require a separate justification.
       checks: ["SA*"]
