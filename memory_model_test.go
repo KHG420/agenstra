@@ -138,15 +138,29 @@ func TestMemoryHostSkipsOversizedLearningAndContinuesBusinessRun(t *testing.T) {
 	// business context fits while the extraction prompt exceeds the limit.
 	h := testHost(t, testStore(t), &hostProvider{caps: map[string]CapabilityDescription{}}, model.hostModel)
 	h.Model = model
-	// Allow the business prompt, but keep the extraction prompt over budget.
-	h.Settings.MaxContextCharacters = utf8.RuneCountInString(memoryExtractionPrompt) - 1
-	run := memoryRun(t, h, "alice", "records", "请用中文写报告", "budget")
+	// Independently size the source and business request. Fixed protocol guidance
+	// must not determine which of these two inputs exceeds the shared budget.
+	runtime := &AgentRuntime{Provider: &hostProvider{caps: map[string]CapabilityDescription{}}}
+	h.Settings.MaxContextCharacters = utf8.RuneCountInString(runtime.systemPrompt()) + 1000
+	create := func() StoredRun {
+		t.Helper()
+		run, err := h.createWithMemoryInput(t.Context(), "alice", "records", "请用中文写报告", "budget", strings.Repeat("偏好", h.Settings.MaxContextCharacters))
+		if err != nil {
+			t.Fatal(err)
+		}
+		run, err = h.Drive(t.Context(), run.RunID, "alice")
+		if err != nil || run.Status != "completed" {
+			t.Fatalf("run: %s %v", run.Status, err)
+		}
+		return run
+	}
+	run := create()
 	errors, ok := run.State["memory_errors"].([]any)
 	if !ok || len(errors) != 1 || errors[0].(map[string]any)["code"] != "memory_extraction_too_large" || len(model.inputs) != 0 {
 		t.Fatal("learning budget failure not exposed", run.State)
 	}
 	// No independent source arrives on resume: failed learning is idempotent too.
-	memoryRun(t, h, "alice", "records", "请用中文写报告", "budget")
+	create()
 }
 
 func TestMemoryLostLeaseCannotCommitExtraction(t *testing.T) {

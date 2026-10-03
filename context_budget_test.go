@@ -34,7 +34,8 @@ func contextBudgetRuntime(t *testing.T, budget int) (*AgentRuntime, *RuntimeStat
 	t.Helper()
 	provider := &contextBudgetProvider{coreTestProvider: coreTestProvider{caps: map[string]CapabilityDescription{}}, skills: map[string]Skill{}}
 	// Preserve the packet allowance while counting the runtime's fixed guidance.
-	runtime := &AgentRuntime{Provider: provider, Grants: map[string]bool{}, MaxContextCharacters: budget + utf8.RuneCountInString(conversationGuidance) + 1}
+	runtime := &AgentRuntime{Provider: provider, Grants: map[string]bool{}}
+	runtime.MaxContextCharacters = budget + utf8.RuneCountInString(runtime.systemPrompt())
 	state, err := runtime.NewState("Read records", "")
 	if err != nil {
 		t.Fatal(err)
@@ -290,8 +291,9 @@ func TestContextBudgetMultiRoundInspectAndForwardCompleteValue(t *testing.T) {
 		return CapabilityResult{Data: JSON{"received_characters": len(received)}}, nil
 	}
 	rounds := 0
+	budget := 6500 + utf8.RuneCountInString(decisionProtocolPrompt)
 	model := contextBudgetModel(func(_ context.Context, packet ContextPacket, prompt string) (Decision, error) {
-		assertContextBudget(t, packet, prompt, 6500)
+		assertContextBudget(t, packet, prompt, budget)
 		rounds++
 		switch rounds {
 		case 1:
@@ -328,7 +330,7 @@ func TestContextBudgetMultiRoundInspectAndForwardCompleteValue(t *testing.T) {
 			return Decision{}, nil
 		}
 	})
-	runtime := &AgentRuntime{Provider: provider, Model: model, Grants: map[string]bool{"record.read": true, "record.forward": true}, MaxContextCharacters: 6500}
+	runtime := &AgentRuntime{Provider: provider, Model: model, Grants: map[string]bool{"record.read": true, "record.forward": true}, MaxContextCharacters: budget}
 	result, err := runtime.Run(t.Context(), "Read records and forward the complete body of the first record")
 	if err != nil || result.Status != "completed" || rounds != 4 || len(result.Facts) != 5 || received != strings.Repeat("x", 9000) || result.Observations[4].Arguments["payload"] != received {
 		t.Fatal("multi-round run lost complete evidence", result, err)

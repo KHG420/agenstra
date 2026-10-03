@@ -25,6 +25,8 @@ const conversationGuidance = "Respond to the user's intent in this turn; complet
 
 // Decision protocol additions belong to the runtime. Changing AgentPrompt
 // would change the persisted fingerprint of every pack that embeds it.
-const decisionProtocolPrompt = "request_input may include input_schema for string, enum or date (YYYY-MM-DD). final may include result_refs [{fact_id,path,label?,entity_type?}]; cite each Fact in fact_ids. The host resolves IDs only from available, model-visible Fact fields. Never invent IDs or inspect/reference fields hidden by model_output."
+const decisionProtocolPrompt = `request_input.input_schema is optional: {"type":"string"} for text without enum, {"type":"date"} for YYYY-MM-DD, or the enum form below. This is a single-text-answer contract, not general JSON Schema. Omit input_schema for unrestricted or combined answers.
+Input enum schema: {"type":"enum","enum":["first","second"]}
+final may include result_refs [{fact_id,path,label?,entity_type?}]; cite each Fact in fact_ids. The host resolves IDs only from available, model-visible Fact fields. Never invent IDs or inspect/reference fields hidden by model_output.`
 
 const capabilitySearchPrompt = "When runtime_features includes capability_search, the visible catalog may be incomplete. Use a standalone search_capabilities decision with a short query to find authorized capabilities by name, description or input field, then inspect the selected schema if needed. Search never calls a business provider. Without that feature, search_capabilities is unavailable."
