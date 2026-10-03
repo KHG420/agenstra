@@ -654,8 +654,8 @@ func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any,
 	if len(endpoint.ResponseSchemas) > 0 && p.statuses[name][status] == nil {
 		return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
 	}
-	raw, e := io.ReadAll(io.LimitReader(response.Body, 16<<20))
-	if e != nil {
+	raw, e := io.ReadAll(io.LimitReader(response.Body, (16<<20)+1))
+	if e != nil || len(raw) > 16<<20 {
 		return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
 	}
 	var data any
@@ -664,7 +664,7 @@ func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any,
 	} else {
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.UseNumber()
-		if dec.Decode(&data) != nil {
+		if !json.Valid(raw) || dec.Decode(&data) != nil {
 			return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
 		}
 	}
@@ -968,21 +968,21 @@ func (p *LegacyRestPack) Invoke(ctx context.Context, name string, args map[strin
 			}
 			return CapabilityResult{ErrorCode: "upstream_unavailable"}, nil
 		}
-		raw, readErr := io.ReadAll(io.LimitReader(response.Body, 16<<20))
+		raw, readErr := io.ReadAll(io.LimitReader(response.Body, (16<<20)+1))
 		response.Body.Close()
-		if response.StatusCode >= 400 {
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
 			if attempt+1 < binding.Definition.MaxAttempts && (response.StatusCode == 429 || response.StatusCode == 502 || response.StatusCode == 503 || response.StatusCode == 504) {
 				continue
 			}
 			return CapabilityResult{ErrorCode: fmt.Sprintf("upstream_http_%d", response.StatusCode)}, nil
 		}
-		if readErr != nil {
+		if readErr != nil || len(raw) > 16<<20 {
 			return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
 		}
 		var data any
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.UseNumber()
-		if dec.Decode(&data) != nil {
+		if !json.Valid(raw) || dec.Decode(&data) != nil {
 			return CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
 		}
 		data, err = traversePath(data, binding.Definition.ResponsePath)

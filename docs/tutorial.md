@@ -24,6 +24,8 @@ Authorization: Bearer <API token>
 
 确认路径变量、类型、返回结构、错误码和认证方式。只有真实服务能保证这些约定；框架不会通过一个 HTTP 200 推断任务结果。如果接口会提交作业，还要确认是否有幂等键和可跨连接查询的作业 ID。
 
+REST 结果只接受 2xx 状态和不超过 16 MiB 的单个完整 JSON 值，允许尾随空白；双 JSON、尾随垃圾、截断和超限响应都返回 `upstream_response_invalid`。显式声明 `allow_empty_success` 的 REST v2 能力也可接受 204 空响应。写操作已经发出但返回结果无效时，框架将其视为结果未知；没有安全重放保证时，运行进入 `needs_reconciliation` 并暂停原操作，应按业务回执核对实际结果。
+
 ## 2. 手写最小 REST 能力包
 
 把自己的接入文件放在忽略提交的 `local/` 下：
