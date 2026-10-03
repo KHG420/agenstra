@@ -33,6 +33,9 @@ func TestMCPHTTPReadsCompleteSSEEventsForTheCurrentRequest(t *testing.T) {
 		{"two-json-values", "data: " + response + " " + response + "\n\n", true},
 		{"invalid-later-data", "data: " + response + "\ndata: garbage\n\n", true},
 		{"undelimited-event", "data: " + response + "\n", true},
+		{"missing-version", "data: {\"id\":1,\"result\":{\"capacity\":2400}}\n\n", true},
+		{"wrong-version", "data: {\"jsonrpc\":\"1.0\",\"id\":1,\"result\":{\"capacity\":2400}}\n\n", true},
+		{"result-and-null-error", "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capacity\":2400},\"error\":null}\n\n", true},
 		{"matching-error", "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32601}}\n\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -61,6 +64,10 @@ func TestMCPHTTPJSONResponseRequiresOneCompleteBoundedValue(t *testing.T) {
 		wantError     bool
 	}{
 		{"valid", response + "\n \t", false},
+		{"missing-version", `{"id":1,"result":{"capacity":2400}}`, true},
+		{"wrong-version", `{"jsonrpc":"1.0","id":1,"result":{"capacity":2400}}`, true},
+		{"result-and-null-error", `{"jsonrpc":"2.0","id":1,"result":{"capacity":2400},"error":null}`, true},
+		{"request-with-result", `{"jsonrpc":"2.0","id":1,"method":"ping","result":{"capacity":2400}}`, true},
 		{"second-value", response + " " + response, true},
 		{"trailing-garbage", response + " incomplete", true},
 		{"oversized", response + strings.Repeat(" ", (16<<20)+1-len(response)), true},
@@ -151,6 +158,13 @@ func TestMCPPackConnectsAndInvokesUsingMultilineSSE(t *testing.T) {
 }
 
 func TestMCPInvalidWriteReceiptPausesWithoutReplaying(t *testing.T) {
+	for _, responseCase := range []string{"incomplete-sse", "missing-version", "wrong-version", "result-and-null-error", "request-with-result"} {
+		t.Run(responseCase, func(t *testing.T) { testMCPInvalidWriteReceipt(t, responseCase) })
+	}
+}
+
+func testMCPInvalidWriteReceipt(t *testing.T, responseCase string) {
+	t.Helper()
 	tool := JSON{"name": "record.create", "description": "Create record", "inputSchema": JSON{"type": "object", "properties": JSON{}, "additionalProperties": false}, "outputSchema": JSON{"type": "object", "properties": JSON{"id": JSON{"type": "string"}}, "required": []any{"id"}, "additionalProperties": false}}
 	var writes atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -172,9 +186,24 @@ func TestMCPInvalidWriteReceiptPausesWithoutReplaying(t *testing.T) {
 		case "tools/call":
 			writes.Add(1)
 			result = JSON{"content": []any{}, "structuredContent": JSON{"id": "R1"}}
-			w.Header().Set("Content-Type", "text/event-stream")
-			raw, _ := json.Marshal(JSON{"jsonrpc": "2.0", "id": request["id"], "result": result})
-			_, _ = fmt.Fprintf(w, "data: %s\ndata: incomplete\n\n", raw)
+			reply := JSON{"jsonrpc": "2.0", "id": request["id"], "result": result}
+			switch responseCase {
+			case "incomplete-sse":
+				w.Header().Set("Content-Type", "text/event-stream")
+				raw, _ := json.Marshal(reply)
+				_, _ = fmt.Fprintf(w, "data: %s\ndata: incomplete\n\n", raw)
+				return
+			case "missing-version":
+				delete(reply, "jsonrpc")
+			case "wrong-version":
+				reply["jsonrpc"] = "1.0"
+			case "result-and-null-error":
+				reply["error"] = nil
+			case "request-with-result":
+				reply["method"] = "ping"
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(reply)
 			return
 		default:
 			t.Errorf("unexpected method: %v", request["method"])

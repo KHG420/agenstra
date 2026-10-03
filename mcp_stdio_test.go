@@ -65,7 +65,18 @@ func TestMCPStdioRequiresCompleteResponseLinesForTheCurrentRequest(t *testing.T)
 		if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		raw, err := json.Marshal(JSON{"jsonrpc": "2.0", "id": request["id"], "result": JSON{"capacity": 2400}})
+		reply := JSON{"jsonrpc": "2.0", "id": request["id"], "result": JSON{"capacity": 2400}}
+		switch os.Getenv("AGENSTRA_MCP_STDIO_RESPONSE_CASE") {
+		case "missing-version":
+			delete(reply, "jsonrpc")
+		case "wrong-version":
+			reply["jsonrpc"] = "1.0"
+		case "result-and-null-error":
+			reply["error"] = nil
+		case "result-and-null-method":
+			reply["method"] = nil
+		}
+		raw, err := json.Marshal(reply)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -91,6 +102,10 @@ func TestMCPStdioRequiresCompleteResponseLinesForTheCurrentRequest(t *testing.T)
 		{"valid", false},
 		{"notification", false},
 		{"server-request", false},
+		{"missing-version", true},
+		{"wrong-version", true},
+		{"result-and-null-error", true},
+		{"result-and-null-method", true},
 		{"trailing-garbage", true},
 		{"second-value", true},
 	} {

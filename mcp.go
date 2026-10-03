@@ -169,12 +169,18 @@ func (c *stdioMCP) request(ctx context.Context, method string, params JSON, noti
 		if !json.Valid(line) || dec.Decode(&reply) != nil {
 			return nil, errors.New("invalid MCP stdio response")
 		}
-		if reply["method"] != nil || reply["id"] == nil {
+		_, hasMethod := reply["method"]
+		if hasMethod || reply["id"] == nil {
 			continue
 		}
 		id, ok := pathIndex(reply["id"])
 		if !ok || id != c.nextID {
 			continue
+		}
+		_, hasResult := reply["result"]
+		_, hasError := reply["error"]
+		if reply["jsonrpc"] != "2.0" || hasResult == hasError {
+			return nil, errors.New("invalid MCP response envelope")
 		}
 		if reply["error"] != nil {
 			return nil, fmt.Errorf("MCP error: %v", reply["error"])
@@ -345,6 +351,12 @@ func (c *httpMCP) request(ctx context.Context, method string, params JSON, notif
 		if err := dec.Decode(&reply); err != nil {
 			return nil, err
 		}
+	}
+	_, hasResult := reply["result"]
+	_, hasError := reply["error"]
+	_, hasMethod := reply["method"]
+	if reply["jsonrpc"] != "2.0" || hasMethod || hasResult == hasError {
+		return nil, errors.New("invalid MCP response envelope")
 	}
 	if reply["error"] != nil {
 		return nil, fmt.Errorf("MCP error: %v", reply["error"])
