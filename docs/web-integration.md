@@ -206,6 +206,8 @@ handler 在连接前注册，返回符合 output Schema 的结果；实际业务
 
 配置 `getPageObservation` 时，SDK 每次心跳检查页面变化，并在 handler 前后同步；内容不变时不增加页面版本。页面观察的外层 `revision` 仅用于浏览器桥。如果业务 API 自己有乐观锁版本，在观察和动作参数中使用不同字段名，例如 `activityRevision` 与 `expectedRevision`，并在能力说明中写清来源。每个批次执行一个宿主浏览器动作，下一宿主动作前读取一次 `ui.get_context`。一次成功的观察已满足下一动作的要求；内置 `ui.get_context`、`ui.command_status` 是服务端观察，本身不要求前置页面观察。这两个动态读取能力，以及声明为 `effect: "read"` 的宿主浏览器动作，可在同一任务再次读取以核对页面或业务变化，仍受总轮次与工具预算约束；业务写保留重复调用保护。缺少事实字段时用 `inspect_fact`，不能靠反复读取同一页面推进任务。
 
+SDK 只把服务端成功确认的上传快照作为已同步页面状态；上传前复制宿主数据，避免请求期间原对象变化影响已确认内容。初次连接、显式更新与后续同步使用同一队列。上传未获确认时保留待同步数据，后续心跳再次尝试；只使用 `updatePageObservation`、未配置 getter 的宿主也沿用这一行为。服务端的 generation、权限和 revision 检查仍生效，冲突或不确定结果不能据此视为已解决。
+
 handler 只有在能证明没有提交业务副作用时，才能抛出 SDK 导出的 `AgenstraActionError(code, message)`，例如执行前权限/版本检查失败，或原后端明确拒绝请求。SDK 将它记录为 `failed`；普通异常仍为 `unknown`。不要把网络超时、连接中断或未知服务端错误包装成确定失败。只读查询出错可报告确定失败。业务已保存之后的显示失败应通过原业务查询和回执恢复处理，不能重发写命令。页面更新和装饰动画需要有界等待，后台窗口可能暂停 `requestAnimationFrame`，不能靠它作为业务完成的唯一证据。
 
 SDK 的 `id()` 在没有 `crypto.randomUUID` 的 HTTP 页面使用 `crypto.getRandomValues` 生成 UUID。这只保证稳定请求标识；生产身份和传输保护仍由宿主现有部署承担。
