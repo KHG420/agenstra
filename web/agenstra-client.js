@@ -188,10 +188,13 @@ export class AgenstraClient {
     // Freeze the bytes to publish before awaiting the server. A host may return
     // a live state object, and an attempted upload is not a confirmed snapshot.
     const observation = structuredClone(this.options.getPageObservation ? await this.options.getPageObservation() : (this.pendingPageObservation ?? this.pageObservation));
+    const published = this.pageObservationBinding;
+    if (published?.sessionId === browser.id && published.generation === browser.generation && published.revision === browser.context_revision && JSON.stringify(observation) === JSON.stringify(this.pageObservation)) return;
     const data = await this.request("/browser/v1/sessions/" + browser.id + "/observation", { method: "POST", browserKey: browser.key, body: { generation: browser.generation, revision: browser.context_revision, observation } });
     if (this.closed || epoch !== this.browserEpoch) return;
     this.browser = { ...data.session, key: browser.key };
     this.pageObservation = structuredClone(observation);
+    this.pageObservationBinding = { sessionId: this.browser.id, generation: this.browser.generation, revision: this.browser.context_revision };
     this.save("browser", this.browser);
   }
   async pollBrowser() {
