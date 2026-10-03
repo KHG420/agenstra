@@ -213,10 +213,12 @@ export class AgenstraClient {
     if (this.closed) return;
     const epoch = this.browserEpoch;
     try {
+      // Completed actions must keep retrying their receipts even when the
+      // host's current page cannot be read or uploaded.
+      await this.flushReceipts();
+      if (epoch !== this.browserEpoch) return;
       const latest = this.options.getPageObservation ? await this.options.getPageObservation() : (this.pendingPageObservation ?? this.pageObservation);
       if (JSON.stringify(latest) !== JSON.stringify(this.pageObservation)) await this.updatePageObservation(latest);
-      if (epoch !== this.browserEpoch) return;
-      await this.flushReceipts();
       if (epoch !== this.browserEpoch) return;
       const data = await this.request("/browser/v1/sessions/" + this.browser.id + "/poll", { method: "POST", browserKey: this.browser.key, body: { generation: this.browser.generation } });
       if (this.closed || epoch !== this.browserEpoch) return;

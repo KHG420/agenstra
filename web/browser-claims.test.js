@@ -89,6 +89,48 @@ test("lost ACK retries keep the handler's original result when host state change
   assert.equal(c.receipts[command.id].status, "acked");
 });
 
+for (const failingStep of ["page getter", "observation upload"]) {
+  for (const lostStep of ["result", "run read"]) {
+    test(`heartbeat retries a lost ${lostStep} despite a persistent ${failingStep} failure`, async t => {
+      let handlers = 0, results = 0, runReads = 0, polls = 0, uploads = 0;
+      const submitted = [], errors = [];
+      const c = client(t, async (path, options) => {
+        if (path.endsWith("/begin")) return response({ accepted: true });
+        if (path.endsWith("/observation")) { uploads++;throw new Error("observation unavailable"); }
+        if (path.endsWith("/result")) {
+          results++;submitted.push(JSON.parse(options.body).result);
+          if (lostStep === "result" && results === 1) throw new Error("result response lost");
+          return response({ status: "succeeded" });
+        }
+        if (path.endsWith("/poll")) { polls++;return response({ commands: [] }); }
+        runReads++;
+        if (lostStep === "run read" && runReads === 1) throw new Error("run read unavailable");
+        return response({ status: "completed" });
+      });
+      c.pageObservation = { page: "home" };
+      c.options.getPageObservation = () => {
+        if (handlers && failingStep === "page getter") throw new Error("page unavailable");
+        return { page: handlers ? "orders" : "home" };
+      };
+      c.on("error", error => errors.push(error));
+      c.registerActions({ "ui.navigate": () => { handlers++;return { page: "orders" }; } });
+      await c.executeCommand(command);
+      assert.equal(c.receipts[command.id].status, lostStep === "result" ? "succeeded" : "confirmed");
+      await c.pollBrowser();clearTimeout(c.browserTimer);
+      assert.equal(c.receipts[command.id].status, "acked");
+      await c.pollBrowser();clearTimeout(c.browserTimer);
+      assert.equal(handlers, 1);
+      assert.equal(results, lostStep === "result" ? 2 : 1);
+      assert.deepEqual(submitted, Array.from({ length: results }, () => ({ page: "orders" })));
+      assert.equal(runReads, lostStep === "run read" ? 2 : 1);
+      assert.equal(polls, 0, "new commands still require a synchronized page");
+      assert.equal(uploads, failingStep === "observation upload" ? 3 : 0);
+      assert.equal(c.browserConnected, false);
+      assert.equal(errors.at(-1).message, failingStep === "page getter" ? "page unavailable" : "observation unavailable");
+    });
+  }
+}
+
 test("a result that cannot be captured remains unknown after the handler ran", async t => {
   const statuses = [];
   const c = client(t, async (path, options) => {
