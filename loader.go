@@ -1,7 +1,6 @@
 package agenstra
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,9 +13,7 @@ import (
 
 func validateRawManifest(raw []byte, skills map[string]string) error {
 	var manifest map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	if err := decoder.Decode(&manifest); err != nil {
+	if err := strictUnmarshal(raw, &manifest); err != nil {
 		return err
 	}
 	return ValidatePackManifest(manifest, skills)

@@ -33,6 +33,9 @@ func checkedHeader(name string, allowIdempotency bool) error {
 	return nil
 }
 func strictUnmarshal(raw []byte, v any) error {
+	if !json.Valid(raw) {
+		return errors.New("invalid JSON document")
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	dec.UseNumber()
