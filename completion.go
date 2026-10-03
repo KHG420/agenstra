@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // CompletionContext is supplied only after citation identity checks succeed.
@@ -43,7 +45,7 @@ type FactRequirement struct {
 func (r *FactRequirement) UnmarshalJSON(raw []byte) error {
 	type requirement FactRequirement
 	var parsed requirement
-	if err := strictUnmarshal(raw, &parsed); err != nil {
+	if err := jsonvalue.DecodeStrict(raw, &parsed); err != nil {
 		return err
 	}
 	var fields map[string]json.RawMessage
@@ -68,7 +70,7 @@ func RequireFactValues(requirements ...FactRequirement) (CompletionValidator, er
 		}
 		for _, p := range requirement.Path {
 			if _, ok := p.(string); !ok {
-				if index, ok := pathIndex(p); !ok || index < 0 {
+				if index, ok := jsonvalue.Index(p); !ok || index < 0 {
 					return nil, fmt.Errorf("completion requirement path invalid")
 				}
 			}

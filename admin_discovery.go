@@ -3,6 +3,8 @@ package agenstra
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 func (s *HTTPServer) discoverDraftMCP(w http.ResponseWriter, r *http.Request, id string) {
@@ -33,7 +35,7 @@ func (s *HTTPServer) discoverDraftMCP(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 	var source MCPSource
-	if strictUnmarshal(raw, &source) != nil {
+	if jsonvalue.DecodeStrict(raw, &source) != nil {
 		apiError(w, 422, "mcp_discovery_source_invalid", true)
 		return
 	}

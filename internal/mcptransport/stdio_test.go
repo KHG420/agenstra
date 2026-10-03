@@ -1,4 +1,4 @@
-package agenstra
+package mcptransport
 
 import (
 	"bufio"
@@ -34,7 +34,7 @@ func TestMCPStdioCancellationInterruptsBlockedWrite(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	client := &stdioMCP{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}
+	client := &Stdio{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}
 	defer func(close func() error) {
 		if err := close(); err != nil {
 			t.Error(err)
@@ -47,7 +47,7 @@ func TestMCPStdioCancellationInterruptsBlockedWrite(t *testing.T) {
 	defer cancel()
 	finished := make(chan error, 1)
 	go func() {
-		_, err := client.Request(ctx, "tools/call", JSON{"payload": strings.Repeat("x", 1<<20)})
+		_, err := client.Request(ctx, "tools/call", map[string]any{"payload": strings.Repeat("x", 1<<20)})
 		finished <- err
 	}()
 	select {
@@ -69,11 +69,11 @@ func TestMCPStdioCancellationInterruptsBlockedWrite(t *testing.T) {
 
 func TestMCPStdioRequiresCompleteResponseLinesForTheCurrentRequest(t *testing.T) {
 	if os.Getenv("AGENSTRA_MCP_STDIO_RESPONSE_HELPER") == "1" {
-		var request JSON
+		var request map[string]any
 		if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		reply := JSON{"jsonrpc": "2.0", "id": request["id"], "result": JSON{"capacity": 2400}}
+		reply := map[string]any{"jsonrpc": "2.0", "id": request["id"], "result": map[string]any{"capacity": 2400}}
 		switch os.Getenv("AGENSTRA_MCP_STDIO_RESPONSE_CASE") {
 		case "missing-version":
 			delete(reply, "jsonrpc")
@@ -141,7 +141,7 @@ func TestMCPStdioRequiresCompleteResponseLinesForTheCurrentRequest(t *testing.T)
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			client := &stdioMCP{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}
+			client := &Stdio{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}
 			defer func() {
 				if callErr8 := client.Close(); callErr8 != nil {
 					t.Error(callErr8)
@@ -152,7 +152,7 @@ func TestMCPStdioRequiresCompleteResponseLinesForTheCurrentRequest(t *testing.T)
 			}()
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
-			result, err := client.Request(ctx, "tools/call", JSON{})
+			result, err := client.Request(ctx, "tools/call", map[string]any{})
 			if tc.wantError {
 				if err == nil {
 					t.Fatalf("malformed line became a confirmed result: %v", result)
@@ -161,5 +161,46 @@ func TestMCPStdioRequiresCompleteResponseLinesForTheCurrentRequest(t *testing.T)
 				t.Fatalf("valid response lost: %v %v", result, err)
 			}
 		})
+	}
+}
+
+func TestMCPStdioCancellationReapsProcess(t *testing.T) {
+	if os.Getenv("AGENSTRA_MCP_HANG_HELPER") == "1" {
+		reader := bufio.NewReader(os.Stdin)
+		if _, callErr := reader.ReadString('\n'); callErr != nil {
+			t.Error(callErr)
+		}
+		time.Sleep(30 * time.Second)
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=TestMCPStdioCancellationReapsProcess")
+	cmd.Env = append(os.Environ(), "AGENSTRA_MCP_HANG_HELPER=1")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	client := &Stdio{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err = client.Request(ctx, "tools/list", map[string]any{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("wanted deadline, got %v", err)
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Fatal("cancellation did not interrupt blocking read")
+	}
+	if cmd.ProcessState == nil {
+		t.Fatal("MCP child not reaped")
+	}
+	if err := client.Close(); err != nil && !strings.Contains(err.Error(), "killed") {
+		t.Fatalf("idempotent close: %v", err)
 	}
 }

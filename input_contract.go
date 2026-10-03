@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // RequestedInputSchema constrains a single text answer without changing the
@@ -20,7 +22,7 @@ type RequestedInputSchema struct {
 func (s *RequestedInputSchema) UnmarshalJSON(raw []byte) error {
 	type shape RequestedInputSchema
 	var parsed shape
-	if err := strictUnmarshal(raw, &parsed); err != nil {
+	if err := jsonvalue.DecodeStrict(raw, &parsed); err != nil {
 		return err
 	}
 	*s = RequestedInputSchema(parsed)

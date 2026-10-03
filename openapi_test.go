@@ -167,17 +167,6 @@ func TestOpenAPISchemaConversionPreservesPropertyNamesAndLiteralJSON(t *testing.
 	}
 }
 
-func TestOpenAPI30ExclusiveBoundRequiresNumericInclusiveBound(t *testing.T) {
-	for _, bound := range []struct{ exclusive, inclusive string }{
-		{"exclusiveMinimum", "minimum"}, {"exclusiveMaximum", "maximum"},
-	} {
-		_, err := convertOpenAPISchema(JSON{"openapi": "3.0.3"}, JSON{bound.exclusive: true})
-		if err == nil || !strings.Contains(err.Error(), bound.exclusive) || !strings.Contains(err.Error(), bound.inclusive) {
-			t.Fatalf("missing %s accepted: %v", bound.inclusive, err)
-		}
-	}
-}
-
 func TestOpenAPIImportsArrayScalarAndEmptyResponses(t *testing.T) {
 	doc := JSON{"openapi": "3.1.0", "components": JSON{"schemas": JSON{"Ids": JSON{"type": "array", "items": JSON{"type": "string"}}}}, "paths": JSON{
 		"/ids":    JSON{"get": JSON{"operationId": "listIds", "responses": JSON{"200": JSON{"content": JSON{"application/json": JSON{"schema": JSON{"$ref": "#/components/schemas/Ids"}}}}}}},

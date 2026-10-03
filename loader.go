@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 func validateRawManifest(raw []byte, skills map[string]string) error {
 	var manifest map[string]any
-	if err := strictUnmarshal(raw, &manifest); err != nil {
+	if err := jsonvalue.DecodeStrict(raw, &manifest); err != nil {
 		return err
 	}
 	return ValidatePackManifest(manifest, skills)
@@ -56,7 +58,7 @@ func ValidatePackManifest(manifest map[string]any, skillContents map[string]stri
 	switch manifest["schema"] {
 	case "agenstra.rest-pack.v2":
 		var m RestManifest
-		if err := strictUnmarshal(raw, &m); err != nil {
+		if err := jsonvalue.DecodeStrict(raw, &m); err != nil {
 			return err
 		}
 		if len(m.Name) < 1 || len(m.Name) > 80 || len(m.Version) < 1 || len(m.Version) > 40 || len(m.Guidance) < 1 || len(m.Guidance) > 8000 || len(m.Capabilities) == 0 || !envPattern.MatchString(m.BaseURLEnv) {
@@ -111,7 +113,7 @@ func ValidatePackManifest(manifest map[string]any, skillContents map[string]stri
 		return nil
 	case "agenstra.mcp-pack.v1":
 		var m MCPManifest
-		if err := strictUnmarshal(raw, &m); err != nil {
+		if err := jsonvalue.DecodeStrict(raw, &m); err != nil {
 			return err
 		}
 		if m.Name == "" || m.Version == "" || len(m.Guidance) < 1 || len(m.Guidance) > 8000 || len(m.Tools) == 0 || m.Source.TimeoutSeconds <= 0 || m.Source.TimeoutSeconds > 300 {
@@ -159,7 +161,7 @@ func ValidatePackManifest(manifest map[string]any, skillContents map[string]stri
 		return nil
 	case "agenstra.capability-pack.v1":
 		var m LegacyPackManifest
-		if err := strictUnmarshal(raw, &m); err != nil {
+		if err := jsonvalue.DecodeStrict(raw, &m); err != nil {
 			return err
 		}
 		if len(m.Name) < 1 || len(m.Name) > 80 || len(m.Guidance) < 1 || len(m.Guidance) > 8000 || len(m.Capabilities) == 0 {

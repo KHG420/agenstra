@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // ReconciliationRule verifies an uncertain operation using a granted read
@@ -71,7 +73,7 @@ func validCheckPath(path []any) bool {
 	}
 	for _, part := range path {
 		if _, ok := part.(string); !ok {
-			if index, ok := pathIndex(part); !ok || index < 0 {
+			if index, ok := jsonvalue.Index(part); !ok || index < 0 {
 				return false
 			}
 		}

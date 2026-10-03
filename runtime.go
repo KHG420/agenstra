@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"slices"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // AgentRuntime owns decision budgets, references and a run's mutable execution state.
@@ -187,7 +188,7 @@ func valueAt(value any, path []any) (any, error) {
 			}
 			cur = next
 		case []any:
-			i, ok := pathIndex(p)
+			i, ok := jsonvalue.Index(p)
 			if !ok || i < 0 || i >= len(v) {
 				return nil, errors.New("invalid")
 			}
@@ -197,20 +198,6 @@ func valueAt(value any, path []any) (any, error) {
 		}
 	}
 	return cur, nil
-}
-func pathIndex(v any) (int, bool) {
-	switch x := v.(type) {
-	case int:
-		return x, true
-	case json.Number:
-		i, e := x.Int64()
-		return int(i), e == nil
-	case float64:
-		if x >= 0 && x == math.Trunc(x) {
-			return int(x), true
-		}
-	}
-	return 0, false
 }
 func factView(f Fact, budget int) FactView {
 	f.Value = modelFactValue(f)
@@ -475,7 +462,7 @@ func (r *AgentRuntime) Context(state *RuntimeState) ContextPacket {
 	projected, _, _ := r.characterProjection(state, packet, r.systemPrompt())
 	// A context view may be retained or modified by the host without changing
 	// the full evidence used to resolve references in later rounds.
-	view, err := cloneJSON(projected)
+	view, err := jsonvalue.Clone(projected)
 	if err != nil {
 		return ContextPacket{}
 	}
@@ -583,15 +570,15 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			}
 		}
 		if state.InspectedFact != nil {
-			if arrayLength, ok := pathIndex(state.InspectedFact["array_length"]); ok {
+			if arrayLength, ok := jsonvalue.Index(state.InspectedFact["array_length"]); ok {
 				if preview, ok := state.InspectedFact["preview"].(map[string]any); ok {
 					if shown, ok := preview["value"].([]any); ok && len(shown) < arrayLength {
 						prompt += fmt.Sprintf("\nThe inspected array has %d items, but its preview shows only %d. Inspect missing indices before reporting full coverage.", arrayLength, len(shown))
 					}
 				}
 			}
-			if parentLength, ok := pathIndex(state.InspectedFact["parent_array_length"]); ok {
-				if inspectedIndex, ok := pathIndex(state.InspectedFact["inspected_index"]); ok {
+			if parentLength, ok := jsonvalue.Index(state.InspectedFact["parent_array_length"]); ok {
+				if inspectedIndex, ok := jsonvalue.Index(state.InspectedFact["inspected_index"]); ok {
 					prompt += fmt.Sprintf("\nThe item you inspected at index %d belongs to an array with %d items. Report the total as %d; do not use the preview length as the total.", inspectedIndex, parentLength, parentLength)
 				}
 			}
@@ -650,7 +637,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		}
 		// Detach nested evidence, observations and followups before handing the
 		// packet to a model implementation supplied by the host.
-		modelPacket, err := cloneJSON(packet)
+		modelPacket, err := jsonvalue.Clone(packet)
 		if err != nil {
 			state.Status = "failed"
 			state.ErrorCode = strptr("run_state_invalid")
@@ -777,7 +764,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			state.InspectedFact["array_length"] = len(a)
 		}
 		for i := len(decision.Path) - 1; i >= 0; i-- {
-			if index, ok := pathIndex(decision.Path[i]); ok {
+			if index, ok := jsonvalue.Index(decision.Path[i]); ok {
 				parent, e := valueAt(facts[decision.FactID].Value, decision.Path[:i])
 				if e == nil {
 					if a, ok := parent.([]any); ok {

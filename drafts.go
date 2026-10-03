@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // CapabilityDraft shares the registry but never takes part in runtime resolution.
@@ -425,7 +427,7 @@ func (r *CapabilityRegistry) EditDraft(id string, edit DraftEdit) (*CapabilityDr
 				Operations []string          `json:"operations"`
 				Effects    map[string]string `json:"effects"`
 			}
-			if err = strictUnmarshal(raw, &args); err != nil {
+			if err = jsonvalue.DecodeStrict(raw, &args); err != nil {
 				return nil, registryError("invalid_request")
 			}
 			incoming, err = ImportOpenAPIDocument(args.Spec, draftString(m, "name"), draftString(m, "base_url_env"), args.Operations, args.Effects, draftString(m, "token_env"))

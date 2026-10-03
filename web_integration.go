@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -175,7 +176,7 @@ func NewWebIntegration(h *AgentHost, d *Deployment, c WebIntegrationConfig) (*We
 				return nil, e
 			}
 			var p FrontendProfile
-			if e = strictUnmarshal(raw, &p); e != nil {
+			if e = jsonvalue.DecodeStrict(raw, &p); e != nil {
 				return nil, e
 			}
 			compiled, e := compileFrontend(p)

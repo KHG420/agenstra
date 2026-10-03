@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // ModelConfiguration contains connection references, never resolved API keys.
@@ -167,7 +169,7 @@ func (d *Deployment) NewModel() (*ModelManager, error) {
 			return nil, err
 		}
 		if err == nil {
-			if err = strictUnmarshal([]byte(payload), &snapshot.Config); err != nil {
+			if err = jsonvalue.DecodeStrict([]byte(payload), &snapshot.Config); err != nil {
 				return nil, registryError("model_configuration_invalid")
 			}
 		}

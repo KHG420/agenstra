@@ -1,27 +1,21 @@
 package agenstra
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"log"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strings"
-	"sync"
 	"time"
 
+	"github.com/KHG420/agenstra/internal/jsonvalue"
+	"github.com/KHG420/agenstra/internal/mcptransport"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -41,7 +35,7 @@ type MCPSource struct {
 func (s *MCPSource) UnmarshalJSON(raw []byte) error {
 	type source MCPSource
 	var parsed source
-	if err := strictUnmarshal(raw, &parsed); err != nil {
+	if err := jsonvalue.DecodeStrict(raw, &parsed); err != nil {
 		return err
 	}
 	var fields map[string]json.RawMessage
@@ -74,7 +68,7 @@ type MCPToolExposure struct {
 func (e *MCPToolExposure) UnmarshalJSON(raw []byte) error {
 	type exposure MCPToolExposure
 	var parsed exposure
-	if err := strictUnmarshal(raw, &parsed); err != nil {
+	if err := jsonvalue.DecodeStrict(raw, &parsed); err != nil {
 		return err
 	}
 	var fields map[string]json.RawMessage
@@ -106,344 +100,6 @@ type mcpTransport interface {
 	Request(context.Context, string, JSON) (JSON, error)
 	Notify(context.Context, string, JSON) error
 	Close() error
-}
-type stdioMCP struct {
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	stdout    *bufio.Reader
-	mu        chan struct{}
-	muOnce    sync.Once
-	nextID    int
-	closeOnce sync.Once
-	closeErr  error
-}
-
-func (c *stdioMCP) request(ctx context.Context, method string, params JSON, notification bool) (JSON, error) {
-	c.muOnce.Do(func() { c.mu = make(chan struct{}, 1) })
-	select {
-	case c.mu <- struct{}{}:
-		defer func() { <-c.mu }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	msg := JSON{"jsonrpc": "2.0", "method": method, "params": params}
-	if !notification {
-		c.nextID++
-		msg["id"] = c.nextID
-	}
-	raw, err := CanonicalJSON(msg)
-	if err != nil {
-		return nil, err
-	}
-	raw = append(raw, '\n')
-	written := make(chan error, 1)
-	go func() {
-		_, err := c.stdin.Write(raw)
-		written <- err
-	}()
-	select {
-	case <-ctx.Done():
-		closeErr := c.Close()
-		writeErr := <-written
-		return nil, errors.Join(ctx.Err(), closeErr, writeErr)
-	case err := <-written:
-		if err != nil {
-			return nil, err
-		}
-	}
-	if notification {
-		return nil, nil
-	}
-	type readResult struct {
-		line []byte
-		err  error
-	}
-	for {
-		read := make(chan readResult, 1)
-		go func() { line, err := c.stdout.ReadBytes('\n'); read <- readResult{line, err} }()
-		var got readResult
-		select {
-		case <-ctx.Done():
-			closeErr := c.Close()
-			got = <-read
-			return nil, errors.Join(ctx.Err(), closeErr, got.err)
-		case got = <-read:
-		}
-		line, err := got.line, got.err
-		if err != nil {
-			return nil, err
-		}
-		var reply JSON
-		dec := json.NewDecoder(bytes.NewReader(line))
-		dec.UseNumber()
-		if !json.Valid(line) || dec.Decode(&reply) != nil {
-			return nil, errors.New("invalid MCP stdio response")
-		}
-		_, hasMethod := reply["method"]
-		if hasMethod || reply["id"] == nil {
-			continue
-		}
-		id, ok := pathIndex(reply["id"])
-		if !ok || id != c.nextID {
-			continue
-		}
-		_, hasResult := reply["result"]
-		_, hasError := reply["error"]
-		if reply["jsonrpc"] != "2.0" || hasResult == hasError {
-			return nil, errors.New("invalid MCP response envelope")
-		}
-		if reply["error"] != nil {
-			return nil, fmt.Errorf("MCP error: %v", reply["error"])
-		}
-		result, ok := reply["result"].(map[string]any)
-		if !ok {
-			return nil, errors.New("invalid MCP result")
-		}
-		return result, nil
-	}
-}
-func (c *stdioMCP) Request(ctx context.Context, m string, p JSON) (JSON, error) {
-	return c.request(ctx, m, p, false)
-}
-func (c *stdioMCP) Notify(ctx context.Context, m string, p JSON) error {
-	_, e := c.request(ctx, m, p, true)
-	return e
-}
-
-// Close releases owned connection resources after outstanding calls have stopped.
-func (c *stdioMCP) Close() error {
-	c.closeOnce.Do(func() {
-		stdinErr := c.stdin.Close()
-		if errors.Is(stdinErr, os.ErrClosed) {
-			stdinErr = nil
-		}
-		var killErr error
-		if c.cmd.Process != nil {
-			killErr = c.cmd.Process.Kill()
-			if errors.Is(killErr, os.ErrProcessDone) {
-				killErr = nil
-			}
-		}
-		waitErr := c.cmd.Wait()
-		if _, ok := waitErr.(*exec.ExitError); ok {
-			// Closing a stdio connection intentionally terminates its subprocess.
-			waitErr = nil
-		}
-		c.closeErr = errors.Join(stdinErr, killErr, waitErr)
-	})
-	return c.closeErr
-}
-
-type httpMCP struct {
-	url       string
-	token     string
-	client    *http.Client
-	session   string
-	protocol  string
-	mu        chan struct{}
-	muOnce    sync.Once
-	nextID    int
-	closeOnce sync.Once
-	closeErr  error
-}
-
-func (c *httpMCP) request(ctx context.Context, method string, params JSON, notification bool) (JSON, error) {
-	c.muOnce.Do(func() { c.mu = make(chan struct{}, 1) })
-	select {
-	case c.mu <- struct{}{}:
-		defer func() { <-c.mu }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	msg := JSON{"jsonrpc": "2.0", "method": method, "params": params}
-	if !notification {
-		c.nextID++
-		msg["id"] = c.nextID
-	}
-	raw, err := CanonicalJSON(msg)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, "POST", c.url, bytes.NewReader(raw))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	version := c.protocol
-	if version == "" {
-		version = "2025-03-26"
-	}
-	req.Header.Set("Mcp-Protocol-Version", version)
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	if c.session != "" {
-		req.Header.Set("Mcp-Session-Id", c.session)
-	}
-	res, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err := res.Body.Close(); err != nil {
-			log.Print("HTTP response cleanup failed")
-		}
-	}()
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("MCP HTTP %d", res.StatusCode)
-	}
-	if session := res.Header.Get("Mcp-Session-Id"); session != "" {
-		c.session = session
-	}
-	if notification {
-		return nil, nil
-	}
-	var reply JSON
-	mediaType, _, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
-	if err != nil {
-		return nil, errors.New("invalid MCP response content type")
-	}
-	if mediaType == "text/event-stream" {
-		scanner := bufio.NewScanner(io.LimitReader(res.Body, 16<<20))
-		scanner.Buffer(make([]byte, 4096), 16<<20)
-		scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
-			if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
-				if data[i] == '\r' && i+1 == len(data) && !atEOF {
-					return 0, nil, nil
-				}
-				advance := i + 1
-				if data[i] == '\r' && advance < len(data) && data[advance] == '\n' {
-					advance++
-				}
-				return advance, data[:i], nil
-			}
-			if atEOF && len(data) > 0 {
-				return len(data), data, nil
-			}
-			return 0, nil, nil
-		})
-		var eventData strings.Builder
-		firstLine := true
-		for scanner.Scan() {
-			line := scanner.Text()
-			if firstLine {
-				line = strings.TrimPrefix(line, "\ufeff")
-				firstLine = false
-			}
-			if line == "data" || strings.HasPrefix(line, "data:") {
-				payload := strings.TrimPrefix(strings.TrimPrefix(line, "data"), ":")
-				eventData.WriteString(strings.TrimPrefix(payload, " "))
-				eventData.WriteByte('\n')
-				continue
-			}
-			if line != "" || eventData.Len() == 0 {
-				continue
-			}
-			payload := eventData.String()
-			eventData.Reset()
-			if strings.TrimSpace(payload) == "" {
-				continue
-			}
-			if !json.Valid([]byte(payload)) {
-				return nil, errors.New("invalid MCP SSE event")
-			}
-			var event JSON
-			dec := json.NewDecoder(strings.NewReader(payload))
-			dec.UseNumber()
-			if err := dec.Decode(&event); err != nil {
-				return nil, err
-			}
-			id, ok := pathIndex(event["id"])
-			if event["method"] != nil || !ok || id != c.nextID {
-				continue
-			}
-			reply = event
-			break
-		}
-		if err := scanner.Err(); err != nil {
-			return nil, err
-		}
-	} else {
-		raw, err := io.ReadAll(io.LimitReader(res.Body, (16<<20)+1))
-		if err != nil {
-			return nil, err
-		}
-		if len(raw) > 16<<20 || !json.Valid(raw) {
-			return nil, errors.New("invalid MCP JSON response")
-		}
-		dec := json.NewDecoder(bytes.NewReader(raw))
-		dec.UseNumber()
-		if err := dec.Decode(&reply); err != nil {
-			return nil, err
-		}
-	}
-	_, hasResult := reply["result"]
-	_, hasError := reply["error"]
-	_, hasMethod := reply["method"]
-	if reply["jsonrpc"] != "2.0" || hasMethod || hasResult == hasError {
-		return nil, errors.New("invalid MCP response envelope")
-	}
-	if reply["error"] != nil {
-		return nil, fmt.Errorf("MCP error: %v", reply["error"])
-	}
-	id, ok := pathIndex(reply["id"])
-	if !ok || id != c.nextID {
-		return nil, errors.New("invalid MCP response id")
-	}
-	result, ok := reply["result"].(map[string]any)
-	if !ok {
-		return nil, errors.New("invalid MCP result")
-	}
-	return result, nil
-}
-func (c *httpMCP) Request(ctx context.Context, m string, p JSON) (JSON, error) {
-	return c.request(ctx, m, p, false)
-}
-func (c *httpMCP) Notify(ctx context.Context, m string, p JSON) error {
-	_, e := c.request(ctx, m, p, true)
-	return e
-}
-
-// Close releases owned connection resources after outstanding calls have stopped.
-func (c *httpMCP) Close() error {
-	c.closeOnce.Do(func() {
-		if c.session == "" {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.url, nil)
-		if err != nil {
-			c.closeErr = err
-			return
-		}
-		req.Header.Set("Mcp-Session-Id", c.session)
-		version := c.protocol
-		if version == "" {
-			version = "2025-03-26"
-		}
-		req.Header.Set("Mcp-Protocol-Version", version)
-		if c.token != "" {
-			req.Header.Set("Authorization", "Bearer "+c.token)
-		}
-		res, err := c.client.Do(req)
-		if err != nil {
-			c.closeErr = err
-			return
-		}
-		c.closeErr = res.Body.Close()
-		if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusNoContent && res.StatusCode != http.StatusNotFound {
-			c.closeErr = errors.Join(c.closeErr, fmt.Errorf("MCP session close: HTTP %d", res.StatusCode))
-		}
-	})
-	return c.closeErr
 }
 
 // MCPPack owns an MCP transport and validated tool catalogs.
@@ -489,7 +145,7 @@ func OpenMCPPack(ctx context.Context, path string, environment map[string]string
 		return nil, err
 	}
 	var manifest MCPManifest
-	if err := strictUnmarshal(raw, &manifest); err != nil {
+	if err := jsonvalue.DecodeStrict(raw, &manifest); err != nil {
 		return nil, err
 	}
 	if manifest.Schema != "agenstra.mcp-pack.v1" || manifest.Name == "" || manifest.Version == "" || manifest.Guidance == "" || len(manifest.Tools) == 0 {
@@ -660,18 +316,11 @@ func openMCPSource(ctx context.Context, source MCPSource, env map[string]string)
 			}
 			cmd.Env = append(cmd.Env, target+"="+v)
 		}
-		stdin, e := cmd.StdinPipe()
+		client, e := mcptransport.StartStdio(cmd)
 		if e != nil {
 			return nil, nil, e
 		}
-		stdout, e := cmd.StdoutPipe()
-		if e != nil {
-			return nil, nil, errors.Join(e, stdin.Close())
-		}
-		if e := cmd.Start(); e != nil {
-			return nil, nil, errors.Join(e, stdin.Close(), stdout.Close())
-		}
-		transport = &stdioMCP{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}
+		transport = client
 	} else if source.Transport == "streamable_http" {
 		if source.URLEnv == nil || source.Command != nil || len(source.Args) > 0 || source.CWDEnv != nil || len(source.Environment) > 0 {
 			return nil, nil, errors.New("streamable_http requires url_env and optional token_env")
@@ -691,7 +340,7 @@ func openMCPSource(ctx context.Context, source MCPSource, env map[string]string)
 				return nil, nil, e
 			}
 		}
-		transport = &httpMCP{url: target, token: token, client: &http.Client{Timeout: time.Duration(source.TimeoutSeconds * float64(time.Second)), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+		transport = mcptransport.NewHTTP(target, token, &http.Client{Timeout: time.Duration(source.TimeoutSeconds * float64(time.Second)), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }})
 	} else {
 		return nil, nil, errors.New("invalid MCP transport")
 	}
@@ -705,9 +354,9 @@ func openMCPSource(ctx context.Context, source MCPSource, env map[string]string)
 	if err != nil {
 		return nil, nil, errors.Join(err, transport.Close())
 	}
-	if client, ok := transport.(*httpMCP); ok {
+	if client, ok := transport.(*mcptransport.HTTP); ok {
 		if version, ok := initialized["protocolVersion"].(string); ok && version != "" {
-			client.protocol = version
+			client.SetProtocolVersion(version)
 		}
 	}
 	requestCtx, cancel = context.WithTimeout(ctx, requestTimeout)

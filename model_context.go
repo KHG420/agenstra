@@ -2,6 +2,8 @@ package agenstra
 
 import (
 	"errors"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // ModelInfoProvider is optional. Unknown capacities stay nil; no model-name guesses.
@@ -144,7 +146,7 @@ func (r *AgentRuntime) tokenProjection(state *RuntimeState, packet ContextPacket
 			return InputMeasurement{}, hostError("run_state_invalid")
 		}
 		if model, ok := r.Model.(ModelInputMeasurer); ok {
-			measuredPacket, err := cloneJSON(p)
+			measuredPacket, err := jsonvalue.Clone(p)
 			if err != nil {
 				return InputMeasurement{}, hostError("run_state_invalid")
 			}

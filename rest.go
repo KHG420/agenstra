@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -32,15 +33,6 @@ func checkedHeader(name string, allowIdempotency bool) error {
 		return fmt.Errorf("unsafe REST header name: %s", name)
 	}
 	return nil
-}
-func strictUnmarshal(raw []byte, v any) error {
-	if !json.Valid(raw) {
-		return errors.New("invalid JSON document")
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	dec.UseNumber()
-	return dec.Decode(v)
 }
 func requiredEnv(env map[string]string, name string) (string, error) {
 	v := strings.TrimSpace(env[name])
@@ -216,7 +208,7 @@ type RestBusinessCheck struct {
 func (e *RestEndpoint) UnmarshalJSON(raw []byte) error {
 	type endpoint RestEndpoint
 	var parsed endpoint
-	if err := strictUnmarshal(raw, &parsed); err != nil {
+	if err := jsonvalue.DecodeStrict(raw, &parsed); err != nil {
 		return err
 	}
 	var keys map[string]json.RawMessage
@@ -475,7 +467,7 @@ func LoadRestPack(path string, environment map[string]string, client *http.Clien
 		return nil, err
 	}
 	var manifest RestManifest
-	if err := strictUnmarshal(raw, &manifest); err != nil {
+	if err := jsonvalue.DecodeStrict(raw, &manifest); err != nil {
 		return nil, err
 	}
 	if manifest.Schema != "agenstra.rest-pack.v2" || manifest.Name == "" || manifest.Version == "" || manifest.Guidance == "" || len(manifest.Capabilities) == 0 || !envPattern.MatchString(manifest.BaseURLEnv) {
@@ -746,7 +738,7 @@ func (f *RestField) UnmarshalJSON(raw []byte) error {
 		Description string `json:"description"`
 		Required    *bool  `json:"required"`
 	}
-	if err := strictUnmarshal(raw, &holder); err != nil {
+	if err := jsonvalue.DecodeStrict(raw, &holder); err != nil {
 		return err
 	}
 	f.Type = holder.Type
@@ -777,7 +769,7 @@ type LegacyRestCapability struct {
 func (c *LegacyRestCapability) UnmarshalJSON(raw []byte) error {
 	type capability LegacyRestCapability
 	var parsed capability
-	if err := strictUnmarshal(raw, &parsed); err != nil {
+	if err := jsonvalue.DecodeStrict(raw, &parsed); err != nil {
 		return err
 	}
 	var keys map[string]json.RawMessage
@@ -876,7 +868,7 @@ func LoadLegacyPack(path string, environment map[string]string, client *http.Cli
 		return nil, err
 	}
 	var manifest LegacyPackManifest
-	if err := strictUnmarshal(raw, &manifest); err != nil {
+	if err := jsonvalue.DecodeStrict(raw, &manifest); err != nil {
 		return nil, err
 	}
 	if manifest.Schema != "agenstra.capability-pack.v1" || manifest.Name == "" || manifest.Guidance == "" || len(manifest.Capabilities) == 0 {

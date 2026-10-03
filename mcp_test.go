@@ -1,60 +1,14 @@
 package agenstra
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"strings"
 	"testing"
-	"time"
 )
-
-func TestMCPStdioCancellationReapsProcess(t *testing.T) {
-	if os.Getenv("AGENSTRA_MCP_HANG_HELPER") == "1" {
-		reader := bufio.NewReader(os.Stdin)
-		if _, callErr := reader.ReadString('\n'); callErr != nil {
-			t.Error(callErr)
-		}
-		time.Sleep(30 * time.Second)
-		return
-	}
-	cmd := exec.Command(os.Args[0], "-test.run=TestMCPStdioCancellationReapsProcess")
-	cmd.Env = append(os.Environ(), "AGENSTRA_MCP_HANG_HELPER=1")
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	client := &stdioMCP{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	start := time.Now()
-	_, err = client.Request(ctx, "tools/list", JSON{})
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("wanted deadline, got %v", err)
-	}
-	if time.Since(start) > 3*time.Second {
-		t.Fatal("cancellation did not interrupt blocking read")
-	}
-	if cmd.ProcessState == nil {
-		t.Fatal("MCP child not reaped")
-	}
-	if err := client.Close(); err != nil && !strings.Contains(err.Error(), "killed") {
-		t.Fatalf("idempotent close: %v", err)
-	}
-}
 
 func TestMCPHTTPPaginationContractAndSessionCleanup(t *testing.T) {
 	tool := JSON{"name": "Metrics.Capacity/v2", "description": "Read capacity.", "inputSchema": JSON{"type": "object", "required": []any{"resource"}, "properties": JSON{"resource": JSON{"type": "integer", "minimum": 1}}, "additionalProperties": false}, "outputSchema": JSON{"type": "object", "required": []any{"capacity"}, "properties": JSON{"capacity": JSON{"type": "integer"}}, "additionalProperties": false}}
@@ -62,16 +16,19 @@ func TestMCPHTTPPaginationContractAndSessionCleanup(t *testing.T) {
 	deletes := 0
 	pages := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("missing connection credential")
+		}
 		if r.Method == http.MethodDelete {
 			deletes++
 			if r.Header.Get("Mcp-Session-Id") != "session-1" {
 				t.Errorf("missing session on DELETE")
 			}
+			if r.Header.Get("Mcp-Protocol-Version") != "2025-06-18" {
+				t.Errorf("missing negotiated protocol on DELETE")
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
-		}
-		if r.Header.Get("Mcp-Protocol-Version") != "2025-03-26" {
-			t.Errorf("missing protocol header")
 		}
 		if r.Method != "POST" {
 			t.Errorf("wrong method: %s", r.Method)
@@ -81,6 +38,13 @@ func TestMCPHTTPPaginationContractAndSessionCleanup(t *testing.T) {
 			t.Error(callErr2)
 		}
 		method, _ := request["method"].(string)
+		version := "2025-06-18"
+		if method == "initialize" {
+			version = "2025-03-26"
+		}
+		if r.Header.Get("Mcp-Protocol-Version") != version {
+			t.Errorf("incorrect protocol header for %s", method)
+		}
 		if method != "initialize" && r.Header.Get("Mcp-Session-Id") != "session-1" {
 			t.Errorf("missing session on %s", method)
 		}
@@ -93,7 +57,7 @@ func TestMCPHTTPPaginationContractAndSessionCleanup(t *testing.T) {
 		var result any
 		switch method {
 		case "initialize":
-			result = JSON{"protocolVersion": "2025-03-26", "capabilities": JSON{}, "serverInfo": JSON{"name": "test", "version": "1"}}
+			result = JSON{"protocolVersion": "2025-06-18", "capabilities": JSON{}, "serverInfo": JSON{"name": "test", "version": "1"}}
 		case "tools/list":
 			pages++
 			params, _ := request["params"].(map[string]any)
@@ -113,9 +77,9 @@ func TestMCPHTTPPaginationContractAndSessionCleanup(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	manifest := JSON{"schema": "agenstra.mcp-pack.v1", "name": "metrics", "version": "1", "guidance": "Use metrics", "source": JSON{"transport": "streamable_http", "url_env": "MCP_URL"}, "tools": []any{JSON{"name": tool["name"], "effect": "read", "contract_sha256": MCPContractDigest(tool)}}}
+	manifest := JSON{"schema": "agenstra.mcp-pack.v1", "name": "metrics", "version": "1", "guidance": "Use metrics", "source": JSON{"transport": "streamable_http", "url_env": "MCP_URL", "token_env": "MCP_TOKEN"}, "tools": []any{JSON{"name": tool["name"], "effect": "read", "contract_sha256": MCPContractDigest(tool)}}}
 	path := writeTestManifest(t, manifest)
-	pack, err := OpenMCPPack(context.Background(), path, map[string]string{"MCP_URL": server.URL})
+	pack, err := OpenMCPPack(context.Background(), path, map[string]string{"MCP_URL": server.URL, "MCP_TOKEN": "test-token"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +104,7 @@ func TestMCPHTTPPaginationContractAndSessionCleanup(t *testing.T) {
 		t.Fatalf("session cleanup count: %d", deletes)
 	}
 	tool["description"] = "drifted"
-	_, err = OpenMCPPack(context.Background(), path, map[string]string{"MCP_URL": server.URL})
+	_, err = OpenMCPPack(context.Background(), path, map[string]string{"MCP_URL": server.URL, "MCP_TOKEN": "test-token"})
 	if err == nil || !strings.Contains(err.Error(), "contract changed") {
 		t.Fatalf("contract drift accepted: %v", err)
 	}

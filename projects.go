@@ -6,6 +6,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // RunSource is an explicit delegation for one other host project's pack.
@@ -50,7 +52,7 @@ func runBindings(run StoredRun) ([]projectBinding, error) {
 	out := []projectBinding{}
 	if value, ok := run.State["project_sources"]; ok {
 		raw, err := CanonicalJSON(value)
-		if err != nil || strictUnmarshal(raw, &out) != nil {
+		if err != nil || jsonvalue.DecodeStrict(raw, &out) != nil {
 			return nil, hostError("run_state_invalid")
 		}
 	}

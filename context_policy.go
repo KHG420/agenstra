@@ -6,6 +6,8 @@ import (
 	"errors"
 	"math"
 	"unicode/utf8"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // ContextPolicy sets optional thresholds for projecting model input within existing budgets.
@@ -54,7 +56,7 @@ func (r *AgentRuntime) characterProjection(state *RuntimeState, packet ContextPa
 
 func contextPolicyCursor(envelope JSON) int {
 	runtime, _ := envelope["runtime"].(JSON)
-	cursor, _ := pathIndex(runtime["context_policy_cursor"])
+	cursor, _ := jsonvalue.Index(runtime["context_policy_cursor"])
 	return cursor
 }
 func latestContextPolicy(q sqlQueryer, id string) (int, error) {
@@ -143,7 +145,7 @@ func (h *AgentHost) applyContextPolicy(run StoredRun, state *RuntimeState) (Stor
 		if err = rows.Scan(&sequence, &raw); err != nil {
 			return run, errors.Join(err, rows.Close())
 		}
-		if err = strictUnmarshal([]byte(raw), &policy); err != nil {
+		if err = jsonvalue.DecodeStrict([]byte(raw), &policy); err != nil {
 			return run, errors.Join(err, rows.Close())
 		}
 		if err = policy.Validate(); err != nil {

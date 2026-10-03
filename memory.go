@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // Memory is a user-owned default or project convention. Pack scope is the first
@@ -213,7 +215,7 @@ func (h *AgentHost) prepareMemories(ctx context.Context, run StoredRun) (StoredR
 	}
 	inputs := []memoryInput{}
 	if run.State["memory_inputs"] != nil {
-		if err := strictUnmarshal(raw, &inputs); err != nil {
+		if err := jsonvalue.DecodeStrict(raw, &inputs); err != nil {
 			return run, hostError("run_state_invalid")
 		}
 	}
@@ -316,7 +318,7 @@ func (h *AgentHost) runMemories(run StoredRun) ([]MemoryView, error) {
 	}
 	views := []MemoryView{}
 	if run.State["memory_snapshot"] != nil {
-		if err = strictUnmarshal(raw, &views); err != nil {
+		if err = jsonvalue.DecodeStrict(raw, &views); err != nil {
 			return nil, hostError("run_state_invalid")
 		}
 	}

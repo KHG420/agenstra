@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 func memoryModelReply(t *testing.T, w http.ResponseWriter, content string) {
@@ -48,7 +50,7 @@ func TestMemoryHTTPJSONExtractorContractAndBudget(t *testing.T) {
 					t.Error("extraction input exceeded budget")
 				}
 				var input MemoryExtractionRequest
-				if err := strictUnmarshal([]byte(b.Messages[1].Content), &input); err != nil || input.Text != "用中文写报告" || len(input.Existing) >= 20 {
+				if err := jsonvalue.DecodeStrict([]byte(b.Messages[1].Content), &input); err != nil || input.Text != "用中文写报告" || len(input.Existing) >= 20 {
 					t.Error("full source lost or optional memories not trimmed", input, err)
 				}
 				memoryModelReply(t, w, tc.content)
@@ -92,7 +94,7 @@ func TestMemoryHTTPJSONModelAutomaticallyLearnsAndRecallsAcrossRuns(t *testing.T
 		if b.Messages[0].Content == memoryExtractionPrompt {
 			extraction.Add(1)
 			var input MemoryExtractionRequest
-			if err := strictUnmarshal([]byte(b.Messages[1].Content), &input); err != nil {
+			if err := jsonvalue.DecodeStrict([]byte(b.Messages[1].Content), &input); err != nil {
 				t.Error(err)
 				return
 			}
@@ -109,7 +111,7 @@ func TestMemoryHTTPJSONModelAutomaticallyLearnsAndRecallsAcrossRuns(t *testing.T
 		}
 		n := decisions.Add(1)
 		var packet ContextPacket
-		if err := strictUnmarshal([]byte(b.Messages[1].Content), &packet); err != nil {
+		if err := jsonvalue.DecodeStrict([]byte(b.Messages[1].Content), &packet); err != nil {
 			t.Error(err)
 			return
 		}

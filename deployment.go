@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // DeploymentError carries a safe deployment or connection error code.
@@ -102,7 +104,7 @@ func LoadDeployment(path string) (*Deployment, error) {
 		return nil, e
 	}
 	c := DeploymentConfig{Settings: DefaultHostSettings()}
-	if e = strictUnmarshal(b, &c); e != nil {
+	if e = jsonvalue.DecodeStrict(b, &c); e != nil {
 		return nil, e
 	}
 	if c.Users == nil && (c.HostAuth == nil || c.Management == nil) {
@@ -309,7 +311,7 @@ func (d *Deployment) verifiedIdentity(ctx context.Context, owner string, c Conne
 		return "", nil, deploymentError("identity_unverified")
 	}
 	var body any
-	if strictUnmarshal(raw, &body) != nil {
+	if jsonvalue.DecodeStrict(raw, &body) != nil {
 		return "", nil, deploymentError("identity_unverified")
 	}
 	steps := id.SubjectPath

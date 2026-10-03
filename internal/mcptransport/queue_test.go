@@ -1,4 +1,4 @@
-package agenstra
+package mcptransport
 
 import (
 	"bufio"
@@ -21,7 +21,7 @@ func TestMCPHTTPQueuedCancellationPreservesTheActiveRequest(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request JSON
+		var request map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
 			return
@@ -35,19 +35,19 @@ func TestMCPHTTPQueuedCancellationPreservesTheActiveRequest(t *testing.T) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if callErr := json.NewEncoder(w).Encode(JSON{"jsonrpc": "2.0", "id": request["id"], "result": JSON{"capacity": 2400}}); callErr != nil {
+		if callErr := json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request["id"], "result": map[string]any{"capacity": 2400}}); callErr != nil {
 			t.Error(callErr)
 		}
 	}))
 	defer server.Close()
 	var releaseOnce sync.Once
 	defer releaseOnce.Do(func() { close(release) })
-	client := &httpMCP{url: server.URL, client: server.Client()}
+	client := &HTTP{url: server.URL, client: server.Client()}
 	firstCtx, cancelFirst := context.WithCancel(t.Context())
 	defer cancelFirst()
 	firstDone := make(chan error, 1)
 	go func() {
-		_, err := client.Request(firstCtx, "tools/call", JSON{})
+		_, err := client.Request(firstCtx, "tools/call", map[string]any{})
 		firstDone <- err
 	}()
 	select {
@@ -59,7 +59,7 @@ func TestMCPHTTPQueuedCancellationPreservesTheActiveRequest(t *testing.T) {
 	defer cancel()
 	secondDone := make(chan error, 1)
 	go func() {
-		_, err := client.Request(ctx, "tools/call", JSON{})
+		_, err := client.Request(ctx, "tools/call", map[string]any{})
 		secondDone <- err
 	}()
 	select {
@@ -85,7 +85,7 @@ func TestMCPHTTPQueuedCancellationPreservesTheActiveRequest(t *testing.T) {
 	if err := <-firstDone; err != nil {
 		t.Fatalf("active request failed: %v", err)
 	}
-	if _, err := client.Request(t.Context(), "tools/call", JSON{}); err != nil || requests.Load() != 2 {
+	if _, err := client.Request(t.Context(), "tools/call", map[string]any{}); err != nil || requests.Load() != 2 {
 		t.Fatalf("connection did not remain usable: %v requests=%d", err, requests.Load())
 	}
 }
@@ -116,7 +116,7 @@ func TestMCPStdioQueuedCancellationPreservesTheActiveProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := make(chan struct{})
-	client := &stdioMCP{cmd: cmd, stdin: &mcpQueueSignalWriter{WriteCloser: stdin, started: started}, stdout: bufio.NewReader(stdout)}
+	client := &Stdio{cmd: cmd, stdin: &mcpQueueSignalWriter{WriteCloser: stdin, started: started}, stdout: bufio.NewReader(stdout)}
 	t.Cleanup(func() {
 		if callErr2 := client.Close(); callErr2 != nil {
 			t.Error(callErr2)
@@ -131,7 +131,7 @@ func TestMCPStdioQueuedCancellationPreservesTheActiveProcess(t *testing.T) {
 	firstCtx, cancelFirst := context.WithCancel(t.Context())
 	firstDone := make(chan error, 1)
 	go func() {
-		_, err := client.Request(firstCtx, "tools/call", JSON{"payload": strings.Repeat("x", 1<<20)})
+		_, err := client.Request(firstCtx, "tools/call", map[string]any{"payload": strings.Repeat("x", 1<<20)})
 		firstDone <- err
 	}()
 	defer func() { cancelFirst(); <-firstDone }()
@@ -144,7 +144,7 @@ func TestMCPStdioQueuedCancellationPreservesTheActiveProcess(t *testing.T) {
 	defer cancel()
 	secondDone := make(chan error, 1)
 	go func() {
-		_, err := client.Request(ctx, "tools/call", JSON{})
+		_, err := client.Request(ctx, "tools/call", map[string]any{})
 		secondDone <- err
 	}()
 	select {

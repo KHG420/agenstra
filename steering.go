@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 var errSteeringPending = errors.New("steering pending at completion checkpoint")
@@ -18,7 +20,7 @@ type steeringMessage struct {
 
 func steeringCursor(envelope JSON) int {
 	runtime, _ := envelope["runtime"].(map[string]any)
-	cursor, _ := pathIndex(runtime["steering_cursor"])
+	cursor, _ := jsonvalue.Index(runtime["steering_cursor"])
 	return cursor
 }
 
@@ -126,7 +128,7 @@ func (h *AgentHost) applySteering(run StoredRun, state *RuntimeState) (StoredRun
 		if err != nil {
 			return run, false, hostError("run_state_invalid")
 		}
-		if err = strictUnmarshal(raw, &inputs); err != nil {
+		if err = jsonvalue.DecodeStrict(raw, &inputs); err != nil {
 			return run, false, hostError("run_state_invalid")
 		}
 	}

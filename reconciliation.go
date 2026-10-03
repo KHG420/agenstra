@@ -5,6 +5,8 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // ReconciliationContext gives a verifier a detached copy of the original uncertain invocation and trusted identity.
@@ -142,7 +144,7 @@ func (h *AgentHost) Reconcile(ctx context.Context, id, owner, invocationID, args
 		return run, hostError("run_state_invalid")
 	}
 	var verification ReconciliationContext
-	if err = strictUnmarshal(raw, &verification); err != nil {
+	if err = jsonvalue.DecodeStrict(raw, &verification); err != nil {
 		return run, hostError("run_state_invalid")
 	}
 	verificationCtx, cancel := context.WithTimeout(ctx, time.Duration(min(h.runSettings(run).InvocationTimeoutSeconds, h.Settings.LeaseSeconds/2)*1e9))

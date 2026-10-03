@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // InvocationContext carries the trusted identity and stable idempotency key of a call.
@@ -55,11 +57,11 @@ func (b OperationBinding) MarshalJSON() ([]byte, error) {
 	if err := dec.Decode(&fields); err != nil {
 		return nil, err
 	}
-	interval, err := pythonFloat(b.IntervalSeconds)
+	interval, err := jsonvalue.Float(b.IntervalSeconds)
 	if err != nil {
 		return nil, err
 	}
-	timeout, err := pythonFloat(b.TimeoutSeconds)
+	timeout, err := jsonvalue.Float(b.TimeoutSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +74,7 @@ func (b OperationBinding) MarshalJSON() ([]byte, error) {
 func (b *OperationBinding) UnmarshalJSON(raw []byte) error {
 	type binding OperationBinding
 	var parsed binding
-	if err := strictUnmarshal(raw, &parsed); err != nil {
+	if err := jsonvalue.DecodeStrict(raw, &parsed); err != nil {
 		return err
 	}
 	if len(parsed.IDPath) == 0 || len(parsed.StatusPath) == 0 || parsed.PollCapability == "" || len(parsed.PollArgument) == 0 {
@@ -312,7 +314,7 @@ func ExecuteCall(ctx context.Context, provider CapabilityProvider, grants map[st
 	}
 	// Provider code receives its own arguments, so it cannot alter the saved
 	// invocation or the caller's data after the parameter digest was checked.
-	arguments, err := cloneJSON(call.Arguments)
+	arguments, err := jsonvalue.Clone(call.Arguments)
 	if err != nil || arguments == nil {
 		return CallOutcome{ErrorCode: "capability_input_invalid"}, nil
 	}
@@ -321,7 +323,7 @@ func ExecuteCall(ctx context.Context, provider CapabilityProvider, grants map[st
 		copy := *inv
 		providerInvocation = &copy
 	}
-	projection, err := cloneJSON(cap.ModelOutput)
+	projection, err := jsonvalue.Clone(cap.ModelOutput)
 	if err != nil {
 		return CallOutcome{ErrorCode: "model_output_config_invalid"}, nil
 	}
@@ -332,7 +334,7 @@ func ExecuteCall(ctx context.Context, provider CapabilityProvider, grants map[st
 	if result.ErrorCode != "" || result.Data == nil {
 		return CallOutcome{ErrorCode: firstNonempty(result.ErrorCode, "upstream_response_invalid")}, nil
 	}
-	data, err := cloneJSON(result.Data)
+	data, err := jsonvalue.Clone(result.Data)
 	if err != nil {
 		return CallOutcome{ErrorCode: "upstream_response_invalid"}, nil
 	}

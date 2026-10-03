@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // HostError carries a stable run lifecycle or authorization error code.
@@ -439,7 +441,7 @@ func (h *AgentHost) SupplyInput(ctx context.Context, id, owner, field, text stri
 	}
 	inputs := []memoryInput{}
 	if raw, err := CanonicalJSON(run.State["memory_inputs"]); err == nil && run.State["memory_inputs"] != nil {
-		if err := strictUnmarshal(raw, &inputs); err != nil {
+		if err := jsonvalue.DecodeStrict(raw, &inputs); err != nil {
 			return run, hostError("run_state_invalid")
 		}
 	}

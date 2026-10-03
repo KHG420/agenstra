@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+
+	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
 
 // ResultRefRequest names evidence; only the server resolves its business ID.
@@ -18,7 +20,7 @@ type ResultRefRequest struct {
 func (r *ResultRefRequest) UnmarshalJSON(raw []byte) error {
 	type shape ResultRefRequest
 	var parsed shape
-	if err := strictUnmarshal(raw, &parsed); err != nil {
+	if err := jsonvalue.DecodeStrict(raw, &parsed); err != nil {
 		return err
 	}
 	*r = ResultRefRequest(parsed)
@@ -45,7 +47,7 @@ func validResultRefRequest(ref ResultRefRequest) bool {
 				return false
 			}
 		case int, float64, json.Number:
-			index, ok := pathIndex(part)
+			index, ok := jsonvalue.Index(part)
 			if !ok || index < 0 {
 				return false
 			}
