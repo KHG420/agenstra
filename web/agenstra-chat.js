@@ -258,7 +258,7 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
         const p = document.createElement("p");p.className = "notice";
         p.textContent = [ref.label || ref.entity_type || (this.getAttribute("lang") === "en" ? "Result" : "业务对象"), ref.id].join(": ");turn.append(p);
       }
-      if (message.error_code) { const p = document.createElement("p");p.className = "notice";p.textContent = (Array.from(receipts.values()).some(receipt => receipt.effect === "write") ? outcomes.incomplete : t.error) + " (" + message.error_code + ")";turn.append(p); }
+      if (message.error_code && !(state === "cancelled" && message.error_code === "cancel_requested")) { const p = document.createElement("p");p.className = "notice";p.textContent = (Array.from(receipts.values()).some(receipt => receipt.effect === "write") ? outcomes.incomplete : t.error) + " (" + message.error_code + ")";turn.append(p); }
       if (state === "needs_input") {
         this.awaitingInput = { run, runtime, messageID: message.id };
         const p = document.createElement("p");p.id = "input-prompt-" + message.id;p.className = "notice";p.textContent = runtime.input_prompt;turn.append(p);

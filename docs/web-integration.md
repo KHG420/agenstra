@@ -197,10 +197,15 @@ await client.send("查询待处理订单", { clientId: client.id() });
 // 用户切换会话：await client.selectConversation(chosenConversationId);
 // 用户新建会话：await client.createConversation();
 // 手动页面变化：await client.updatePageObservation({ page: "orders" });
-// 结束使用：stopWatching(); await client.destroy();
+// 路由组件退出：stopWatching(); await client.destroy({ closeSession: false });
+// 退出登录或永久结束浏览器绑定：await client.destroy();
 ```
 
-`hostRouter` 和 `hostChatView` 代表宿主已有的路由和 UI。SDK 不创建任何 DOM 或样式。React/Vue 中只需在相应生命周期创建 client、订阅状态和解除订阅。结束使用或切换登录用户时调用 `client.destroy()`。一个 tab 对同一 endpoint/integration 使用一个 client。默认 `sessionStorage` 保存所选会话 ID、tab 绑定和执行回执，不保存 Agent 会话上下文；可传 `storage: null`。禁用存储后仍可通过会话列表手动恢复，服务端仍阻止重复认领。
+`hostRouter` 和 `hostChatView` 代表宿主已有的路由和 UI。SDK 不创建任何 DOM 或样式。一个 tab 对同一 endpoint/integration 使用一个 client。React/Vue 中优先由应用或登录会话持有 client，路由组件只订阅和解除订阅；这样切换页面后仍可处理已绑定的任务和回执。
+
+如果 client 由路由组件持有，组件卸载时调用 `client.destroy({ closeSession: false })`，停止本地轮询和订阅，保留服务端绑定及恢复身份。回到页面后创建 client、注册相同 handlers，再调用 `connectBrowser()` 恢复；离开期间任务可能等待浏览器，等待仍受原任务期限约束。默认 `client.destroy()` 会永久关闭服务端浏览器会话，仅用于退出登录、切换登录用户或明确结束该绑定。把默认关闭用于普通路由卸载，会使原任务留在已关闭的 session 上；新的页面即使显示已连接，也不能执行原任务。
+
+默认 `sessionStorage` 保存所选会话 ID、tab 绑定和执行回执，不保存 Agent 会话上下文；可传 `storage: null`。禁用存储后仍可通过会话列表手动恢复，服务端仍阻止重复认领；上述销毁并重建 client 的自动浏览器恢复需要保留存储。
 
 `listConversations()` 返回当前 integration 下该用户最近的最多 100 个会话。`selectConversation(id)` 验证会话归属和 integration，立即发布所选会话的历史及状态。切换失败保留此前选择；旧会话的迟到轮询不会覆盖新会话。选择和创建按调用顺序串行化。未显式选择时，`getConversation()` 恢复已保存的会话 ID；没有可用会话时自动创建。切换不取消、不迁移旧任务的浏览器绑定。浏览器连接受阻时，仍可读取、选择和创建会话、查看任务状态以及调用 `cancelMessage`；这些操作成功不代表浏览器已连接。`watchConversation` 同时尝试浏览器连接和聊天轮询，连接错误不阻止历史显示。启用控制桥的 `send` 和 `run` 必须先完成浏览器连接。
 

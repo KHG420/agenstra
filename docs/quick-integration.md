@@ -79,7 +79,7 @@ const chat = mountAgenstraChat(document.querySelector("#agent"), {
 
 组件提供发送、进度、确认、补充输入、取消、核对、恢复权限和读取诊断。回答支持表格、有序/无序列表、加粗、行内代码和围栏代码块；这是安全的 Markdown 子集，HTML、链接、图片及其他语法保留为文本。所有内容通过 DOM 文本节点构建，模型 HTML 不会执行。文案也可通过 custom element 的 `subtitle`、`empty-title`、`empty-hint`、`placeholder` 属性设置。CSS 变量 `--agenstra-accent`、`--agenstra-height` 等可匹配宿主主题。组件使用 Shadow DOM；严格限制内联样式的宿主应配置合适的样式策略。
 
-组件不拥有传入的 client。卸载时调用 `chat.unmount()` 解除观察；宿主结束该 client 的生命周期时调用 `client.destroy()`。组件未导入时，headless client 不加载 DOM、CSS 或 UI 依赖。
+组件不拥有传入的 client。卸载时调用 `chat.unmount()` 解除观察。优先由应用或登录会话持有 client，让路由切换后仍可执行任务；若 client 随路由组件卸载，调用 `client.destroy({ closeSession: false })`，保留浏览器绑定供下次挂载恢复。默认 `client.destroy()` 会永久关闭绑定，用于退出登录、切换用户或明确结束使用，不能当作普通路由卸载。组件未导入时，headless client 不加载 DOM、CSS 或 UI 依赖。生命周期与存储限制见[Web 接入](web-integration.md#宿主使用无-ui-的-sdk)。
 
 会话创建与选择使用 `client.createConversation()`、`listConversations()` 和 `selectConversation(id)`；[完整 Go 示例](../examples/web-integration/README.md)已复用正式组件，仍使用明确标注的演示数据和固定模型。
 

@@ -81,6 +81,9 @@ export class AgenstraClient {
   /** Requires a server-side verifier for the original business invocation. */
   reconcileInvocation(id: string, invocation: JSONObject, revision: number): Promise<Run>;
   run(instruction: string, options?: { requestId?: string; sources?: RunSource[] }): Promise<Run>;
+  /** Stops local work. By default also permanently closes the browser session.
+   * Use closeSession: false on route unmount to retain its stored binding for reconnect.
+   */
   destroy(options?: { closeSession?: boolean }): Promise<void>;
 }
 export function createAgenstraClient(options: ClientOptions): AgenstraClient;

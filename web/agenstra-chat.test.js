@@ -41,6 +41,44 @@ test("write receipts remain visible when a task fails and accepted is never succ
   } finally { globalThis.document = previous; }
 });
 
+test("intentional cancellation is a stopped task while uncertain receipts and real errors stay visible", () => {
+  const previous = globalThis.document;
+  class Element {
+    constructor() { this.children = []; this.dataset = {}; this.textContent = ""; }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    querySelectorAll() { return []; }
+  }
+  globalThis.document = { createElement: () => new Element() };
+  try {
+    for (const locale of ["en", "zh-CN"]) {
+      for (const [status, code, uncertain, showError] of [
+        ["cancelled", "cancel_requested", false, false],
+        ["cancelled", "cancel_requested", true, false],
+        ["cancelled", "provider_outcome_unknown", true, true],
+        ["failed", "cancel_requested", false, true]
+      ]) {
+        const chat = Object.create(AgenstraChat.prototype);
+        chat.log = Object.assign(new Element(), { scrollHeight: 0, scrollTop: 0, clientHeight: 100 });
+        chat.input = { value: "" };
+        const nodes = new Map();
+        chat.shadowRoot = { querySelector: name => { if (!nodes.has(name)) nodes.set(name, new Element()); return nodes.get(name); } };
+        chat.getAttribute = () => locale;
+        chat.text = { statuses: { cancelled: "Stopped", failed: "Incomplete" }, error: "Request failed", placeholder: "Message", send: "Send" };
+        chat.button = () => new Element();
+        const receipts = uncertain ? [{ invocation_id: "write", capability: "business.update", effect: "write", status: "unknown" }] : [];
+        chat.render({ conversation: { id: "conversation" }, messages: [{ id: "message", text: "Task", status, error_code: code,
+          run: { run_id: "run", status, state: { runtime: { invocation_receipts: receipts } } }
+        }] });
+        const turn = chat.log.children[0];
+        assert.equal(turn.children.find(node => node.className === "status").children[0].textContent, chat.text.statuses[status]);
+        assert.equal(turn.children.some(node => node.textContent.endsWith("(" + code + ")")), showError, "only expected cancellation hides the generic error");
+        if (uncertain) assert.match(turn.children.find(node => node.className === "notice action-outcome").textContent, locale === "en" ? /outcome unconfirmed/ : /结果尚未确认/);
+      }
+    }
+  } finally { globalThis.document = previous; }
+});
+
 test("model HTML and code fence content remain text", () => {
   const previous = globalThis.document;
   class Element {
