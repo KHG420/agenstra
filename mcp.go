@@ -100,15 +100,21 @@ type stdioMCP struct {
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
 	stdout    *bufio.Reader
-	mu        sync.Mutex
+	mu        chan struct{}
+	muOnce    sync.Once
 	nextID    int
 	closeOnce sync.Once
 	closeErr  error
 }
 
 func (c *stdioMCP) request(ctx context.Context, method string, params JSON, notification bool) (JSON, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.muOnce.Do(func() { c.mu = make(chan struct{}, 1) })
+	select {
+	case c.mu <- struct{}{}:
+		defer func() { <-c.mu }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -207,15 +213,24 @@ type httpMCP struct {
 	client    *http.Client
 	session   string
 	protocol  string
-	mu        sync.Mutex
+	mu        chan struct{}
+	muOnce    sync.Once
 	nextID    int
 	closeOnce sync.Once
 	closeErr  error
 }
 
 func (c *httpMCP) request(ctx context.Context, method string, params JSON, notification bool) (JSON, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.muOnce.Do(func() { c.mu = make(chan struct{}, 1) })
+	select {
+	case c.mu <- struct{}{}:
+		defer func() { <-c.mu }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	msg := JSON{"jsonrpc": "2.0", "method": method, "params": params}
 	if !notification {
 		c.nextID++
