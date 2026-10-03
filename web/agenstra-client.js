@@ -345,7 +345,9 @@ export class AgenstraClient {
     const run = await this.getRun(receipt.command.run_id);
     const pending = run.state?.runtime?.pending?.find(item => item.invocation_id === receipt.command.id);
     const unsettled = pending && (["unknown", "in_flight"].includes(pending.status) || pending.poll_in_flight || (pending.status === "waiting" && pending.operation));
-    if (run.status === "needs_reconciliation" || (["failed", "cancelled"].includes(run.status) && unsettled)) await this.reconcile(receipt.command.id, run.revision);
+    // Another command may have paused this run; reconcile only this receipt's
+    // original invocation while it still has an unsettled outcome.
+    if (["needs_reconciliation", "failed", "cancelled"].includes(run.status) && unsettled) await this.reconcile(receipt.command.id, run.revision);
     if (["completed", "failed", "cancelled"].includes(run.status)) {
       receipt.status = "acked"; this.save("receipts", this.receipts);
     }

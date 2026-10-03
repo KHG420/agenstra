@@ -112,3 +112,19 @@
 请求在途时曾观察到 196 笔 settled 和一笔 unknown、40 元保守预留及 `budget_exhausted`。代理在发送前先保存 unknown/预留，免费通道收到响应并核对网关 usage 后再结算；该在途请求随后返回 HTTP 200，账本自动变为 settled/0，没有手工结算、降低预留或重置账本。不能把最近一分钟样本的时间当作随后预算读取的精确时间，也不能将一次在途状态直接记为终态计费失败。截至上海时间 04:18，累计 **198 次 settled、0 次 unknown，网关记录费用及未结算预留均为 0 元**，费用上限仍为人民币 50 元。
 
 本次证明客户端在**已收到业务成功响应且成功回执已持久化**之后崩溃，恢复时能只补原回执并完成原任务。业务请求已经到达远端、但成功响应尚未回到客户端的窗口仍可能产生 unknown，不能据本次结果自动重放；Sub2API 普通写 API 的远端幂等保证仍未证明。持续监督已恢复 `idle`，下一波号仍为 5，原截止不变；当前有 38 个 run（26 completed、8 failed、4 cancelled）、36 个 conversation、117 个 artifact、41 个 command，到期队列为空。
+
+## 业务写入后响应丢失与原命令核对
+
+上海时间 **2026-10-04 04:41:04 至 04:52:17**，对同一专属管理员发起一次新的自然语言请求，将本人测试账号的并发上限从 5 调整为 4，再按 ID 读回。审批绑定原 invocation、能力、参数摘要和修订版本；处理器再次读取业务基线，真实 PUT 只发送并发字段。一个仅监听本机、仅允许该专属目标且只转发一次 PUT 的独立故障代理，取得 Sub2API 的真实 HTTP 200 成功响应并保存审计回执后，直接关闭客户端连接，不发送任何 HTTP 响应字节。代理记录入站 PUT、上游 PUT 各一次，SDK handler 收到 `TypeError`，没有收到 HTTP 响应。
+
+正式 SDK 将原回执持久化为 `unknown/browser_handler_outcome_unknown`，框架命令和原 invocation 同为 `unknown`，原 run 进入 `needs_reconciliation`，执行次数为 1。活动任务下的会话恢复被 `browser_recovery_run_active` 拒绝；没有已验证成功/失败回执的原命令核对被 `browser_result_not_verified` 拒绝。两项拒绝保留原状态，没有重新执行业务写入。
+
+这次真实路径暴露一个 SDK 缺陷：同一 run 的较早读取已确认成功，但缓存回执仍等待 run 终态；后续写入进入 `needs_reconciliation` 时，`finishReceipt` 仅依据整个 run 的状态，对较早读取也请求核对，服务器返回 `reconciliation_invocation_mismatch`，使本次回执刷新和浏览器轮询提前中止。修复将核对条件限定为**该回执对应的原 invocation 仍未结算**；其他已完成命令不触发核对，真正未结算命令保留原恢复路径。两个本地回归分别覆盖较早调用已从 pending 移出和仍以成功状态保留，修复前均失败，修复后通过；原 ACK、断线恢复、失败/取消后核对等相关测试继续通过。完整 `make check` 通过，Web 测试共 106 项。
+
+业务处理器的原尝试没有重跑。控制器从故障代理保留的原成功响应、新管理员登录后的独立 GET 和隔离 PostgreSQL 三处核对专属账号、值及未改变的角色/状态，再核对原命令、session/generation、operation ID、审批及各自的参数摘要。使用原 session key/generation，只补交一次同命令的真实成功回执，再以最新 revision 对原命令执行一次 reconciliation。新 SDK 进程加载同一持久化会话及缓存，使用已修复的框架客户端继续原 run，generation 从 1 进入 2；没有新建 run、conversation 或 session。模型随后按 ID 读回 4，原 run 为 `completed`，pending 为空，原 invocation 为 `succeeded/reconciled` 且 attempts 为 1。核对后的终态 Fact 来源为 `ui.command_status`、质量为 `verified_reconciliation`，结果哈希与原成功响应和服务器命令回执一致；较早的 unknown Fact 原样保留。
+
+实验校验器的两项误报及启动失败均保留。首次启动在 SDK、模型和业务请求开始前，因 Python 解释器路径规范化导致进程归属校验失败，代理已退出且端口释放后才修正启动；实际业务阶段先错误地要求 BrowserCommand 的“原参数 SHA”与 Host 的“能力加参数 SHA”相同，恢复阶段又错误地选择同一命令较早的 unknown Fact。两种摘要分别按自己的契约核验，终态改为沿原 invocation 日志的 `fact_id` 获取准确 Artifact。原驱动结果仍记录 `failed_validation`，补充的离线取证 13 项全部通过，明确业务与原命令核对为 `verified_completed`；没有通过重发模型或 PUT 改写失败。私有验收器源码已局部修正，语法检查通过。
+
+本次共 **8 次模型请求**：记忆提取 1 次、决策 6 次、完成复核 1 次，无无效 JSON、格式恢复或模型重试。新增八笔按网关的普通输入加缓存读取口径与 run telemetry 逐笔核对；其中四笔使用缓存输入。累计 **206 次已结算、0 次未知，网关费用及未结算预留均为 0 元**，用户总费用上限仍为人民币 50 元。两次测试 SDK 进程和故障代理已退出，代理端口已释放，原会话已关闭并从数据库确认；实验主体服务继续运行，监督已恢复 `idle`，下一波仍为 5，原截止保持上海时间 2026-10-07 00:53:34。
+
+截至上海时间 04:58，状态包含 39 个 run（27 completed、8 failed、4 cancelled）、36 个 conversation、126 个 artifact、44 个 command，到期队列为空。本次证明**客户端没有收到成功响应时保留 unknown，依据独立保存的原成功响应及业务读回核对同一命令，恢复过程不重复写入**。这依赖故障代理真实保存的原回执和排他的专属测试目标；不能据此把只有业务当前值的情况自动判为原调用成功，也不提供 Sub2API 普通写 API 的远端幂等保证。上游原回执完全不可取得时仍需保留不确定状态并由宿主核对，72 小时长期运行验收也尚未结束。

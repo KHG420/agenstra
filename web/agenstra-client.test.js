@@ -261,7 +261,7 @@ for (const failStep of ["getRun", "reconcile"]) {
         completed = true;return response({ status: "queued" });
       }
       if (fail && failStep === "getRun") { fail = false;throw new Error("lost run response"); }
-      return response({ status: completed ? "completed" : "needs_reconciliation", revision: 2 });
+      return response({ status: completed ? "completed" : "needs_reconciliation", revision: 2, state: { runtime: { pending: completed ? [] : [{ invocation_id: command.id, status: "unknown" }] } } });
     };
     const first = client(fetch, store);
     t.after(() => first.destroy({ closeSession: false }));
@@ -287,7 +287,7 @@ for (const failStep of ["getRun", "reconcile"]) {
         completed = true;return response({ status: "queued" });
       }
       if (fail && failStep === "getRun") { fail = false;throw new Error("lost run response"); }
-      return response({ status: completed ? "completed" : "needs_reconciliation", revision: 2 });
+      return response({ status: completed ? "completed" : "needs_reconciliation", revision: 2, state: { runtime: { pending: completed ? [] : [{ invocation_id: command.id, status: "unknown" }] } } });
     };
     const first = client(fetch, store);
     first.receipts[command.id] = { command, status: "succeeded", result: { page: "orders" } };
@@ -305,12 +305,47 @@ test("a confirmed receipt retries when Host enters reconciliation after ACK", as
   let reads = 0, recovery = 0;
   const c = client(async path => {
     if (path.endsWith("/reconcile")) { recovery++;return response({ status: "queued" }); }
-    reads++;return response({ status: reads === 1 ? "waiting" : "needs_reconciliation", revision: 3 });
+    reads++;return response({ status: reads === 1 ? "waiting" : "needs_reconciliation", revision: 3, state: { runtime: { pending: [{ invocation_id: command.id, status: "unknown" }] } } });
   });
   c.receipts[command.id] = { command, status: "confirmed" };
   await c.flushReceipts();await c.flushReceipts();assert.equal(recovery, 1);
   await c.destroy({ closeSession: false });
 });
+
+for (const includeSettledCall of [false, true]) {
+  test(`a confirmed earlier receipt cannot block an unknown command when its call is ${includeSettledCall ? "settled" : "absent"}`, async t => {
+    const blocked = { ...command, id: "cmd-write", action: "ui.update_user", arguments: { id: 12, concurrency: 4 } };
+    const pending = [{ invocation_id: blocked.id, status: "unknown" }];
+    if (includeSettledCall) pending.unshift({ invocation_id: command.id, status: "succeeded" });
+    const errors = [], results = [], reconciled = [];
+    let polls = 0;
+    const c = client(async (path, options) => {
+      if (path.endsWith("/reconcile")) {
+        reconciled.push(path);
+        return response({ code: "reconciliation_invocation_mismatch" }, 409);
+      }
+      if (path.endsWith("/result")) {
+        assert.equal(path, "/browser/v1/commands/" + blocked.id + "/result");
+        results.push(JSON.parse(options.body).status);
+        return response({ status: "unknown" });
+      }
+      if (path.endsWith("/poll")) { polls++;return response({ commands: [], blocked_unknown: true }); }
+      assert.equal(path, "/web/v1/runs/" + command.run_id);
+      return response({ status: "needs_reconciliation", revision: 4, state: { runtime: { pending } } });
+    });
+    t.after(() => c.destroy({ closeSession: false }));
+    c.on("error", error => errors.push(error));
+    c.receipts[command.id] = { command, status: "confirmed", result: { page: "orders" } };
+    c.receipts[blocked.id] = { command: blocked, status: "unknown", error_code: "browser_handler_outcome_unknown" };
+    await c.pollBrowser();
+    assert.deepEqual(errors, []);
+    assert.deepEqual(reconciled, []);
+    assert.deepEqual(results, ["unknown"]);
+    assert.equal(polls, 1);
+    assert.equal(c.receipts[command.id].status, "confirmed");
+    assert.equal(c.receipts[blocked.id].status, "unknown");
+  });
+}
 
 test("destroy while acquiring a ticket cannot start a later request", async () => {
   let provideTicket, entered;let requests = 0;
