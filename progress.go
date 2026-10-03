@@ -49,14 +49,48 @@ func recordInspection(state *RuntimeState, value any) {
 	}
 }
 
-func updateProgress(state *RuntimeState, limit int) bool {
+// A completed browser read wraps business data in a new command receipt. The
+// delivery ID is not new information, unlike a new write or changed read data.
+func browserReadProgressKeys(state *RuntimeState, capabilities map[string]CapabilityDescription) map[string]string {
+	facts := map[string]Fact{}
+	for _, fact := range state.Facts {
+		facts[fact.FactID] = fact
+	}
+	keys := map[string]string{}
+	for _, observation := range currentEvidenceObservations(state, state.Observations) {
+		capability, ok := capabilities[observation.Capability]
+		if !ok || capability.Effect != "read" || capability.Operation == nil || capability.Operation.PollCapability != "ui.command_status" || observation.ErrorCode != nil || observation.FactID == nil {
+			continue
+		}
+		fact, ok := facts[*observation.FactID]
+		if !ok || fact.SourceCapability != "ui.command_status" {
+			continue
+		}
+		data, ok := fact.Value["data"].(map[string]any)
+		if !ok || data["status"] != "succeeded" {
+			continue
+		}
+		if _, ok := data["result"]; !ok {
+			continue
+		}
+		keys[fact.FactID] = progressKey(JSON{"capability": capability.Name, "result": data["result"]})
+	}
+	return keys
+}
+
+func updateProgress(state *RuntimeState, limit int, capabilities map[string]CapabilityDescription) bool {
 	if state.Progress == nil {
 		state.Progress = &ProgressTracker{}
 	}
 	// Deduplicate content: new call refs or Fact IDs alone are not progress.
 	keys := map[string]bool{}
+	readKeys := browserReadProgressKeys(state, capabilities)
 	for _, fact := range state.Facts {
-		keys[progressKey(JSON{"capability": fact.SourceCapability, "value": fact.Value})] = true
+		key, ok := readKeys[fact.FactID]
+		if !ok {
+			key = progressKey(JSON{"capability": fact.SourceCapability, "value": fact.Value})
+		}
+		keys[key] = true
 	}
 	for _, skill := range state.LoadedSkills {
 		keys["skill:"+skill] = true
@@ -154,15 +188,29 @@ func currentEvidenceObservations(state *RuntimeState, observations []Observation
 		}
 	}
 	result := append([]Observation{}, observations...)
+	redundantPolls := map[string]bool{}
 	for i, observation := range result {
-		if observation.FactID == nil || facts[*observation.FactID] || observation.ErrorCode != nil {
+		if observation.FactID == nil || observation.ErrorCode != nil {
 			continue
 		}
 		if poll, ok := polls[deterministicInvocationID(state.RunID, observation.CallRef)]; ok {
+			if facts[*observation.FactID] && *observation.FactID != *poll.FactID {
+				continue
+			}
 			result[i].FactID = poll.FactID
+			redundantPolls[poll.CallRef] = true
 		}
 	}
-	return result
+	// The original action now carries this invocation's current result. Keep a
+	// standalone poll when its action is absent, but do not spend two observation
+	// slots or count two completions for the same action. Audit state is unchanged.
+	projected := make([]Observation, 0, len(result))
+	for _, observation := range result {
+		if !redundantPolls[observation.CallRef] {
+			projected = append(projected, observation)
+		}
+	}
+	return projected
 }
 
 const progressUsagePrompt = "progress summarizes observed outcomes; pending is unfinished. Reuse cited Facts. On stagnation_warning, change approach or explain the verified limitation."

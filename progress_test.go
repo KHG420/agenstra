@@ -62,27 +62,27 @@ func TestStagnationDetectsInspectionCyclesAndSurvivesRestore(t *testing.T) {
 
 func TestProgressCountsNewEvidenceAndInputButNotNewFactIDs(t *testing.T) {
 	state := &RuntimeState{}
-	if updateProgress(state, 3) {
+	if updateProgress(state, 3, nil) {
 		t.Fatal("initial stagnation")
 	}
 	f := Fact{FactID: NewID(), SourceCapability: "records.read", Value: JSON{"count": 1}}
 	state.Facts = append(state.Facts, f)
-	updateProgress(state, 3)
+	updateProgress(state, 3, nil)
 	f.FactID = NewID()
 	state.Facts = append(state.Facts, f)
-	updateProgress(state, 3)
+	updateProgress(state, 3, nil)
 	if state.Progress.NoProgressRounds != 1 {
 		t.Fatal("duplicate content counted as progress")
 	}
 	f.Value = JSON{"count": 2}
 	state.Facts = append(state.Facts, f)
-	updateProgress(state, 3)
+	updateProgress(state, 3, nil)
 	if state.Progress.NoProgressRounds != 0 {
 		t.Fatal("new data did not reset stagnation")
 	}
-	updateProgress(state, 3)
+	updateProgress(state, 3, nil)
 	state.Followups = append(state.Followups, "Use the second result")
-	updateProgress(state, 3)
+	updateProgress(state, 3, nil)
 	if state.Progress.NoProgressRounds != 0 {
 		t.Fatal("new user input did not reset stagnation")
 	}

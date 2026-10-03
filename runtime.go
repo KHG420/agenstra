@@ -474,7 +474,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		state.ErrorCode = strptr("model_round_budget_exhausted")
 		return nil
 	}
-	if updateProgress(state, r.MaxStagnantRounds) {
+	if updateProgress(state, r.MaxStagnantRounds, r.Provider.Capabilities()) {
 		state.Status = "failed"
 		state.ErrorCode = strptr("agent_stagnated")
 		return nil
@@ -666,7 +666,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			break
 		}
 		fact := facts[decision.FactID]
-		recordInspection(state, JSON{"fact": progressKey(fact.Value), "path": decision.Path})
+		key := browserReadProgressKeys(state, r.Provider.Capabilities())[fact.FactID]
+		if key == "" {
+			key = progressKey(fact.Value)
+		}
+		recordInspection(state, JSON{"fact": key, "path": decision.Path})
 		fact.Value = JSON{"value": selected}
 		fact.ModelOutput = nil
 		view := factView(fact, 6000)

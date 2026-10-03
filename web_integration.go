@@ -455,8 +455,10 @@ func (p *browserProvider) Invoke(ctx context.Context, name string, args map[stri
 		if s.Closed || s.Generation != binding.Generation || p.web.Store.store.now()-s.LastSeen > 30 {
 			return CapabilityResult{ErrorCode: "browser_offline"}, nil
 		}
-		expiry := time.UnixMilli(int64((s.LastSeen + 30) * 1000))
-		return CapabilityResult{Data: JSON{"context": s.Context, "revision": s.ContextRevision, "profile_version": p.profile.profile.Version}, ReferenceScope: "durable", ExpiresAt: &expiry}, nil
+		// This is an observed snapshot, not a heartbeat lease. Enqueue and begin
+		// still check the live session/generation and the observed page revision.
+		// A normal approval delay must not expire references to an unchanged page.
+		return CapabilityResult{Data: JSON{"context": s.Context, "revision": s.ContextRevision, "profile_version": p.profile.profile.Version}, ReferenceScope: "durable"}, nil
 	}
 	if validateSchema(p.profile.inputs[name], args) != nil {
 		return CapabilityResult{ErrorCode: "capability_input_invalid"}, nil

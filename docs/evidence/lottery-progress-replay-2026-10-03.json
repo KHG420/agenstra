@@ -1,0 +1,83 @@
+{
+  "schema": "agenstra.lottery-progress-replay.v1",
+  "date": "2026-10-03",
+  "source_framework_commit": "5232a25",
+  "dataset": "Saved isolated fictional lottery runs; no new business or model requests",
+  "measurement": "Canonical JSON characters of the model observation view at each stored terminal state; not the entire context or token usage",
+  "runs": [
+    {
+      "after_observation_characters": 373,
+      "after_observations": 2,
+      "before_observation_characters": 593,
+      "before_observations": 3,
+      "completed_actions": 2,
+      "run_id": "0cb43daf-f362-5272-8655-f0f6dc349613",
+      "status": "completed"
+    },
+    {
+      "after_observation_characters": 697,
+      "after_observations": 3,
+      "before_observation_characters": 1137,
+      "before_observations": 5,
+      "completed_actions": 3,
+      "run_id": "5b23fe8c-cd7c-5486-820c-d39c8fcf1dd0",
+      "status": "completed"
+    },
+    {
+      "after_observation_characters": 1161,
+      "after_observations": 5,
+      "before_observation_characters": 1601,
+      "before_observations": 7,
+      "completed_actions": 4,
+      "run_id": "4fa9c71d-c7a3-52d6-bb32-b1a4b1072e70",
+      "status": "failed"
+    },
+    {
+      "after_observation_characters": 2011,
+      "after_observations": 7,
+      "before_observation_characters": 2231,
+      "before_observations": 8,
+      "completed_actions": 4,
+      "run_id": "174e2fb6-3a71-57a1-8ffc-2061dc9d8eb4",
+      "status": "failed"
+    },
+    {
+      "after_observation_characters": 1133,
+      "after_observations": 4,
+      "before_observation_characters": 1573,
+      "before_observations": 6,
+      "completed_actions": 4,
+      "run_id": "57cf7ebe-5241-5c93-b82b-f0ee56bd5c55",
+      "status": "completed"
+    },
+    {
+      "after_observation_characters": 386,
+      "after_observations": 2,
+      "before_observation_characters": 606,
+      "before_observations": 3,
+      "completed_actions": 2,
+      "run_id": "d9d5b3c6-0170-575a-b405-38965fe94d03",
+      "status": "completed"
+    },
+    {
+      "after_observation_characters": 869,
+      "after_observations": 4,
+      "before_observation_characters": 1089,
+      "before_observations": 5,
+      "completed_actions": 3,
+      "run_id": "5b4b2028-dff3-53da-ae2d-122519968c3d",
+      "status": "completed"
+    }
+  ],
+  "totals": {
+    "before_observations": 37,
+    "after_observations": 27,
+    "before_observation_characters": 8830,
+    "after_observation_characters": 6630
+  },
+  "limits": [
+    "Historical terminal-state replay does not measure live decisions, wording quality or model request savings.",
+    "Failed run states remain failed; replay does not execute or recover those tasks.",
+    "Full audit observations and business Facts are preserved."
+  ]
+}

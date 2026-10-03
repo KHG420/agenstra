@@ -97,6 +97,33 @@ test("bridge-only run does not create a chat conversation", async () => {
 });
 
 for (const failStep of ["getRun", "reconcile"]) {
+  test(`executing an action preserves the server ACK when ${failStep} subsequently fails`, async t => {
+    const store = storage();let calls = 0, ack = 0, recovery = 0, fail = true, completed = false;
+    const fetch = async (path, options) => {
+      if (path.endsWith("/begin")) return response({ accepted: true });
+      if (path.endsWith("/result")) { ack++;assert.equal(JSON.parse(options.body).status, "succeeded");return response({ status: "succeeded" }); }
+      if (path.endsWith("/reconcile")) {
+        recovery++;
+        if (fail && failStep === "reconcile") { fail = false;throw new Error("lost reconciliation response"); }
+        completed = true;return response({ status: "queued" });
+      }
+      if (fail && failStep === "getRun") { fail = false;throw new Error("lost run response"); }
+      return response({ status: completed ? "completed" : "needs_reconciliation", revision: 2 });
+    };
+    const first = client(fetch, store);
+    t.after(() => first.destroy({ closeSession: false }));
+    first.registerActions({ "ui.navigate": () => { calls++;return { page: "orders" }; } });
+    await first.executeCommand(command);
+    assert.equal(first.receipts[command.id].status, "confirmed");
+    await first.destroy({ closeSession: false });
+    const resumed = client(fetch, store);
+    t.after(() => resumed.destroy({ closeSession: false }));
+    resumed.registerActions({ "ui.navigate": () => { calls++;return { page: "orders" }; } });
+    await resumed.executeCommand(command);await resumed.flushReceipts();
+    assert.equal(calls, 1);assert.equal(ack, 1);
+    assert.equal(recovery, failStep === "reconcile" ? 2 : 1);
+    assert.equal(resumed.receipts[command.id].status, "acked");
+  });
   test(`ACK persists recovery work when ${failStep} fails and the client reloads`, async () => {
     const store = storage();let ack = 0, recovery = 0, fail = true, completed = false;
     const fetch = async path => {
@@ -338,4 +365,48 @@ test('public HTTP pages without randomUUID still get stable valid UUID request I
     assert.match(first, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
     assert.notEqual(first, second);
   } finally { Object.defineProperty(globalThis, 'crypto', original); await c.destroy({ closeSession: false }); }
+});
+
+test("browser key rejection does not exchange another login ticket", async t => {
+  let tickets = 0, requests = 0;
+  const c = new AgenstraClient({ integration: "lottery", storage: null,
+    getSession: async () => { tickets++; return "ticket"; },
+    fetch: async () => { requests++; return response({ code: "browser_session_invalid" }, 401); },
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  await assert.rejects(c.request("/browser/v1/sessions/tab/observation", { method: "POST", browserKey: "key", body: {} }), { code: "browser_session_invalid" });
+  assert.equal(tickets, 1); assert.equal(requests, 1);
+});
+
+test("chat polling cannot report connected while the browser bridge failed", async t => {
+  const states = [];
+  const c = new AgenstraClient({ integration: "lottery", storage: null, browser: true, handlerVersion: "1", getSession: async () => "ticket",
+    fetch: async path => {
+      if (path.endsWith("/sessions")) return response({ session: { id: "tab", generation: 1, context_revision: 0 }, key: "key" });
+      if (path.endsWith("/observation")) return response({ code: "browser_session_invalid" }, 401);
+      if (path.endsWith("/conversations")) return response({ id: "chat", integration_id: "lottery" });
+      return response({ conversation: { id: "chat", integration_id: "lottery" }, messages: [] });
+    },
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.on("connection", state => states.push(state.status));
+  await assert.rejects(c.connectBrowser(), { code: "browser_session_invalid" });
+  c.chatWatchers = 1;
+  await c.pollChat();
+  assert.deepEqual(states, ["disconnected"]);
+});
+
+test("transient browser polling failure recovers its connected state", async t => {
+  let fail = true;
+  const states = [];
+  const c = new AgenstraClient({ integration: "lottery", storage: null, browser: true, getSession: async () => "ticket", fetch: async () => {
+    if (fail) throw new Error("temporary transport loss");
+    return response({ commands: [] });
+  } });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.browser = { id: "tab", generation: 1, key: "key" };
+  c.on("connection", state => states.push(state.status));
+  await c.pollBrowser(); clearTimeout(c.browserTimer);
+  fail = false; await c.pollBrowser();
+  assert.deepEqual(states, ["disconnected", "connected"]);
 });
