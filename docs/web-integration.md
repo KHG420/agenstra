@@ -255,7 +255,7 @@ stateDiagram-v2
     unknown --> failed: original definite failure
 ```
 
-SDK 执行前保存 command，执行后保存结果，再提交 ACK。ACK 丢失时重发原结果，不重跑 handler。服务端以 invocation ID 去重。刷新递增 generation，旧 queued/dispatched 动作取消，旧 running 变 unknown；原 generation 的缓存结果可确认原动作，并恢复同一个 operation。确认 ACK 后的恢复待办也会持久保留，以便重试网络和 revision 错误。
+SDK 执行前保存 command，执行后保存结果，再提交 ACK。ACK 丢失时重发原结果，不重跑 handler。服务端以 invocation ID 去重。刷新递增 generation，同一 owner、会话和 profile 的任务后续调用绑定同步到新代数，并清除旧页面观察版本，模型须重新读取 `ui.get_context`。旧 queued/dispatched 动作取消，旧 running 变 unknown；原 generation 的缓存结果可确认原动作，并恢复同一个 operation。确认 ACK 后的恢复待办也会持久保留，以便重试网络和 revision 错误。
 
 页面读取或同步在发送 begin 请求前失败时，SDK 报告错误并移除本次尚未认领的本地记录，允许同步恢复后继续投递原命令；此时没有执行 handler，也不提交 unknown 业务结果。begin 请求一旦尝试发送，丢失响应仍保留 unknown，不能自动重跑。SDK 在 handler 返回时复制结果，后续页面状态变化不改写原回执；结果无法复制时仍视为未知，不能把已经执行的动作当作未执行。已缓存回执的重试错误通过 SDK 的 error 事件报告，并保留回执。
 

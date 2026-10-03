@@ -75,6 +75,7 @@ export async function exportActions(profilePath, destination) {
   const types = ["// Generated from the host's frontend profile. Regenerate after contract changes.", "export interface ActionContext { commandId: string; runId: string }", "export interface ActionHandlers {", ...profile.actions.map(action => `  ${JSON.stringify(action.name)}: (args: ${schemaType(action.input_schema)}, context: ActionContext) => ${schemaType(action.output_schema)} | Promise<${schemaType(action.output_schema)}>;`), "}", ""].join("\n");
   await writeFile(resolve(target, "agenstra-actions.d.ts"), types);
   await writeFile(resolve(target, "agenstra-profile.js"), `// Generated version. Publish this profile to the server as well.\nexport const handlerVersion = ${JSON.stringify(profile.handler_version)};\n`);
+  await writeFile(resolve(target, "agenstra-profile.d.ts"), `export declare const handlerVersion: ${JSON.stringify(profile.handler_version)};\n`);
   const handlers = ["// Bind these handlers to the original application's business functions.", 'import { AgenstraActionError } from "./agenstra-client.js";', '/** @type {import("./agenstra-actions.d.ts").ActionHandlers} */', "export const actions = {", ...profile.actions.map(action => `  ${JSON.stringify(action.name)}: async () => { throw new AgenstraActionError("handler_not_implemented"); },`), "};", ""].join("\n");
   let created = true;
   try { await writeFile(resolve(target, "agenstra-handlers.js"), handlers, { flag: "wx" }); }

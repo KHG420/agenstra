@@ -90,6 +90,12 @@ func (w *WebIntegration) ResumeBrowserSession(owner, id, key string, generation 
 		s.LastSeen = w.Store.store.now()
 		s.Context = JSON{}
 		s.ContextRevision++
+		// Reconnect future calls without moving or replaying any old command.
+		// Their original generations and receipts remain independently fenced.
+		// The resumed page must be observed again before a new action can run.
+		if _, e := tx.Exec("UPDATE web_bindings SET payload=json_set(payload,'$.generation',?,'$.observed_revision',-1) WHERE owner=? AND payload->>'session_id'=? AND payload->>'profile_digest'=?", s.Generation, owner, s.ID, s.ProfileDigest); e != nil {
+			return e
+		}
 		return webSave(tx, "web_sessions", id, s)
 	})
 	s.KeyHash = ""
@@ -653,8 +659,11 @@ func (w *WebIntegration) authorizeCommand(ctx context.Context, owner string, c B
 	if e != nil {
 		return e
 	}
-	if b.SessionID != c.SessionID || b.Generation != c.Generation || b.ProfileDigest != c.ProfileDigest {
+	if b.SessionID != c.SessionID || b.ProfileDigest != c.ProfileDigest {
 		return hostError("browser_binding_mismatch")
+	}
+	if b.Generation != c.Generation {
+		return hostError("browser_generation_changed")
 	}
 	policy, e := w.Host.policy(ctx, owner, b.IntegrationID, true)
 	if e != nil {

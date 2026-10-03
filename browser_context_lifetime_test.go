@@ -90,3 +90,72 @@ func TestBrowserApprovalDelayStillChecksPageRevisionAndLiveness(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserResumeRefreshesRunBindingAndRequiresFreshObservation(t *testing.T) {
+	f := newWebFixture(t, &hostModel{decisions: browserDecisions()}, false)
+	run := f.run(t)
+	provider, err := f.h.ProviderFactory(t.Context(), "alice", "records-web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Close()
+	invoke := func(name string, args JSON) CapabilityResult {
+		t.Helper()
+		result, err := provider.Invoke(t.Context(), name, args, &InvocationContext{OwnerID: "alice", RunID: run.RunID, InvocationID: NewID()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	if result := invoke("ui.get_context", JSON{}); result.ErrorCode != "" {
+		t.Fatal(result)
+	}
+	command := f.dispatch(t)
+	if ok, _, err := f.w.BeginBrowserCommand(t.Context(), "alice", command.ID, f.key, 1); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if _, err := f.w.CompleteBrowserCommand("alice", command.ID, f.key, 1, "succeeded", JSON{"page": "orders"}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	other, otherKey, err := f.w.CreateBrowserSession(t.Context(), "alice", "records-web", "1", []string{"ui.navigate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRun, err := f.w.CreateBrowserRun(t.Context(), "alice", "records-web", other.ID, "Another tab", "other-tab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := f.w.ResumeBrowserSession("alice", f.session.ID, f.key, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.w.UpdatePageObservation("alice", resumed.ID, f.key, resumed.Generation, resumed.ContextRevision, JSON{"page": "orders"}); err != nil {
+		t.Fatal(err)
+	}
+	// Resuming a tab may reconnect future actions, but cannot reuse its old page snapshot.
+	if result := invoke("ui.navigate", JSON{"page": "details"}); result.ErrorCode != "browser_context_required" {
+		t.Fatal(result)
+	}
+	if result := invoke("ui.get_context", JSON{}); result.ErrorCode != "" {
+		t.Fatal(result)
+	}
+	if result := invoke("ui.navigate", JSON{"page": "details"}); result.ErrorCode != "" {
+		t.Fatal(result)
+	}
+	commands, blocked, err := f.w.PollBrowser("alice", resumed.ID, f.key, resumed.Generation)
+	if err != nil || blocked || len(commands) != 1 || commands[0].Generation != resumed.Generation {
+		t.Fatal(commands, blocked, err)
+	}
+	original, err := f.w.command("alice", command.ID)
+	if err != nil || original.Generation != 1 || original.Status != "succeeded" {
+		t.Fatal(original, err)
+	}
+	binding, err := f.w.Store.binding("alice", otherRun.RunID)
+	if err != nil || binding.Generation != 1 || binding.SessionID != other.ID {
+		t.Fatal(binding, err)
+	}
+	if _, _, err := f.w.PollBrowser("alice", other.ID, otherKey, 1); err != nil {
+		t.Fatal(err)
+	}
+}

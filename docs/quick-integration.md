@@ -92,7 +92,7 @@ node web/export-client.mjs /path/to/host/vendor/agenstra
 node web/export-actions.mjs frontend-profile.json /path/to/host/vendor/agenstra
 ```
 
-生成器先检查版本、动作名称/重复/保留名、影响类型、超时、字段和受支持的 Schema 引用位置，发现接线错误时在写文件前报错。检查通过后生成 `agenstra-actions.d.ts`、`agenstra-profile.js` 和首次创建的 `agenstra-handlers.js`。修改 handlers，把函数绑定到原系统；重复生成会更新类型和版本，保留业务 handler 文件。未绑定的模板明确返回 `handler_not_implemented`。
+生成器先检查版本、动作名称/重复/保留名、影响类型、超时、字段和受支持的 Schema 引用位置，发现接线错误时在写文件前报错。检查通过后生成 `agenstra-actions.d.ts`、版本文件 `agenstra-profile.js` 及配套的 `agenstra-profile.d.ts`；首次运行还会创建 `agenstra-handlers.js`。修改 handlers，把函数绑定到原系统；重复生成会更新类型和版本，保留业务 handler 文件。未绑定的模板明确返回 `handler_not_implemented`。
 
 ```js
 import { actions } from "./vendor/agenstra/agenstra-handlers.js";

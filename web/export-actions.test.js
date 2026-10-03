@@ -18,6 +18,8 @@ test("one profile derives action types and versions while preserving host implem
     assert.equal((await exportActions(path, dir)).handlers_created, false);
     assert.equal(await readFile(join(dir, "agenstra-handlers.js"), "utf8"), "original business implementation");
     assert.match(await readFile(join(dir, "agenstra-profile.js"), "utf8"), /handlerVersion = "2"/);
+    // Strict TypeScript hosts resolve .js imports through the adjacent .d.ts.
+    assert.equal(await readFile(join(dir, "agenstra-profile.d.ts"), "utf8"), 'export declare const handlerVersion: "2";\n');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
