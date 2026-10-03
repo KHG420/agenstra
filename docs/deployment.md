@@ -16,7 +16,11 @@ deploy/capability-packs/           你自己的能力包与技能；Git 忽略
 
 `DeploymentConfig` 将 `pack_id` 映射到受信任清单路径，再为每个用户配置 `api_key_env`、连接变量、`granted_capabilities`、`approval_capabilities` 和 `allow_model_data`。配置文件相对路径以配置文件所在目录为基准；容器模板使用 `/opt/packs/records/pack.json` 绝对路径。用户的 Bearer key 只识别当前用户，服务凭据仍通过连接映射注入 Provider。
 
+部署配置必须是单个完整 JSON 文档，允许尾随空白；拼接文档和尾随垃圾在加载时被拒绝，部分 `settings` 配置继续继承其余默认值。
+
 可以为连接添加可选 `identity` 配置，使用身份查询接口在执行和恢复前验证主体；字段为 `url_env`、`token_env`、`subject_path` 和可选 `expected_subject`。身份接口由部署方提供并验收。授权和身份变化会影响已有运行继续执行，不会只在创建时检查一次。
+
+身份查询响应必须是不超过 1 MiB 的单个完整 JSON 值，支持既有对象或数组路径；拼接值、尾随垃圾、截断和超限响应返回 `identity_unverified`，不产生已核实主体或能力授权。身份核对使用配置的 Bearer 凭据，复用带 CookieJar 的 HTTP client 时不会附带其会话 cookie，也不改变调用方的 CookieJar。
 
 ## 2. 本地服务
 

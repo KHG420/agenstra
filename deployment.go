@@ -83,10 +83,7 @@ func LoadDeployment(path string) (*Deployment, error) {
 		return nil, e
 	}
 	c := DeploymentConfig{Settings: DefaultHostSettings()}
-	d := json.NewDecoder(strings.NewReader(string(b)))
-	d.DisallowUnknownFields()
-	d.UseNumber()
-	if e = d.Decode(&c); e != nil {
+	if e = strictUnmarshal(b, &c); e != nil {
 		return nil, e
 	}
 	if c.Users == nil && (c.HostAuth == nil || c.Management == nil) {
@@ -265,6 +262,7 @@ func (d *Deployment) verifiedIdentity(ctx context.Context, owner string, c Conne
 	}
 	// Never forward a user's bearer token to a redirect target.
 	safeClient := *client
+	safeClient.Jar = nil
 	safeClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := safeClient.Do(req)
 	if err != nil {
@@ -274,9 +272,12 @@ func (d *Deployment) verifiedIdentity(ctx context.Context, owner string, c Conne
 	if resp.StatusCode != http.StatusOK {
 		return "", nil, deploymentError("identity_unverified")
 	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	if err != nil || len(raw) > 1<<20 {
+		return "", nil, deploymentError("identity_unverified")
+	}
 	var body any
-	decoder := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
-	if decoder.Decode(&body) != nil {
+	if strictUnmarshal(raw, &body) != nil {
 		return "", nil, deploymentError("identity_unverified")
 	}
 	steps := id.SubjectPath

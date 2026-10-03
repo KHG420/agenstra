@@ -39,3 +39,31 @@ func TestLoadDeploymentDefaultsAndValidation(t *testing.T) {
 		t.Fatal("invalid management key reference accepted")
 	}
 }
+
+func TestLoadDeploymentRequiresCompleteJSONDocument(t *testing.T) {
+	valid := `{"database_path":"runs.sqlite3","users":{"alice":{"api_key_env":"ALICE_KEY"}},"settings":{"max_concurrent_runs":2}}`
+	for _, tc := range []struct {
+		name, suffix string
+		wantError    bool
+	}{
+		{"whitespace", " \n\t", false},
+		{"second deployment", "\n" + valid, true},
+		{"second value", " null", true},
+		{"trailing garbage", " incomplete", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "deployment.json")
+			if err := os.WriteFile(path, []byte(valid+tc.suffix), 0600); err != nil {
+				t.Fatal(err)
+			}
+			d, err := LoadDeployment(path)
+			if tc.wantError {
+				if err == nil || d != nil {
+					t.Fatalf("incomplete deployment accepted: deployment=%v err=%v", d != nil, err)
+				}
+			} else if err != nil || d.Config.Settings.MaxConcurrentRuns != 2 || d.Config.Settings.ModelTimeoutSeconds != DefaultHostSettings().ModelTimeoutSeconds {
+				t.Fatalf("valid deployment or partial defaults lost: deployment=%v err=%v", d, err)
+			}
+		})
+	}
+}
