@@ -249,7 +249,9 @@ export class AgenstraClient {
       this.emit("action", { command, status: ["confirmed", "acked"].includes(receipt.status) ? "succeeded" : "unknown" });
     } catch (error) {
       const receipt = this.receipts[command.id];
-      if (receipt && receipt.status !== "succeeded" && receipt.status !== "acked") {
+      // A server-confirmed result stays confirmed when the following run read
+      // or reconciliation fails. Retry that recovery work, not the result.
+      if (receipt && !["succeeded", "confirmed", "acked"].includes(receipt.status)) {
         const definite = receipt.status === "running" && error instanceof AgenstraActionError;
         receipt.status = definite ? "failed" : "unknown";
         receipt.error_code = definite ? error.code : "browser_handler_outcome_unknown";

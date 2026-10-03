@@ -97,6 +97,33 @@ test("bridge-only run does not create a chat conversation", async () => {
 });
 
 for (const failStep of ["getRun", "reconcile"]) {
+  test(`executing an action preserves the server ACK when ${failStep} subsequently fails`, async t => {
+    const store = storage();let calls = 0, ack = 0, recovery = 0, fail = true, completed = false;
+    const fetch = async (path, options) => {
+      if (path.endsWith("/begin")) return response({ accepted: true });
+      if (path.endsWith("/result")) { ack++;assert.equal(JSON.parse(options.body).status, "succeeded");return response({ status: "succeeded" }); }
+      if (path.endsWith("/reconcile")) {
+        recovery++;
+        if (fail && failStep === "reconcile") { fail = false;throw new Error("lost reconciliation response"); }
+        completed = true;return response({ status: "queued" });
+      }
+      if (fail && failStep === "getRun") { fail = false;throw new Error("lost run response"); }
+      return response({ status: completed ? "completed" : "needs_reconciliation", revision: 2 });
+    };
+    const first = client(fetch, store);
+    t.after(() => first.destroy({ closeSession: false }));
+    first.registerActions({ "ui.navigate": () => { calls++;return { page: "orders" }; } });
+    await first.executeCommand(command);
+    assert.equal(first.receipts[command.id].status, "confirmed");
+    await first.destroy({ closeSession: false });
+    const resumed = client(fetch, store);
+    t.after(() => resumed.destroy({ closeSession: false }));
+    resumed.registerActions({ "ui.navigate": () => { calls++;return { page: "orders" }; } });
+    await resumed.executeCommand(command);await resumed.flushReceipts();
+    assert.equal(calls, 1);assert.equal(ack, 1);
+    assert.equal(recovery, failStep === "reconcile" ? 2 : 1);
+    assert.equal(resumed.receipts[command.id].status, "acked");
+  });
   test(`ACK persists recovery work when ${failStep} fails and the client reloads`, async () => {
     const store = storage();let ack = 0, recovery = 0, fail = true, completed = false;
     const fetch = async path => {
