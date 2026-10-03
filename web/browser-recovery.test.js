@@ -93,6 +93,58 @@ test("a lost recovery response reuses the original request and acknowledgement a
   assert.equal(resumed.browser.id, "new-tab"); assert.equal(resumed.load("browser_recovery"), null);
 });
 
+test("a lost resume response preserves the active session and reuses its request after reload", async t => {
+  const store = storage(), attempts = [];
+  let generation = 1, committed, creates = 0;
+  const fetch = async (path, options) => {
+    if (path.endsWith("/resume")) {
+      const body = JSON.parse(options.body); attempts.push(body);
+      if (generation === 1) {
+        generation++;
+        committed = body.request_id;
+        throw new Error("resume response lost after commit");
+      }
+      if (!committed || body.request_id !== committed || body.generation !== 1) return response({ code: "browser_generation_changed" }, 409);
+      return response({ session: { ...old, generation, context_revision: 2 } });
+    }
+    if (path === "/browser/v1/sessions") { creates++; return response({ session: replacement, key: "new-key" }); }
+    if (path.endsWith("/observation")) return response({ session: { ...old, generation, context_revision: 2 } });
+    return response({ commands: [] });
+  };
+  const first = bridge(t, fetch, store);
+  first.rememberConversation({ id: "active-history", integration_id: "records-web" });
+  await assert.rejects(first.connectBrowser(), /resume response lost/);
+  await first.destroy({ closeSession: false });
+  const resumed = bridge(t, fetch, store);
+  await resumed.connectBrowser();
+  assert.equal(creates, 0);
+  assert.equal(resumed.browser.id, old.id);
+  assert.equal(resumed.browser.generation, 2);
+  assert.equal(resumed.load("conversation"), "active-history");
+  assert.equal(typeof attempts[0].request_id, "string");
+  assert.ok(attempts[0].request_id);
+  assert.deepEqual(attempts[1], attempts[0]);
+  assert.equal(resumed.load("browser_resume"), null);
+});
+
+test("a resume gateway error retains its in-memory identity when storage is disabled", async t => {
+  const attempts = [];
+  const c = bridge(t, async (path, options) => {
+    if (path.endsWith("/resume")) {
+      attempts.push(JSON.parse(options.body));
+      return attempts.length === 1 ? response({ code: "request_failed" }, 502) : response({ session: { ...old, generation: 2 } });
+    }
+    if (path.endsWith("/observation")) return response({ session: { ...old, generation: 2, context_revision: 2 } });
+    return response({ commands: [] });
+  }, null);
+  c.browser = old;
+  await assert.rejects(c.connectBrowser(), { status: 502 });
+  await c.connectBrowser();
+  assert.deepEqual(attempts[0], attempts[1]);
+  assert.equal(c.browser.generation, 2);
+  assert.equal(c.browserResume, null);
+});
+
 for (const persisted of [true, false]) test(`a gateway error retains the recovery request with storage ${persisted ? "enabled" : "disabled"}`, async t => {
   const attempts = [];
   const c = bridge(t, async (path, options) => {

@@ -255,7 +255,7 @@ stateDiagram-v2
     unknown --> failed: original definite failure
 ```
 
-SDK 执行前保存 command，执行后保存结果，再提交 ACK。ACK 丢失时重发原结果，不重跑 handler。服务端以 invocation ID 去重。刷新递增 generation，同一 owner、会话和 profile 的任务后续调用绑定同步到新代数，并清除旧页面观察版本，模型须重新读取 `ui.get_context`。旧 queued/dispatched 动作取消，旧 running 变 unknown；原 generation 的缓存结果可确认原动作，并恢复同一个 operation。确认 ACK 后的恢复待办也会持久保留，以便重试网络和 revision 错误。
+SDK 执行前保存 command，执行后保存结果，再提交 ACK。ACK 丢失时重发原结果，不重跑 handler。服务端以 invocation ID 去重。刷新递增 generation，同一 owner、会话和 profile 的任务后续调用绑定同步到新代数，并清除旧页面观察版本，模型须重新读取 `ui.get_context`。SDK 在恢复请求前保存 `request_id`，响应丢失或网关失败后保留同一身份；重新加载后重试可取得同一次恢复的当前会话，不另开会话或再次清除页面与命令。只有原 owner、key、generation 和最后一次请求身份匹配时允许重试；后续恢复、会话关闭和 profile 改变仍会阻断旧请求。省略 `request_id` 的旧客户端保留原 generation 协议。旧 queued/dispatched 动作取消，旧 running 变 unknown；原 generation 的缓存结果可确认原动作，并恢复同一个 operation。确认 ACK 后的恢复待办也会持久保留，以便重试网络和 revision 错误。
 
 页面读取或同步在发送 begin 请求前失败时，SDK 报告错误并移除本次尚未认领的本地记录，允许同步恢复后继续投递原命令；此时没有执行 handler，也不提交 unknown 业务结果。begin 请求一旦尝试发送，丢失响应仍保留 unknown，不能自动重跑。SDK 在 handler 返回时复制结果，后续页面状态变化不改写原回执；结果无法复制时仍视为未知，不能把已经执行的动作当作未执行。已缓存回执的重试错误通过 SDK 的 error 事件报告，并保留回执。
 
@@ -290,7 +290,8 @@ SDK 在发送恢复请求前保存稳定的 request ID、注册参数和确认�
 | `POST /chat/v1/messages/{id}/cancel` | 取消消息 |
 | `GET /browser/v1/integrations/{id}` | profile 和 digest |
 | `POST /browser/v1/sessions` | `{integration_id,handler_version,handlers}` |
-| `POST /browser/v1/sessions/{id}/resume`、`poll`、`close` | `{generation}` |
+| `POST /browser/v1/sessions/{id}/resume` | `{generation,request_id?}`；同一恢复身份可重试，不再次递增代数 |
+| `POST /browser/v1/sessions/{id}/poll`、`close` | `{generation}` |
 | `POST /browser/v1/sessions/{id}/recover` | `{generation,handler_version,handlers,request_id,acknowledge_unknown}`；使用旧 browser key，返回 `{session,key}` |
 | `POST /browser/v1/sessions/{id}/observation` | 页面观察数据 `{generation,revision,observation}` |
 | `POST /browser/v1/runs` | `{integration_id,session_id,instruction,request_id}` |

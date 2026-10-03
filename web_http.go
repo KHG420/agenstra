@@ -363,13 +363,14 @@ func (s *HTTPServer) browserHTTP(w http.ResponseWriter, r *http.Request, owner s
 			return
 		case "resume":
 			var b struct {
-				Generation int `json:"generation"`
+				Generation int    `json:"generation"`
+				RequestID  string `json:"request_id,omitempty"`
 			}
 			if decodeBody(r, &b) != nil {
 				apiError(w, 422, "invalid_request", false)
 				return
 			}
-			session, e := s.Web.ResumeBrowserSession(owner, parts[1], key, b.Generation)
+			session, e := s.Web.resumeBrowserSession(owner, parts[1], key, b.Generation, b.RequestID)
 			if e != nil {
 				webError(w, e)
 				return

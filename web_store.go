@@ -105,6 +105,7 @@ type BrowserSession struct {
 	ContextRevision int     `json:"context_revision"`
 	LastSeen        float64 `json:"last_seen"`
 	KeyHash         string  `json:"key_hash,omitempty"`
+	ResumeRequestID string  `json:"resume_request_id,omitempty"`
 	Closed          bool    `json:"closed"`
 }
 type BrowserCommand struct {

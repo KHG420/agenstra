@@ -28,6 +28,7 @@ export class AgenstraClient {
     this.selectionRevision = 0;
     this.receipts = this.load("receipts") || {};
     this.browserRecovery = this.load("browser_recovery");
+    this.browserResume = this.load("browser_resume");
     this.chatWatchers = 0;
   this.runWatchers = new Set();
     this.aborters = new Set();
@@ -108,9 +109,18 @@ export class AgenstraClient {
         }
         else {
           try {
-            const data = await this.request("/browser/v1/sessions/" + saved.id + "/resume", { method: "POST", browserKey: saved.key, body: { generation: saved.generation } });
+            let resume = this.browserResume;
+            if (!resume || resume.session_id !== saved.id || resume.generation !== saved.generation) {
+              resume = { session_id: saved.id, generation: saved.generation, request_id: this.id() };
+              this.browserResume = resume; this.save("browser_resume", resume);
+            }
+            const data = await this.request("/browser/v1/sessions/" + saved.id + "/resume", { method: "POST", browserKey: saved.key, body: { generation: resume.generation, request_id: resume.request_id } });
             this.browser = { ...data.session, key: saved.key };
+            // Persist the returned generation before retiring its retry identity.
+            this.save("browser", this.browser);
+            this.browserResume = null; this.remove("browser_resume");
           } catch (error) {
+            if (error instanceof AgenstraError && error.status >= 400 && error.status < 500) { this.browserResume = null; this.remove("browser_resume"); }
             if (error.code !== "browser_profile_changed") throw error;
             this.emit("connection", { status: "profile_changed" });
             await this.replaceBrowser(false);
@@ -119,7 +129,7 @@ export class AgenstraClient {
       } catch (error) {
         // A different signed-in owner cannot resume the previous user's session.
         if (!["not_found", "browser_session_invalid", "browser_generation_changed"].includes(error.code)) throw error;
-        this.browser = null; this.browserRecovery = null; this.remove("browser"); this.remove("browser_recovery"); this.receipts = {}; this.save("receipts", {});
+        this.browser = null; this.browserRecovery = null; this.browserResume = null; this.remove("browser"); this.remove("browser_recovery"); this.remove("browser_resume"); this.receipts = {}; this.save("receipts", {});
       }
     }
     if (!this.browser) {
@@ -156,6 +166,7 @@ export class AgenstraClient {
     if (this.closed) throw new AgenstraError("client_closed");
     this.browser = { ...data.session, key: data.key };
     this.browserRecovery = null;
+    this.browserResume = null; this.remove("browser_resume");
     this.save("browser", this.browser); this.remove("browser_recovery");
   }
   async recoverBrowser({ acknowledgeUnknown = false } = {}) {
@@ -482,6 +493,7 @@ export class AgenstraClient {
       try { await this.fetch(this.endpoint + "/browser/v1/sessions/" + this.browser.id + "/close", { method: "POST", headers: { Authorization: "Bearer " + this.token, "Content-Type": "application/json", "X-Agenstra-Browser-Key": this.browser.key }, body: JSON.stringify({ generation: this.browser.generation }), signal: aborter.signal, credentials: "same-origin", keepalive: true }); } catch { /* The server expires interrupted actions independently. */ }
       finally { clearTimeout(timer); }
       this.remove("browser");
+      this.browserResume = null; this.remove("browser_resume");
     }
   }
 }

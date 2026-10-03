@@ -55,17 +55,38 @@ func browserSessionAuth(s BrowserSession, key string, generation int) error {
 	}
 	return nil
 }
+
+// ResumeBrowserSession fences the previous connection using the legacy generation protocol.
 func (w *WebIntegration) ResumeBrowserSession(owner, id, key string, generation int) (BrowserSession, error) {
+	return w.resumeBrowserSession(owner, id, key, generation, "")
+}
+
+func (w *WebIntegration) resumeBrowserSession(owner, id, key string, generation int, requestID string) (BrowserSession, error) {
 	var s BrowserSession
+	if len(requestID) > 128 {
+		return s, hostError("request_id_required")
+	}
 	e := w.Store.store.write(func(tx *sql.Tx) error {
 		if e := webLoad(tx, "web_sessions", id, owner, &s); e != nil {
 			return e
 		}
-		if e := browserSessionAuth(s, key, generation); e != nil {
+		// Only the exact last transition may be retrieved without fencing again.
+		replayed := requestID != "" && requestID == s.ResumeRequestID && generation == s.Generation-1
+		authGeneration := generation
+		if replayed {
+			authGeneration = s.Generation
+		}
+		if e := browserSessionAuth(s, key, authGeneration); e != nil {
 			return e
 		}
 		if p := w.profiles[s.IntegrationID]; p == nil || p.digest != s.ProfileDigest {
 			return hostError("browser_profile_changed")
+		}
+		if replayed {
+			return nil
+		}
+		if requestID != "" && requestID == s.ResumeRequestID {
+			return hostError("request_id_conflict")
 		}
 		commands, e := w.Store.commands(tx, owner, id)
 		if e != nil {
@@ -87,6 +108,7 @@ func (w *WebIntegration) ResumeBrowserSession(owner, id, key string, generation 
 			}
 		}
 		s.Generation++
+		s.ResumeRequestID = requestID
 		s.LastSeen = w.Store.store.now()
 		s.Context = JSON{}
 		s.ContextRevision++
@@ -99,6 +121,7 @@ func (w *WebIntegration) ResumeBrowserSession(owner, id, key string, generation 
 		return webSave(tx, "web_sessions", id, s)
 	})
 	s.KeyHash = ""
+	s.ResumeRequestID = ""
 	return s, e
 }
 
@@ -210,6 +233,7 @@ func (w *WebIntegration) RecoverBrowserSession(ctx context.Context, owner, id, k
 		return webInsert(tx, "web_sessions", newID, owner, replacement)
 	})
 	replacement.KeyHash = ""
+	replacement.ResumeRequestID = ""
 	if e != nil {
 		return BrowserSession{}, "", e
 	}
@@ -277,6 +301,7 @@ func (w *WebIntegration) UpdatePageObservation(owner, id, key string, generation
 		return webSave(tx, "web_sessions", id, current)
 	})
 	current.KeyHash = ""
+	current.ResumeRequestID = ""
 	return current, e
 }
 func (w *WebIntegration) readContext(owner string, b WebRunBinding) (BrowserSession, error) {

@@ -28,6 +28,146 @@ func TestBrowserResumeDetectsChangedProfileBeforeMutatingSession(t *testing.T) {
 	}
 }
 
+func TestBrowserResumeRetryPreservesCurrentPageAndRunningCommand(t *testing.T) {
+	f := newWebFixture(t, &hostModel{decisions: browserDecisions()}, false)
+	first, err := f.w.resumeBrowserSession("alice", f.session.ID, f.key, 1, "refresh-1")
+	if err != nil || first.Generation != 2 || first.ResumeRequestID != "" {
+		t.Fatal(first, err)
+	}
+	f.session, err = f.w.UpdatePageObservation("alice", first.ID, f.key, 2, first.ContextRevision, JSON{"page": "orders"})
+	if err != nil || f.session.ResumeRequestID != "" {
+		t.Fatal(f.session, err)
+	}
+	f.run(t)
+	command := f.dispatch(t)
+	if ok, _, err := f.w.BeginBrowserCommand(t.Context(), "alice", command.ID, f.key, 2); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	retry, err := f.w.resumeBrowserSession("alice", first.ID, f.key, 1, "refresh-1")
+	if err != nil || retry.Generation != 2 || retry.ContextRevision != f.session.ContextRevision || retry.Context["page"] != "orders" {
+		t.Fatal(retry, err)
+	}
+	current, err := f.w.command("alice", command.ID)
+	if err != nil || current.Status != "running" || current.Generation != 2 {
+		t.Fatal(current, err)
+	}
+	for _, tc := range []struct {
+		owner, key, request string
+		generation          int
+		want                string
+	}{
+		{"alice", f.key, "different-refresh", 1, "browser_generation_changed"},
+		{"alice", f.key, "refresh-1", 2, "request_id_conflict"},
+		{"alice", "wrong-key", "refresh-1", 1, "browser_session_invalid"},
+		{"other", f.key, "refresh-1", 1, "not_found"},
+		{"alice", f.key, strings.Repeat("x", 129), 2, "request_id_required"},
+	} {
+		if _, err := f.w.resumeBrowserSession(tc.owner, first.ID, tc.key, tc.generation, tc.request); ErrorCode(err) != tc.want {
+			t.Fatal(tc, err)
+		}
+	}
+	// A later legacy transition still fences the previous request and command.
+	latest, err := f.w.ResumeBrowserSession("alice", first.ID, f.key, 2)
+	if err != nil || latest.Generation != 3 {
+		t.Fatal(latest, err)
+	}
+	if _, err = f.w.resumeBrowserSession("alice", first.ID, f.key, 1, "refresh-1"); ErrorCode(err) != "browser_generation_changed" {
+		t.Fatal(err)
+	}
+	current, err = f.w.command("alice", command.ID)
+	if err != nil || current.Status != "unknown" {
+		t.Fatal(current, err)
+	}
+}
+
+func TestBrowserResumeConcurrentRetriesAdvanceOnce(t *testing.T) {
+	f := newWebFixture(t, &hostModel{}, false)
+	start := make(chan struct{})
+	results := make(chan error, 8)
+	for range 8 {
+		go func() {
+			<-start
+			s, err := f.w.resumeBrowserSession("alice", f.session.ID, f.key, 1, "same-refresh")
+			if err == nil && s.Generation != 2 {
+				err = hostError("unexpected_generation")
+			}
+			results <- err
+		}()
+	}
+	close(start)
+	var firstErr error
+	for range 8 {
+		if err := <-results; err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr != nil {
+		t.Fatal(firstErr)
+	}
+}
+
+func TestBrowserResumeRetryCannotBypassClosureOrProfileChange(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "closed", true: "profile_changed"}[changed], func(t *testing.T) {
+			f := newWebFixture(t, &hostModel{}, false)
+			if _, err := f.w.resumeBrowserSession("alice", f.session.ID, f.key, 1, "retry"); err != nil {
+				t.Fatal(err)
+			}
+			want := "browser_generation_changed"
+			if changed {
+				profile := frontendTestProfile(false)
+				profile.Version = "2"
+				compiled, err := compileFrontend(profile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.w.profiles["records-web"] = compiled
+				want = "browser_profile_changed"
+			} else if err := f.w.CloseBrowserSession("alice", f.session.ID, f.key, 2); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.w.resumeBrowserSession("alice", f.session.ID, f.key, 1, "retry"); ErrorCode(err) != want {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestBrowserResumeHTTPRetryRequiresOriginalOwnerKeyAndRequest(t *testing.T) {
+	f := newWebFixture(t, &hostModel{}, false)
+	s := &HTTPServer{Host: f.h, Web: f.w}
+	ticket, err := f.w.MintSession("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/browser/v1/sessions/" + f.session.ID + "/resume"
+	for _, tc := range []struct {
+		token, key, body string
+		want             int
+	}{
+		{"", f.key, `{"generation":1,"request_id":"http-resume"}`, 401},
+		{ticket, "wrong-key", `{"generation":1,"request_id":"http-resume"}`, 401},
+		{ticket, f.key, `{"generation":1,"request_id":"http-resume"}`, 200},
+		{ticket, f.key, `{"generation":1,"request_id":"http-resume"}`, 200},
+		{ticket, f.key, `{"generation":1,"request_id":"different"}`, 409},
+	} {
+		r := httptest.NewRequest("POST", path, strings.NewReader(tc.body))
+		r.Header.Set("Authorization", "Bearer "+tc.token)
+		r.Header.Set("X-Agenstra-Browser-Key", tc.key)
+		out := httptest.NewRecorder()
+		s.webHTTP(out, r)
+		if out.Code != tc.want {
+			t.Fatal(out.Code, out.Body.String())
+		}
+		if out.Code == 200 {
+			var result struct{ Session BrowserSession }
+			if err = json.Unmarshal(out.Body.Bytes(), &result); err != nil || result.Session.Generation != 2 || result.Session.KeyHash != "" || result.Session.ResumeRequestID != "" {
+				t.Fatal(result, err)
+			}
+		}
+	}
+}
+
 func TestBrowserRecoveryPreservesUnknownHistoryAndRequiresStoppedRun(t *testing.T) {
 	f := newWebFixture(t, &hostModel{decisions: browserDecisions()}, false)
 	r := f.run(t)

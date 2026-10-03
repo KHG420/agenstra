@@ -43,6 +43,7 @@ export class AgenstraClient {
   // Event payloads are heterogeneous; keep the existing permissive callback contract.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on(name: string, callback: (value: any) => void): () => void;
+  /** Persist a resume request identity so reconnect retries retain the active session after a lost response. */
   connectBrowser(): Promise<unknown>;
   /** Stop old tasks and verify actual business state before acknowledging unknown results. Does not replay actions or delete history. */
   recoverBrowser(options?: { acknowledgeUnknown?: boolean }): Promise<unknown>;
