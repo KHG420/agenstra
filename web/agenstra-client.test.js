@@ -90,6 +90,39 @@ test("initial publication and explicit updates share the page revision queue", a
   assert.deepEqual(uploads.map(item => item.revision), [1, 2]);
   assert.deepEqual(c.pageObservation, { page: "orders" });
 });
+test("an unchanged explicit page update cannot invalidate a dispatched command", async t => {
+  let revision = 1, uploads = 0, handlers = 0;
+  let dispatched;
+  const c = client(async (path, options) => {
+    if (path.endsWith("/observation")) {
+      uploads++;
+      assert.equal(JSON.parse(options.body).revision, revision);
+      return response({ session: { id: "tab-1", generation: 1, context_revision: ++revision } });
+    }
+    if (path.endsWith("/begin")) return response({ accepted: dispatched.context_revision === revision });
+    if (path.endsWith("/result")) return response({ status: "succeeded" });
+    return response({ status: "completed" });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.registerActions({ "ui.navigate": () => { handlers++;return { page: "orders" }; } });
+  await c.updatePageObservation({ page: "home" });
+  dispatched = { ...command, context_revision: revision };
+  await c.updatePageObservation({ page: "home" });
+  await c.executeCommand(dispatched);
+  assert.equal(handlers, 1);assert.equal(uploads, 1);
+});
+test("identical page data must still be uploaded for a new connection generation", async t => {
+  const generations = [];
+  const c = client(async (_path, options) => {
+    const body = JSON.parse(options.body);generations.push(body.generation);
+    return response({ session: { id: "tab-1", generation: body.generation, context_revision: body.revision + 1 } });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  await c.updatePageObservation({ page: "home" });
+  c.browser = { ...c.browser, generation: 2, context_revision: 3 };
+  await c.publishPageObservation();
+  assert.deepEqual(generations, [1, 2]);
+});
 test("lost ACK retries the original receipt without rerunning a handler", async () => {
   let calls = 0, acknowledgements = 0;
   const c = client(async (path, options) => {
