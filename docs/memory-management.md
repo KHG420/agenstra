@@ -39,6 +39,8 @@ key 必须匹配 `^[a-z][a-z0-9_.-]{0,63}$`，例如 `report.language`、`report
 
 “独立”指不同输入来源 ID，不是统计置信度。3 次阈值是本版产品规则；长期意图判断、等价表达归一化和 topic 选择仍取决于模型质量。Host 要求每条候选含当前输入的真实原文片段，最多 8 条，拒绝重复 topic、伪造引用、未知字段和习惯推断硬约束。提取提示排除引文、第三方表述、工具输出、凭据与当前业务状态；这不是敏感信息检测器。
 
+取消、改口、只读限制、审批选择和缺参数追问通常属于当前任务。提取提示要求模型将这些指令归为 `temporary` 或不提出候选，只有当前原文明确把规则延伸到未来任务时才作为长期约束；旧条目不能替当前输入提供长期意图。普通语言、格式、单位偏好仍可按习惯规则学习。
+
 ## 3. Go 宿主接口
 
 公开方法复用当前 owner/pack 的授权检查：
@@ -122,7 +124,7 @@ flowchart LR
 
 HTTPJSONDecisionModel 实现可选的 MemoryExtractor。每个未处理来源在业务决策前增加一次提取请求，使用同一模型适配器和超时。自定义模型可实现该接口；没有实现时仍可通过宿主保存/使用记忆。提取与业务决策是不同调用，不计入业务 ReAct 轮数。
 
-提取预检计入固定提取提示和 canonical JSON 的 Unicode 字符数，遵守 HostSettings.MaxContextCharacters；已有条目最多提供 32 条辅助信息，可按预算移除，完整当前输入不可截断。仍超限时不进行模型 IO。提取错误、非法输出和超限记录在运行 envelope 的 memory_errors 中，业务任务继续；失败来源不会在每次恢复时无限重试。
+提取预检计入固定提取提示和 canonical JSON 的 Unicode 字符数，遵守 HostSettings.MaxContextCharacters；已有条目先排除 `forgotten`，再最多提供 32 条辅助信息，保留有效默认值和习惯候选用于归一化。遗忘记录的主题不会再作为提取示例，也不会占用这 32 个位置。辅助信息可按预算移除，完整当前输入不可截断。仍超限时不进行模型 IO。提取错误、非法输出和超限记录在运行 envelope 的 memory_errors 中，业务任务继续；失败来源不会在每次恢复时无限重试。
 
 模型 IO 在 SQLite 事务外发生。来源去重、证据和修订原子提交，并检查运行租约；丢失租约的 worker 不能保存结果。首次执行冻结 memory_snapshot，恢复期间新增记忆不改变快照。每次业务模型调用前过滤已更正/遗忘的旧版本；更正值参与新运行，当前补充由原有 Followups 保留。
 
@@ -136,6 +138,12 @@ HTTPJSONDecisionModel 实现可选的 MemoryExtractor。每个未处理来源在
 
 回归覆盖三次自动采用、显式更正、临时例外、输入重放、恢复、owner/pack 隔离、pack 优先、并发 revision 冲突、遗忘和旧快照失效、聊天只学习当前消息、定时任务重复去重、提取失败不阻断、丢失租约、预算和 IO 预检，以及 HTTP/Web/SDK 管理契约。
 
-测试使用 SQLite、模型替身和 httptest 的真实 HTTP 适配器协议。未调用真实模型；中文/英文提取准确率、归一化效果、延迟和成本需在部署方选择的模型上验收。
+普通测试使用 SQLite、模型替身和 httptest 的真实 HTTP 适配器协议，不调用真实模型。可选的 `TestLiveMemoryTaskScopeEvaluation` 使用合成文本，在选定模型上检查临时任务、明确长期规则和语言偏好；12 次提取调用，仅在显式设置 `AGENSTRA_LIVE_EVAL=1` 时执行。配置 `AGENT_MODEL`、`AGENT_MODEL_BASE_URL`、`AGENT_MODEL_API_KEY` 以及所选 API 所需的 `AGENT_MODEL_API_TYPE`、`AGENT_MODEL_THINKING` 后运行：
+
+```sh
+AGENSTRA_LIVE_EVAL=1 go test -run '^TestLiveMemoryTaskScopeEvaluation$' -count=1 -v
+```
+
+可用 `AGENSTRA_MEMORY_EVIDENCE_PATH` 指定评测 JSON 保存位置。该文件包含合成输入、候选、结果与请求用量，不含认证头。真实模型样本与完整宿主复测见 [Sub2API 第二轮评测](sub2api-round2-findings.md)；准确率、归一化效果、延迟和成本仍需在部署方选择的模型上验收。
 
 跨项目任务可通过可选 `sources` 明确选择目标能力，并按发起项目委派、目标验证权限和任务范围取交集。目标身份、实际凭据、版本固定、项目记忆和各入口的完整接入说明见[跨项目任务、身份与授权](cross-project-tasks.md)。所有读取与轮询也必须明确授权。

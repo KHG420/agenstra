@@ -201,13 +201,21 @@ func (h *AgentHost) prepareMemories(ctx context.Context, run StoredRun) (StoredR
 		if done || !enabled {
 			continue
 		}
-		existing, err := h.Store.listMemories(run.OwnerID, run.PackID, 32, 0)
+		existing, err := h.Store.listMemories(run.OwnerID, run.PackID, -1, 0)
 		if err != nil {
 			return run, err
 		}
 		known := []MemoryView{}
 		for _, m := range existing {
+			// Forgotten defaults are history, not examples for relearning. Filter
+			// before limiting so they cannot crowd out active or habit candidates.
+			if m.Status == "forgotten" {
+				continue
+			}
 			known = append(known, MemoryView{PackID: m.PackID, ID: m.ID, Key: m.Key, Value: m.Value, Kind: m.Kind, Scope: m.Scope, Revision: m.Revision})
+			if len(known) == 32 {
+				break
+			}
 		}
 		request := MemoryExtractionRequest{Text: input.Text, Existing: known, MaxCharacters: h.runSettings(run).MaxContextCharacters}
 		_, extractErr := memoryExtractionInput(&request)

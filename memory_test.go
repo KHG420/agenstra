@@ -217,6 +217,46 @@ func TestMemoryManualDefaultsResistHabitAndForgettingResetsEvidence(t *testing.T
 		}
 	}
 }
+
+func TestMemoryExtractionExcludesForgottenDefaultsBeforeItsLimit(t *testing.T) {
+	calls := 0
+	model := &memoryTestModel{hostModel: &hostModel{}, extract: func(r MemoryExtractionRequest) ([]MemoryProposal, error) {
+		calls++
+		if calls == 1 {
+			return memoryProposal(r, "user", "report.format", "table", "habit"), nil
+		}
+		keys := map[string]bool{}
+		for _, item := range r.Existing {
+			if strings.HasPrefix(item.Key, "obsolete.") {
+				t.Fatal("forgotten default sent to the extractor", item)
+			}
+			keys[item.Key] = true
+		}
+		if len(keys) != 2 || !keys["report.language"] || !keys["report.format"] {
+			t.Fatal("forgotten defaults crowded out active and candidate entries", keys)
+		}
+		return nil, nil
+	}}
+	h, _ := memoryTestHost(t, model)
+	memoryRun(t, h, "alice", "records", "Use a table for the report", "candidate")
+	if _, err := h.SetMemory(t.Context(), "alice", "records", MemoryUpdate{Scope: "user", Key: "report.language", Value: "en", Kind: "preference"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 33; i++ {
+		item, err := h.SetMemory(t.Context(), "alice", "records", MemoryUpdate{Scope: "user", Key: fmt.Sprintf("obsolete.preference_%d", i), Value: "old", Kind: "preference"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = h.DeleteMemory(t.Context(), "alice", "records", item.ID, item.Revision); err != nil {
+			t.Fatal(err)
+		}
+	}
+	memoryRun(t, h, "alice", "records", "Read a fresh record", "inspect")
+	if calls != 2 {
+		t.Fatal("unexpected extraction count", calls)
+	}
+}
+
 func TestMemoryExtractionFailuresAndInvalidEvidenceDoNotBreakBusinessRun(t *testing.T) {
 	for _, bad := range []string{"unavailable", "invented_quote", "inferred_constraint", "duplicate_topic"} {
 		t.Run(bad, func(t *testing.T) {

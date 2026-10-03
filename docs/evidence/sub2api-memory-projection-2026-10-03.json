@@ -1,0 +1,2468 @@
+{
+  "schema": "agenstra.memory-projection-evaluation.v1",
+  "base_commit": "76ca878df3848fc0f68ef28583fa4832fb1df3d3",
+  "model": "deepseek-v4-flash",
+  "phases": [
+    {
+      "label": "prompt_only",
+      "framework": "76ca878+memory-scope",
+      "started_at": "2026-10-03T09:52:32.254Z",
+      "cases": [
+        {
+          "name": "group_missing_input",
+          "pass": true,
+          "started_at": "2026-10-03T09:52:32.255Z",
+          "finished_at": "2026-10-03T09:52:51.188Z",
+          "calls": [
+            {
+              "capability": "ui.list_groups",
+              "args": {
+                "page": 1,
+                "page_size": 50,
+                "search": "Round2-Input-20261003095232"
+              },
+              "run_id": "f7038505-61e4-55a8-ad94-26f10aa4b2f3",
+              "command_id": "bb63d353-3c14-549d-af80-8d4d142430c5",
+              "started_at": "2026-10-03T09:52:41.195Z",
+              "result": {
+                "items": [],
+                "total": 0,
+                "page": 1,
+                "page_size": 50,
+                "pages": 1
+              }
+            },
+            {
+              "capability": "ui.create_group",
+              "args": {
+                "description": "synthetic round 2",
+                "name": "Round2-Input-20261003095232",
+                "platform": "gemini",
+                "rate_multiplier": 1.25
+              },
+              "run_id": "f7038505-61e4-55a8-ad94-26f10aa4b2f3",
+              "command_id": "e21ec711-3f04-5cec-a642-03c111ef67b0",
+              "started_at": "2026-10-03T09:52:45.456Z",
+              "result": {
+                "id": 14,
+                "name": "Round2-Input-20261003095232",
+                "description": "synthetic round 2",
+                "platform": "gemini",
+                "status": "active",
+                "rate_multiplier": 1.25
+              }
+            }
+          ],
+          "inputs": [
+            {
+              "run_id": "f7038505-61e4-55a8-ad94-26f10aa4b2f3",
+              "field": "platform_and_rate_multiplier",
+              "prompt": "创建分组还需要两个必填参数，请一并提供：\n1) platform（平台），可选值：openai、anthropic、gemini、grok、antigravity；\n2) rate_multiplier（倍率），一个 ≥ 0 的数字（例如 1、1.5、2）。\n\n名称已按你的要求使用：Round2-Input-20261003095232。",
+              "value": "平台用 gemini，倍率 1.25，描述 synthetic round 2。"
+            }
+          ],
+          "steps": [
+            {
+              "run_id": "f7038505-61e4-55a8-ad94-26f10aa4b2f3",
+              "instruction": "创建名为 Round2-Input-20261003095232 的分组。缺少必要参数时请向我追问，不要自行猜测。",
+              "status": "completed",
+              "answer": "已按补充参数创建分组并完成。\n\n- 名称：Round2-Input-20261003095232\n- 平台：gemini\n- 倍率：1.25\n- 描述：synthetic round 2\n- 分组 ID：14\n- 状态：active\n\n创建前已按名称查重（total = 0，无同名分组），随后执行创建，操作回执状态为 succeeded。",
+              "model_usage": {
+                "budget_tokens": 28840,
+                "cached_input_requests": 8,
+                "cached_input_tokens": 13696,
+                "cost_available": false,
+                "elapsed_ms": 14158,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 0,
+                "input_tokens": 26706,
+                "invalid_responses": 0,
+                "output_tokens": 2134,
+                "priced_requests": 0,
+                "reasoning_output_requests": 6,
+                "reasoning_output_tokens": 1229,
+                "reported_requests": 8,
+                "requests": 8,
+                "retry_attempts": 0
+              },
+              "findings": []
+            }
+          ]
+        },
+        {
+          "name": "input_refresh",
+          "pass": true,
+          "started_at": "2026-10-03T09:52:51.189Z",
+          "finished_at": "2026-10-03T09:53:14.811Z",
+          "calls": [
+            {
+              "capability": "ui.list_groups",
+              "args": {
+                "page": 1,
+                "page_size": 100,
+                "search": "Round2-Refresh-20261003095232"
+              },
+              "run_id": "ebca9e8a-b9ec-527c-b871-d3c5a400669e",
+              "command_id": "7e075792-fe60-580b-b959-dcfdcd86f309",
+              "started_at": "2026-10-03T09:53:00.832Z",
+              "result": {
+                "items": [],
+                "total": 0,
+                "page": 1,
+                "page_size": 100,
+                "pages": 1
+              }
+            },
+            {
+              "capability": "ui.create_group",
+              "args": {
+                "description": "synthetic round 2",
+                "name": "Round2-Refresh-20261003095232",
+                "platform": "gemini",
+                "rate_multiplier": 1.25
+              },
+              "run_id": "ebca9e8a-b9ec-527c-b871-d3c5a400669e",
+              "command_id": "8a262977-8341-55f9-a1e8-bc8357dfabc9",
+              "started_at": "2026-10-03T09:53:08.371Z",
+              "result": {
+                "id": 15,
+                "name": "Round2-Refresh-20261003095232",
+                "description": "synthetic round 2",
+                "platform": "gemini",
+                "status": "active",
+                "rate_multiplier": 1.25
+              }
+            }
+          ],
+          "inputs": [
+            {
+              "run_id": "ebca9e8a-b9ec-527c-b871-d3c5a400669e",
+              "field": "platform",
+              "prompt": "创建分组 Round2-Refresh-20261003095232（倍率 1.25，描述 synthetic round 2）需要指定平台。请选择该分组使用的平台：",
+              "value": "gemini"
+            }
+          ],
+          "invalid_inputs": [
+            {
+              "field": "platform",
+              "unchanged_revision": 7
+            }
+          ],
+          "refresh": {
+            "original": {
+              "id": "1047ac3d-7351-4730-9558-5c1474258a55",
+              "generation": 1
+            },
+            "current": {
+              "id": "1047ac3d-7351-4730-9558-5c1474258a55",
+              "generation": 2
+            },
+            "lost_response": false
+          },
+          "steps": [
+            {
+              "run_id": "ebca9e8a-b9ec-527c-b871-d3c5a400669e",
+              "instruction": "创建名为 Round2-Refresh-20261003095232 的分组，倍率 1.25，描述 synthetic round 2。平台还没决定，请用单选选项向我追问，不能猜测。",
+              "status": "completed",
+              "answer": "分组已创建成功。平台已根据你的选择确定为 **gemini**（未做猜测）：\n\n- **ID**：15\n- **名称**：Round2-Refresh-20261003095232\n- **平台**：gemini\n- **倍率**：1.25\n- **描述**：synthetic round 2\n- **状态**：active\n\n创建前已按名称查重（匹配数 total=0，无重复），随后提交创建并取得成功的执行回执（该写入需要人工审批，已通过审批并完成）。",
+              "model_usage": {
+                "budget_tokens": 36065,
+                "cached_input_requests": 9,
+                "cached_input_tokens": 21248,
+                "cost_available": false,
+                "elapsed_ms": 18051,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 0,
+                "input_tokens": 33461,
+                "invalid_responses": 0,
+                "output_tokens": 2604,
+                "priced_requests": 0,
+                "reasoning_output_requests": 7,
+                "reasoning_output_tokens": 1699,
+                "reported_requests": 9,
+                "requests": 9,
+                "retry_attempts": 0
+              },
+              "findings": []
+            }
+          ]
+        },
+        {
+          "name": "steer_after_write",
+          "pass": true,
+          "started_at": "2026-10-03T09:53:14.811Z",
+          "finished_at": "2026-10-03T09:53:46.973Z",
+          "calls": [
+            {
+              "capability": "ui.list_users",
+              "args": {
+                "page": 1,
+                "page_size": 20,
+                "search": "page5@example.test"
+              },
+              "run_id": "46a48e21-cdcb-5e5e-9781-00bdfea02364",
+              "command_id": "201a1f09-7502-5835-a630-b895e263fa0d",
+              "started_at": "2026-10-03T09:53:20.220Z",
+              "result": {
+                "items": [
+                  {
+                    "id": 11,
+                    "username": "Page5",
+                    "email": "page5@example.test",
+                    "role": "user",
+                    "status": "active",
+                    "balance": 5,
+                    "concurrency": 78
+                  }
+                ],
+                "total": 1,
+                "page": 1,
+                "page_size": 20,
+                "pages": 1
+              }
+            },
+            {
+              "capability": "ui.update_user",
+              "args": {
+                "concurrency": 78,
+                "id": 11
+              },
+              "run_id": "46a48e21-cdcb-5e5e-9781-00bdfea02364",
+              "command_id": "e2ef024b-62b9-5e65-b3cd-16727253c6ba",
+              "started_at": "2026-10-03T09:53:24.426Z",
+              "result": {
+                "id": 11,
+                "username": "Page5",
+                "email": "page5@example.test",
+                "role": "user",
+                "status": "active",
+                "balance": 5,
+                "concurrency": 78
+              }
+            },
+            {
+              "capability": "ui.get_user",
+              "args": {
+                "id": 11
+              },
+              "run_id": "46a48e21-cdcb-5e5e-9781-00bdfea02364",
+              "command_id": "a78e905a-ae66-5886-8a9a-cd7490b7e391",
+              "started_at": "2026-10-03T09:53:30.141Z",
+              "result": {
+                "id": 11,
+                "username": "Page5",
+                "email": "page5@example.test",
+                "role": "user",
+                "status": "active",
+                "balance": 5,
+                "concurrency": 78
+              }
+            },
+            {
+              "capability": "ui.get_user",
+              "args": {
+                "id": 11
+              },
+              "run_id": "46a48e21-cdcb-5e5e-9781-00bdfea02364",
+              "command_id": "919f59c6-1a29-539a-bda9-06f39a8f3c49",
+              "started_at": "2026-10-03T09:53:36.332Z",
+              "result": {
+                "id": 11,
+                "username": "Page5",
+                "email": "page5@example.test",
+                "role": "user",
+                "status": "active",
+                "balance": 5,
+                "concurrency": 78
+              }
+            }
+          ],
+          "steering": [
+            {
+              "run_id": "46a48e21-cdcb-5e5e-9781-00bdfea02364",
+              "text": "已经提交的变更保留。不要再修改任何数据，只重新查询 Page5 的实际并发并说明结果。",
+              "request_id": "73af402a-7f3d-4507-8a1f-c57d7fe233cc",
+              "after_business_commit": true
+            }
+          ],
+          "steps": [
+            {
+              "run_id": "46a48e21-cdcb-5e5e-9781-00bdfea02364",
+              "instruction": "把 page5@example.test 的并发上限改为 78，保留其他字段，修改后重新读取确认。",
+              "status": "completed",
+              "answer": "已按你的 steering 执行：保留已提交的变更，不再修改任何数据，只重新读取 Page5 的实际情况。\n\n**Page5 当前实际并发上限：78**\n\n- 身份确认：`id=11`、`username=Page5`、`email=page5@example.test`、`role=user`（唯一匹配，total=1）。\n- 本次唯一一次写操作 `ui.update_user`（入参 `id=11, concurrency=78`）已提交并执行成功，其回执返回更新后的用户资料；该操作需要人工审批，审批要求已满足，未绕过确认，也未重复提交。\n- 修改后重新读取 `id=11` 的结果：`concurrency=78`、`status=active`、`balance=5`、`role=user`，其余字段均保持原值（未提供其他字段的改动）。\n\n需要如实说明的一点：修改前的查询结果中该用户的 `concurrency` 已显示为 78，因此从现有数据无法区分本次更新是否实际改变了数值；可以确认的是——当前实际并发上限为 78，且此后未再执行任何写入。",
+              "model_usage": {
+                "budget_tokens": 53665,
+                "cached_input_requests": 11,
+                "cached_input_tokens": 29568,
+                "cost_available": false,
+                "elapsed_ms": 25486,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 1,
+                "input_tokens": 49379,
+                "invalid_responses": 1,
+                "output_tokens": 4286,
+                "priced_requests": 0,
+                "reasoning_output_requests": 9,
+                "reasoning_output_tokens": 2767,
+                "reported_requests": 11,
+                "requests": 11,
+                "retry_attempts": 0
+              },
+              "findings": [
+                {
+                  "category": "model",
+                  "code": "model_decision_schema_invalid",
+                  "message": "模型响应未满足结构化输出契约。",
+                  "next_action": "在模型配置中验证所选 API、模型和参数的结构化输出；检查网关协议适配，保留严格 JSON 与决策校验。",
+                  "recovered": true,
+                  "actionable": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "memory_turn_scope",
+          "pass": false,
+          "error_message": "task-only steering must not create a lasting rule",
+          "started_at": "2026-10-03T09:53:46.977Z",
+          "finished_at": "2026-10-03T09:54:28.895Z",
+          "calls": [
+            {
+              "capability": "ui.list_users",
+              "args": {
+                "search": "page5@example.test"
+              },
+              "run_id": "fbd54ce3-6837-559c-a348-9fc5ea66888a",
+              "command_id": "267cec66-0c71-5441-9198-8dfe06208a55",
+              "started_at": "2026-10-03T09:53:51.310Z",
+              "result": {
+                "items": [
+                  {
+                    "id": 11,
+                    "username": "Page5",
+                    "email": "page5@example.test",
+                    "role": "user",
+                    "status": "active",
+                    "balance": 5,
+                    "concurrency": 78
+                  }
+                ],
+                "total": 1,
+                "page": 1,
+                "page_size": 20,
+                "pages": 1
+              }
+            },
+            {
+              "capability": "ui.list_users",
+              "args": {
+                "search": "page5@example.test"
+              },
+              "run_id": "fbd54ce3-6837-559c-a348-9fc5ea66888a",
+              "command_id": "b5215aa0-88f6-5b0c-83a1-dc78e9e5a1bc",
+              "started_at": "2026-10-03T09:54:01.187Z",
+              "result": {
+                "items": [
+                  {
+                    "id": 11,
+                    "username": "Page5",
+                    "email": "page5@example.test",
+                    "role": "user",
+                    "status": "active",
+                    "balance": 5,
+                    "concurrency": 78
+                  }
+                ],
+                "total": 1,
+                "page": 1,
+                "page_size": 20,
+                "pages": 1
+              }
+            },
+            {
+              "capability": "ui.get_user",
+              "args": {
+                "id": 11
+              },
+              "run_id": "fbd54ce3-6837-559c-a348-9fc5ea66888a",
+              "command_id": "c7ef9ec5-351f-591d-9245-06ac2a56cb00",
+              "started_at": "2026-10-03T09:54:08.944Z",
+              "result": {
+                "id": 11,
+                "username": "Page5",
+                "email": "page5@example.test",
+                "role": "user",
+                "status": "active",
+                "balance": 5,
+                "concurrency": 78
+              }
+            },
+            {
+              "capability": "ui.list_groups",
+              "args": {
+                "search": "Lab-Alpha"
+              },
+              "run_id": "606ff8f4-66fd-5973-bd13-03cc338c81cd",
+              "command_id": "543b3893-9620-59aa-80bc-b185bedf68a3",
+              "started_at": "2026-10-03T09:54:24.552Z",
+              "result": {
+                "items": [
+                  {
+                    "id": 2,
+                    "name": "Lab-Alpha",
+                    "description": "synthetic integration fixture",
+                    "platform": "openai",
+                    "status": "active",
+                    "rate_multiplier": 1.4
+                  }
+                ],
+                "total": 1,
+                "page": 1,
+                "page_size": 20,
+                "pages": 1
+              }
+            }
+          ],
+          "steering": [
+            {
+              "run_id": "fbd54ce3-6837-559c-a348-9fc5ea66888a",
+              "text": "取消刚才的修改要求。不要修改任何用户，只重新读取 Page5 的当前资料，用表格回答。",
+              "request_id": "0fdfdde8-6174-4161-8f5a-af238096463a"
+            }
+          ],
+          "memories": [
+            {
+              "id": "e138b319-f0ca-4b40-b0a2-a1eba9cf395c",
+              "scope": "user",
+              "pack_id": "",
+              "key": "report.format",
+              "value": "",
+              "kind": "preference",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 6,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791019203.1864269,
+              "updated_at": 1791021243.195307
+            },
+            {
+              "id": "dae36642-4d14-473a-84fe-010ef0825e13",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.create.check_duplicate_first",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 3,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020681.7658398,
+              "updated_at": 1791021106.714797
+            },
+            {
+              "id": "935a71de-d280-4351-be92-ffd32f544527",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.create.verify_reread",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 3,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020681.76601,
+              "updated_at": 1791021106.717022
+            },
+            {
+              "id": "80c8cca1-e955-4e5e-b90e-de0a1c3e3c05",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.update.preserve_fields",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 3,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020705.018624,
+              "updated_at": 1791021106.718903
+            },
+            {
+              "id": "4f1be961-96e2-4a92-a558-f9ce8ab29516",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.update.verify_reread",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 3,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020705.019076,
+              "updated_at": 1791021106.720166
+            },
+            {
+              "id": "11d61f37-7135-40a0-b453-d01ded604d2c",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "missing.parameters",
+              "value": "",
+              "kind": "constraint",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 8,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791019460.0355158,
+              "updated_at": 1791021106.7213812
+            },
+            {
+              "id": "25df9c65-ef14-49c4-baa4-18e1f0a5d7d1",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "page5.read_only",
+              "value": "Only re-read Page5 current data; do not modify",
+              "kind": "constraint",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 6,
+              "evidence_count": 1,
+              "source_id": "fbd54ce3-6837-559c-a348-9fc5ea66888a:steering:0fdfdde8-6174-4161-8f5a-af238096463a",
+              "quote": "不要修改任何用户，只重新读取 Page5 的当前资料",
+              "created_at": 1791019203.185643,
+              "updated_at": 1791021243.195179
+            },
+            {
+              "id": "33ae11d1-1246-4aac-9013-2e1cdcdc0471",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "platform.description",
+              "value": "synthetic round 2",
+              "kind": "convention",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 4,
+              "evidence_count": 1,
+              "source_id": "f7038505-61e4-55a8-ad94-26f10aa4b2f3:input:7",
+              "quote": "描述 synthetic round 2",
+              "created_at": 1791020743.8716218,
+              "updated_at": 1791021156.566765
+            },
+            {
+              "id": "58e92162-6457-48b8-a43e-60b4800cbdaa",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "platform.provider",
+              "value": "gemini",
+              "kind": "convention",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 4,
+              "evidence_count": 1,
+              "source_id": "f7038505-61e4-55a8-ad94-26f10aa4b2f3:input:7",
+              "quote": "平台用 gemini",
+              "created_at": 1791020743.870959,
+              "updated_at": 1791021156.566396
+            },
+            {
+              "id": "0d257b96-f46f-4ac8-a05e-f77155d237a1",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "platform.rate_multiplier",
+              "value": "1.25",
+              "kind": "convention",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 4,
+              "evidence_count": 1,
+              "source_id": "f7038505-61e4-55a8-ad94-26f10aa4b2f3:input:7",
+              "quote": "倍率 1.25",
+              "created_at": 1791020743.8713531,
+              "updated_at": 1791021156.5666711
+            },
+            {
+              "id": "ebd0062d-8ca2-4b88-a22c-32c81d3be28e",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "report.format",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 3,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020426.6898181,
+              "updated_at": 1791021106.727478
+            },
+            {
+              "id": "f5a60294-8c8c-4525-a932-956153929644",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "search.read_only",
+              "value": "",
+              "kind": "constraint",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 3,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020299.73343,
+              "updated_at": 1791021106.7284439
+            },
+            {
+              "id": "cc453954-705b-437f-91a6-ca4b0db32809",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "user.update.concurrency_limit",
+              "value": "77",
+              "kind": "convention",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 10,
+              "evidence_count": 1,
+              "source_id": "fbd54ce3-6837-559c-a348-9fc5ea66888a:instruction",
+              "quote": "把 page5@example.test 的并发上限改为 77",
+              "created_at": 1791020879.208864,
+              "updated_at": 1791021228.252784
+            },
+            {
+              "id": "ac1da409-989d-4f59-b008-d3cb40415cdf",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "user.update.preserve_fields",
+              "value": "Preserve other fields when updating a user",
+              "kind": "convention",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 14,
+              "evidence_count": 1,
+              "source_id": "fbd54ce3-6837-559c-a348-9fc5ea66888a:instruction",
+              "quote": "保留其他字段",
+              "created_at": 1791020482.259629,
+              "updated_at": 1791021228.253119
+            },
+            {
+              "id": "d97d911e-c6f7-489a-83cf-ef98f9dc9fd2",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "user.update.verify_reread",
+              "value": "Re-read after modifying to confirm",
+              "kind": "convention",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 14,
+              "evidence_count": 1,
+              "source_id": "fbd54ce3-6837-559c-a348-9fc5ea66888a:instruction",
+              "quote": "修改后重新读取确认",
+              "created_at": 1791020482.2597928,
+              "updated_at": 1791021228.253251
+            }
+          ],
+          "steps": [
+            {
+              "run_id": "fbd54ce3-6837-559c-a348-9fc5ea66888a",
+              "instruction": "把 page5@example.test 的并发上限改为 77，保留其他字段，修改后重新读取确认。",
+              "status": "completed",
+              "answer": "已按新的指示取消修改：`ui.update_user` 调用 **steering_superseded / failed，未执行**，Page5 的用户资料未被更改。以下为重新读取到的 Page5 当前资料（未经修改）：\n\n| 字段 | 值 |\n|---|---|\n| id | 11 |\n| 用户名 | Page5 |\n| 邮箱 | page5@example.test |\n| 角色 | user |\n| 状态 | active |\n| 余额 | 5 |\n| 并发上限 | 78 |\n\n说明：并发上限仍为 **78**（原计划改为 77 的写入已因取消指令而失败，未生效）。以上数据来自修改尝试之后的一次成功读取。",
+              "model_usage": {
+                "budget_tokens": 59960,
+                "cached_input_requests": 12,
+                "cached_input_tokens": 35968,
+                "cost_available": false,
+                "elapsed_ms": 27741,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 0,
+                "input_tokens": 55361,
+                "invalid_responses": 0,
+                "output_tokens": 4599,
+                "priced_requests": 0,
+                "reasoning_output_requests": 10,
+                "reasoning_output_tokens": 3342,
+                "reported_requests": 12,
+                "requests": 12,
+                "retry_attempts": 0
+              },
+              "findings": [
+                {
+                  "category": "business",
+                  "code": "steering_superseded",
+                  "capability": "ui.update_user",
+                  "message": "业务操作未完成。",
+                  "next_action": "核对业务接口的返回状态与实际数据。",
+                  "recovered": false,
+                  "actionable": true
+                }
+              ]
+            },
+            {
+              "run_id": "606ff8f4-66fd-5973-bd13-03cc338c81cd",
+              "instruction": "重新查询 Lab-Alpha 的平台和倍率。",
+              "status": "completed",
+              "answer": "已重新查询 **Lab-Alpha**（分组，id 2，共 1 条匹配）：\n\n| 字段 | 值 |\n|---|---|\n| 名称 | Lab-Alpha |\n| 平台 | openai |\n| 倍率 | 1.4 |\n| 状态 | active |\n| 描述 | synthetic integration fixture |\n\n说明：以上为本次通过 `ui.list_groups`（search=Lab-Alpha）获得的当前数据。项目记忆中另存有「平台 = gemini、倍率 = 1.25」的约定项，但那不是当前 provider 数据，本次未予采用；如需按该约定修改分组，请明确授权。",
+              "model_usage": {
+                "budget_tokens": 15339,
+                "cached_input_requests": 4,
+                "cached_input_tokens": 9600,
+                "cost_available": false,
+                "elapsed_ms": 6368,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 0,
+                "input_tokens": 14572,
+                "invalid_responses": 0,
+                "output_tokens": 767,
+                "priced_requests": 0,
+                "reasoning_output_requests": 3,
+                "reasoning_output_tokens": 368,
+                "reported_requests": 4,
+                "requests": 4,
+                "retry_attempts": 0
+              },
+              "findings": []
+            }
+          ]
+        },
+        {
+          "name": "memory_lasting",
+          "pass": true,
+          "started_at": "2026-10-03T09:54:28.896Z",
+          "finished_at": "2026-10-03T09:54:42.791Z",
+          "calls": [
+            {
+              "capability": "ui.list_groups",
+              "args": {
+                "page": 1,
+                "page_size": 50,
+                "search": "Lab-Alpha"
+              },
+              "run_id": "c0805029-9074-568a-b6ca-e3ff837175dd",
+              "command_id": "6157bab2-bbf9-5e1b-9d09-d2c44e05cd76",
+              "started_at": "2026-10-03T09:54:37.589Z",
+              "result": {
+                "items": [
+                  {
+                    "id": 2,
+                    "name": "Lab-Alpha",
+                    "description": "synthetic integration fixture",
+                    "platform": "openai",
+                    "status": "active",
+                    "rate_multiplier": 1.4
+                  }
+                ],
+                "total": 1,
+                "page": 1,
+                "page_size": 50,
+                "pages": 1
+              }
+            }
+          ],
+          "memories": [
+            {
+              "id": "e138b319-f0ca-4b40-b0a2-a1eba9cf395c",
+              "scope": "user",
+              "pack_id": "",
+              "key": "report.format",
+              "value": "",
+              "kind": "preference",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 6,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791019203.1864269,
+              "updated_at": 1791021243.195307
+            },
+            {
+              "id": "dae36642-4d14-473a-84fe-010ef0825e13",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.create.check_duplicate_first",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 3,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020681.7658398,
+              "updated_at": 1791021106.714797
+            },
+            {
+              "id": "935a71de-d280-4351-be92-ffd32f544527",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.create.verify_reread",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 3,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020681.76601,
+              "updated_at": 1791021106.717022
+            },
+            {
+              "id": "80c8cca1-e955-4e5e-b90e-de0a1c3e3c05",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.update.preserve_fields",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 3,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020705.018624,
+              "updated_at": 1791021106.718903
+            },
+            {
+              "id": "4f1be961-96e2-4a92-a558-f9ce8ab29516",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.update.verify_reread",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 3,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020705.019076,
+              "updated_at": 1791021106.720166
+            },
+            {
+              "id": "11d61f37-7135-40a0-b453-d01ded604d2c",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "missing.parameters",
+              "value": "",
+              "kind": "constraint",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 8,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791019460.0355158,
+              "updated_at": 1791021106.7213812
+            },
+            {
+              "id": "25df9c65-ef14-49c4-baa4-18e1f0a5d7d1",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "page5.read_only",
+              "value": "Only re-read Page5 current data; do not modify",
+              "kind": "constraint",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 6,
+              "evidence_count": 1,
+              "source_id": "fbd54ce3-6837-559c-a348-9fc5ea66888a:steering:0fdfdde8-6174-4161-8f5a-af238096463a",
+              "quote": "不要修改任何用户，只重新读取 Page5 的当前资料",
+              "created_at": 1791019203.185643,
+              "updated_at": 1791021243.195179
+            },
+            {
+              "id": "33ae11d1-1246-4aac-9013-2e1cdcdc0471",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "platform.description",
+              "value": "synthetic round 2",
+              "kind": "convention",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 4,
+              "evidence_count": 1,
+              "source_id": "f7038505-61e4-55a8-ad94-26f10aa4b2f3:input:7",
+              "quote": "描述 synthetic round 2",
+              "created_at": 1791020743.8716218,
+              "updated_at": 1791021156.566765
+            },
+            {
+              "id": "58e92162-6457-48b8-a43e-60b4800cbdaa",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "platform.provider",
+              "value": "gemini",
+              "kind": "convention",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 4,
+              "evidence_count": 1,
+              "source_id": "f7038505-61e4-55a8-ad94-26f10aa4b2f3:input:7",
+              "quote": "平台用 gemini",
+              "created_at": 1791020743.870959,
+              "updated_at": 1791021156.566396
+            },
+            {
+              "id": "0d257b96-f46f-4ac8-a05e-f77155d237a1",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "platform.rate_multiplier",
+              "value": "1.25",
+              "kind": "convention",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 4,
+              "evidence_count": 1,
+              "source_id": "f7038505-61e4-55a8-ad94-26f10aa4b2f3:input:7",
+              "quote": "倍率 1.25",
+              "created_at": 1791020743.8713531,
+              "updated_at": 1791021156.5666711
+            },
+            {
+              "id": "ebd0062d-8ca2-4b88-a22c-32c81d3be28e",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "report.format",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 3,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020426.6898181,
+              "updated_at": 1791021106.727478
+            },
+            {
+              "id": "88b2c92e-a887-4be5-aac9-6aead1121b28",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "response.language",
+              "value": "zh-CN",
+              "kind": "preference",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 2,
+              "evidence_count": 1,
+              "source_id": "09b9152a-e55d-5ddd-865f-560d1043a891:instruction",
+              "quote": "以后这个项目的所有回答都用中文，记住这个偏好。",
+              "created_at": 1791021270.968852,
+              "updated_at": 1791021270.968852
+            },
+            {
+              "id": "f5a60294-8c8c-4525-a932-956153929644",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "search.read_only",
+              "value": "",
+              "kind": "constraint",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 3,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020299.73343,
+              "updated_at": 1791021106.7284439
+            },
+            {
+              "id": "cc453954-705b-437f-91a6-ca4b0db32809",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "user.update.concurrency_limit",
+              "value": "77",
+              "kind": "convention",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 10,
+              "evidence_count": 1,
+              "source_id": "fbd54ce3-6837-559c-a348-9fc5ea66888a:instruction",
+              "quote": "把 page5@example.test 的并发上限改为 77",
+              "created_at": 1791020879.208864,
+              "updated_at": 1791021228.252784
+            },
+            {
+              "id": "ac1da409-989d-4f59-b008-d3cb40415cdf",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "user.update.preserve_fields",
+              "value": "Preserve other fields when updating a user",
+              "kind": "convention",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 14,
+              "evidence_count": 1,
+              "source_id": "fbd54ce3-6837-559c-a348-9fc5ea66888a:instruction",
+              "quote": "保留其他字段",
+              "created_at": 1791020482.259629,
+              "updated_at": 1791021228.253119
+            },
+            {
+              "id": "d97d911e-c6f7-489a-83cf-ef98f9dc9fd2",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "user.update.verify_reread",
+              "value": "Re-read after modifying to confirm",
+              "kind": "convention",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 14,
+              "evidence_count": 1,
+              "source_id": "fbd54ce3-6837-559c-a348-9fc5ea66888a:instruction",
+              "quote": "修改后重新读取确认",
+              "created_at": 1791020482.2597928,
+              "updated_at": 1791021228.253251
+            }
+          ],
+          "steps": [
+            {
+              "run_id": "09b9152a-e55d-5ddd-865f-560d1043a891",
+              "instruction": "以后这个项目的所有回答都用中文，记住这个偏好。",
+              "status": "completed",
+              "answer": "好的，已记下：本项目（sub2api）之后的所有回答都使用中文。\n\n补充说明两点：\n- 当前项目记忆中已存在偏好 `response.language = zh-CN`，与你的要求一致，因此后续对话我会统一用中文回复。\n- 我没有可直接写入长期记忆的能力，无法自行新增或修改记忆条目；如果需要在系统层面固化这条偏好，请通过项目设置或相应管理入口保存。\n\n接下来有需要查询或操作的内容（例如分组、用户、当前账号信息），直接告诉我即可，我会用中文回复并只依据实际查询结果作答。",
+              "model_usage": {
+                "budget_tokens": 5553,
+                "cached_input_requests": 2,
+                "cached_input_tokens": 4224,
+                "cost_available": false,
+                "elapsed_ms": 3808,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 0,
+                "input_tokens": 5250,
+                "invalid_responses": 0,
+                "output_tokens": 303,
+                "priced_requests": 0,
+                "reasoning_output_requests": 1,
+                "reasoning_output_tokens": 97,
+                "reported_requests": 2,
+                "requests": 2,
+                "retry_attempts": 0
+              },
+              "findings": []
+            },
+            {
+              "run_id": "c0805029-9074-568a-b6ca-e3ff837175dd",
+              "instruction": "Query Lab-Alpha current platform and rate multiplier.",
+              "status": "completed",
+              "answer": "查询结果（数据来自本项目的分组列表查询，匹配数 total = 1，结果唯一）：\n\n| 分组 | 平台 | 倍率 | 状态 |\n| --- | --- | --- | --- |\n| Lab-Alpha | openai | 1.4 | active |\n\n**当前平台：openai**\n**当前倍率（rate_multiplier）：1.4**\n\n说明：以上为 provider 返回的实时数据（ID 2）。项目记忆中的 platform.provider / platform.rate_multiplier 属于约定值，未作为本次查询结果使用。",
+              "model_usage": {
+                "budget_tokens": 15532,
+                "cached_input_requests": 4,
+                "cached_input_tokens": 10112,
+                "cost_available": false,
+                "elapsed_ms": 7248,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 0,
+                "input_tokens": 14537,
+                "invalid_responses": 0,
+                "output_tokens": 995,
+                "priced_requests": 0,
+                "reasoning_output_requests": 3,
+                "reasoning_output_tokens": 617,
+                "reported_requests": 4,
+                "requests": 4,
+                "retry_attempts": 0
+              },
+              "findings": []
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "cases": 5,
+        "passed": 4,
+        "messages": 7,
+        "model_requests": 50,
+        "business_handlers": 13
+      },
+      "steering_extractions": [
+        {
+          "text": "取消刚才的修改要求。不要修改任何用户，只重新读取 Page5 的当前资料，用表格回答。",
+          "existing": [
+            {
+              "id": "e138b319-f0ca-4b40-b0a2-a1eba9cf395c",
+              "key": "report.format",
+              "kind": "preference",
+              "revision": 5,
+              "scope": "user",
+              "value": ""
+            },
+            {
+              "id": "dae36642-4d14-473a-84fe-010ef0825e13",
+              "key": "group.create.check_duplicate_first",
+              "kind": "convention",
+              "pack_id": "sub2api",
+              "revision": 3,
+              "scope": "pack",
+              "value": ""
+            },
+            {
+              "id": "935a71de-d280-4351-be92-ffd32f544527",
+              "key": "group.create.verify_reread",
+              "kind": "convention",
+              "pack_id": "sub2api",
+              "revision": 3,
+              "scope": "pack",
+              "value": ""
+            },
+            {
+              "id": "80c8cca1-e955-4e5e-b90e-de0a1c3e3c05",
+              "key": "group.update.preserve_fields",
+              "kind": "convention",
+              "pack_id": "sub2api",
+              "revision": 3,
+              "scope": "pack",
+              "value": ""
+            },
+            {
+              "id": "4f1be961-96e2-4a92-a558-f9ce8ab29516",
+              "key": "group.update.verify_reread",
+              "kind": "convention",
+              "pack_id": "sub2api",
+              "revision": 3,
+              "scope": "pack",
+              "value": ""
+            },
+            {
+              "id": "11d61f37-7135-40a0-b453-d01ded604d2c",
+              "key": "missing.parameters",
+              "kind": "constraint",
+              "pack_id": "sub2api",
+              "revision": 8,
+              "scope": "pack",
+              "value": ""
+            },
+            {
+              "id": "25df9c65-ef14-49c4-baa4-18e1f0a5d7d1",
+              "key": "page5.read_only",
+              "kind": "constraint",
+              "pack_id": "sub2api",
+              "revision": 5,
+              "scope": "pack",
+              "value": ""
+            },
+            {
+              "id": "33ae11d1-1246-4aac-9013-2e1cdcdc0471",
+              "key": "platform.description",
+              "kind": "convention",
+              "pack_id": "sub2api",
+              "revision": 4,
+              "scope": "pack",
+              "value": "synthetic round 2"
+            },
+            {
+              "id": "58e92162-6457-48b8-a43e-60b4800cbdaa",
+              "key": "platform.provider",
+              "kind": "convention",
+              "pack_id": "sub2api",
+              "revision": 4,
+              "scope": "pack",
+              "value": "gemini"
+            },
+            {
+              "id": "0d257b96-f46f-4ac8-a05e-f77155d237a1",
+              "key": "platform.rate_multiplier",
+              "kind": "convention",
+              "pack_id": "sub2api",
+              "revision": 4,
+              "scope": "pack",
+              "value": "1.25"
+            },
+            {
+              "id": "ebd0062d-8ca2-4b88-a22c-32c81d3be28e",
+              "key": "report.format",
+              "kind": "convention",
+              "pack_id": "sub2api",
+              "revision": 3,
+              "scope": "pack",
+              "value": ""
+            },
+            {
+              "id": "f5a60294-8c8c-4525-a932-956153929644",
+              "key": "search.read_only",
+              "kind": "constraint",
+              "pack_id": "sub2api",
+              "revision": 3,
+              "scope": "pack",
+              "value": ""
+            },
+            {
+              "id": "cc453954-705b-437f-91a6-ca4b0db32809",
+              "key": "user.update.concurrency_limit",
+              "kind": "convention",
+              "pack_id": "sub2api",
+              "revision": 10,
+              "scope": "pack",
+              "value": "77"
+            },
+            {
+              "id": "ac1da409-989d-4f59-b008-d3cb40415cdf",
+              "key": "user.update.preserve_fields",
+              "kind": "convention",
+              "pack_id": "sub2api",
+              "revision": 14,
+              "scope": "pack",
+              "value": "Preserve other fields when updating a user"
+            },
+            {
+              "id": "d97d911e-c6f7-489a-83cf-ef98f9dc9fd2",
+              "key": "user.update.verify_reread",
+              "kind": "convention",
+              "pack_id": "sub2api",
+              "revision": 14,
+              "scope": "pack",
+              "value": "Re-read after modifying to confirm"
+            }
+          ],
+          "proposals": [
+            {
+              "scope": "pack",
+              "key": "page5.read_only",
+              "value": "Only re-read Page5 current data; do not modify",
+              "kind": "constraint",
+              "mode": "explicit",
+              "quote": "不要修改任何用户，只重新读取 Page5 的当前资料"
+            },
+            {
+              "scope": "user",
+              "key": "report.format",
+              "value": "table",
+              "kind": "preference",
+              "mode": "habit",
+              "quote": "用表格回答"
+            }
+          ],
+          "task_scope_guidance": true
+        }
+      ]
+    },
+    {
+      "label": "prompt_and_forgotten_projection_fix",
+      "framework": "76ca878+memory-projection",
+      "started_at": "2026-10-03T09:59:22.196Z",
+      "cases": [
+        {
+          "name": "group_missing_input",
+          "pass": true,
+          "started_at": "2026-10-03T09:59:22.198Z",
+          "finished_at": "2026-10-03T09:59:47.205Z",
+          "calls": [
+            {
+              "capability": "ui.list_groups",
+              "args": {
+                "search": "Round2-Input-20261003095922"
+              },
+              "run_id": "380145ec-e2af-56ac-9078-63cc8523530c",
+              "command_id": "874aa493-a5e0-5e57-9577-296e3a065645",
+              "started_at": "2026-10-03T09:59:34.513Z",
+              "result": {
+                "items": [],
+                "total": 0,
+                "page": 1,
+                "page_size": 20,
+                "pages": 1
+              }
+            },
+            {
+              "capability": "ui.create_group",
+              "args": {
+                "description": "synthetic round 2",
+                "name": "Round2-Input-20261003095922",
+                "platform": "gemini",
+                "rate_multiplier": 1.25
+              },
+              "run_id": "380145ec-e2af-56ac-9078-63cc8523530c",
+              "command_id": "ffb7269d-7686-51ba-bf64-fa5470bebcea",
+              "started_at": "2026-10-03T09:59:41.934Z",
+              "result": {
+                "id": 16,
+                "name": "Round2-Input-20261003095922",
+                "description": "synthetic round 2",
+                "platform": "gemini",
+                "status": "active",
+                "rate_multiplier": 1.25
+              }
+            }
+          ],
+          "inputs": [
+            {
+              "run_id": "380145ec-e2af-56ac-9078-63cc8523530c",
+              "field": "missing_group_parameters",
+              "prompt": "创建分组还需要两个必填参数，请一并提供：\n1) 平台（platform），可选值：openai / anthropic / gemini / grok / antigravity；\n2) 倍率（rate_multiplier），一个不小于 0 的数值。\n例如：platform=openai, rate_multiplier=1.0。另外，分组描述（description）为可选，如需设置请一并告知。",
+              "value": "平台用 gemini，倍率 1.25，描述 synthetic round 2。"
+            }
+          ],
+          "steps": [
+            {
+              "run_id": "380145ec-e2af-56ac-9078-63cc8523530c",
+              "instruction": "创建名为 Round2-Input-20261003095922 的分组。缺少必要参数时请向我追问，不要自行猜测。",
+              "status": "completed",
+              "answer": "分组已创建成功（补充参数已按你提供的值使用：平台 gemini、倍率 1.25、描述 synthetic round 2）。\n\n- 分组 ID：16\n- 名称：Round2-Input-20261003095922\n- 平台：gemini\n- 倍率：1.25\n- 状态：active\n- 描述：synthetic round 2\n\n创建前按名称查重结果为 0 条（无同名分组），审批通过后写入成功并返回了上述资料。",
+              "model_usage": {
+                "budget_tokens": 37404,
+                "cached_input_requests": 10,
+                "cached_input_tokens": 21376,
+                "cost_available": false,
+                "elapsed_ms": 19611,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 1,
+                "input_tokens": 34368,
+                "invalid_responses": 1,
+                "output_tokens": 3036,
+                "priced_requests": 0,
+                "reasoning_output_requests": 8,
+                "reasoning_output_tokens": 1968,
+                "reported_requests": 10,
+                "requests": 10,
+                "retry_attempts": 0
+              },
+              "findings": [
+                {
+                  "category": "model",
+                  "code": "model_output_invalid_json",
+                  "message": "模型响应未满足结构化输出契约。",
+                  "next_action": "在模型配置中验证所选 API、模型和参数的结构化输出；检查网关协议适配，保留严格 JSON 与决策校验。",
+                  "recovered": true,
+                  "actionable": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "input_refresh",
+          "pass": true,
+          "started_at": "2026-10-03T09:59:47.206Z",
+          "finished_at": "2026-10-03T10:00:09.439Z",
+          "calls": [
+            {
+              "capability": "ui.list_groups",
+              "args": {
+                "page": 1,
+                "page_size": 100,
+                "search": "Round2-Refresh-20261003095922"
+              },
+              "run_id": "eac833da-423f-566a-a786-4fa47ea3c26a",
+              "command_id": "7457f378-ec5d-5ed4-b321-18e5e4146558",
+              "started_at": "2026-10-03T09:59:56.555Z",
+              "result": {
+                "items": [],
+                "total": 0,
+                "page": 1,
+                "page_size": 100,
+                "pages": 1
+              }
+            },
+            {
+              "capability": "ui.create_group",
+              "args": {
+                "description": "synthetic round 2",
+                "name": "Round2-Refresh-20261003095922",
+                "platform": "gemini",
+                "rate_multiplier": 1.25
+              },
+              "run_id": "eac833da-423f-566a-a786-4fa47ea3c26a",
+              "command_id": "5cac99b4-95a3-5b61-bc50-4f9797717163",
+              "started_at": "2026-10-03T10:00:03.047Z",
+              "result": {
+                "id": 17,
+                "name": "Round2-Refresh-20261003095922",
+                "description": "synthetic round 2",
+                "platform": "gemini",
+                "status": "active",
+                "rate_multiplier": 1.25
+              }
+            }
+          ],
+          "inputs": [
+            {
+              "run_id": "eac833da-423f-566a-a786-4fa47ea3c26a",
+              "field": "platform",
+              "prompt": "请选择分组 Round2-Refresh-20261003095922 的平台（倍率 1.25，描述 synthetic round 2）；平台未指定，不能猜测。",
+              "value": "gemini"
+            }
+          ],
+          "invalid_inputs": [
+            {
+              "field": "platform",
+              "unchanged_revision": 7
+            }
+          ],
+          "refresh": {
+            "original": {
+              "id": "e7c2b645-2d40-4344-af52-fdf162656abb",
+              "generation": 1
+            },
+            "current": {
+              "id": "e7c2b645-2d40-4344-af52-fdf162656abb",
+              "generation": 2
+            },
+            "lost_response": false
+          },
+          "steps": [
+            {
+              "run_id": "eac833da-423f-566a-a786-4fa47ea3c26a",
+              "instruction": "创建名为 Round2-Refresh-20261003095922 的分组，倍率 1.25，描述 synthetic round 2。平台还没决定，请用单选选项向我追问，不能猜测。",
+              "status": "completed",
+              "answer": "分组已创建成功。\n\n- **名称**：Round2-Refresh-20261003095922\n- **平台**：gemini（来自你的补充选择）\n- **倍率**：1.25\n- **描述**：synthetic round 2\n- **分组 ID**：17\n- **状态**：active\n\n创建前已用相同名称查重（匹配数 total=0，无重名），随后执行创建并通过审批，回执确认写入成功。",
+              "model_usage": {
+                "budget_tokens": 28495,
+                "cached_input_requests": 8,
+                "cached_input_tokens": 16640,
+                "cost_available": false,
+                "elapsed_ms": 16031,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 0,
+                "input_tokens": 26142,
+                "invalid_responses": 0,
+                "output_tokens": 2353,
+                "priced_requests": 0,
+                "reasoning_output_requests": 6,
+                "reasoning_output_tokens": 1462,
+                "reported_requests": 8,
+                "requests": 8,
+                "retry_attempts": 0
+              },
+              "findings": []
+            }
+          ]
+        },
+        {
+          "name": "steer_after_write",
+          "pass": true,
+          "started_at": "2026-10-03T10:00:09.440Z",
+          "finished_at": "2026-10-03T10:01:19.483Z",
+          "calls": [
+            {
+              "capability": "ui.list_users",
+              "args": {
+                "page": 1,
+                "page_size": 50,
+                "search": "page5@example.test"
+              },
+              "run_id": "b99a744d-a3d3-5f47-b498-3342553d633f",
+              "command_id": "fdedb94c-ff21-599b-a03a-443d485bee8e",
+              "started_at": "2026-10-03T10:00:14.181Z",
+              "result": {
+                "items": [
+                  {
+                    "id": 11,
+                    "username": "Page5",
+                    "email": "page5@example.test",
+                    "role": "user",
+                    "status": "active",
+                    "balance": 5,
+                    "concurrency": 78
+                  }
+                ],
+                "total": 1,
+                "page": 1,
+                "page_size": 50,
+                "pages": 1
+              }
+            },
+            {
+              "capability": "ui.get_user",
+              "args": {
+                "id": 11
+              },
+              "run_id": "b99a744d-a3d3-5f47-b498-3342553d633f",
+              "command_id": "4be5b426-031f-52cc-a01d-450fefdd5f31",
+              "started_at": "2026-10-03T10:00:24.082Z",
+              "result": {
+                "id": 11,
+                "username": "Page5",
+                "email": "page5@example.test",
+                "role": "user",
+                "status": "active",
+                "balance": 5,
+                "concurrency": 78
+              }
+            },
+            {
+              "capability": "ui.update_user",
+              "args": {
+                "concurrency": 78,
+                "id": 11
+              },
+              "run_id": "b99a744d-a3d3-5f47-b498-3342553d633f",
+              "command_id": "9a0dde67-943c-5927-b3ae-ab14f7ac9c03",
+              "started_at": "2026-10-03T10:00:41.023Z",
+              "result": {
+                "id": 11,
+                "username": "Page5",
+                "email": "page5@example.test",
+                "role": "user",
+                "status": "active",
+                "balance": 5,
+                "concurrency": 78
+              }
+            },
+            {
+              "capability": "ui.get_user",
+              "args": {
+                "id": 11
+              },
+              "run_id": "b99a744d-a3d3-5f47-b498-3342553d633f",
+              "command_id": "c9d765f6-520d-5502-8593-5adbd8206067",
+              "started_at": "2026-10-03T10:00:46.516Z",
+              "result": {
+                "id": 11,
+                "username": "Page5",
+                "email": "page5@example.test",
+                "role": "user",
+                "status": "active",
+                "balance": 5,
+                "concurrency": 78
+              }
+            },
+            {
+              "capability": "ui.get_user",
+              "args": {
+                "id": 11
+              },
+              "run_id": "b99a744d-a3d3-5f47-b498-3342553d633f",
+              "command_id": "eabfb44d-7ab9-5d7c-9eb8-7c835f79e020",
+              "started_at": "2026-10-03T10:00:53.648Z",
+              "result": {
+                "id": 11,
+                "username": "Page5",
+                "email": "page5@example.test",
+                "role": "user",
+                "status": "active",
+                "balance": 5,
+                "concurrency": 78
+              }
+            },
+            {
+              "capability": "ui.get_user",
+              "args": {
+                "id": 11
+              },
+              "run_id": "b99a744d-a3d3-5f47-b498-3342553d633f",
+              "command_id": "b7362d0b-84a6-5b34-b0fa-937dca722a0d",
+              "started_at": "2026-10-03T10:00:58.348Z",
+              "result": {
+                "id": 11,
+                "username": "Page5",
+                "email": "page5@example.test",
+                "role": "user",
+                "status": "active",
+                "balance": 5,
+                "concurrency": 78
+              }
+            },
+            {
+              "capability": "ui.get_user",
+              "args": {
+                "id": 11
+              },
+              "run_id": "b99a744d-a3d3-5f47-b498-3342553d633f",
+              "command_id": "06d099e4-ea66-578c-9fc9-deb708e45e3a",
+              "started_at": "2026-10-03T10:01:04.369Z",
+              "result": {
+                "id": 11,
+                "username": "Page5",
+                "email": "page5@example.test",
+                "role": "user",
+                "status": "active",
+                "balance": 5,
+                "concurrency": 78
+              }
+            },
+            {
+              "capability": "ui.get_user",
+              "args": {
+                "id": 11
+              },
+              "run_id": "b99a744d-a3d3-5f47-b498-3342553d633f",
+              "command_id": "b5134684-f6c0-5b70-94df-053945f95e6c",
+              "started_at": "2026-10-03T10:01:09.851Z",
+              "result": {
+                "id": 11,
+                "username": "Page5",
+                "email": "page5@example.test",
+                "role": "user",
+                "status": "active",
+                "balance": 5,
+                "concurrency": 78
+              }
+            }
+          ],
+          "steering": [
+            {
+              "run_id": "b99a744d-a3d3-5f47-b498-3342553d633f",
+              "text": "已经提交的变更保留。不要再修改任何数据，只重新查询 Page5 的实际并发并说明结果。",
+              "request_id": "5d372844-085f-4cc5-9b6f-b8dfd986c5a1",
+              "after_business_commit": true
+            }
+          ],
+          "steps": [
+            {
+              "run_id": "b99a744d-a3d3-5f47-b498-3342553d633f",
+              "instruction": "把 page5@example.test 的并发上限改为 78，保留其他字段，修改后重新读取确认。",
+              "status": "completed",
+              "answer": "已按您的 steering 停止一切写入，只做查询，不再修改任何数据。\n\n**Page5 的实际并发结果**\n\n- 用户：Page5（`page5@example.test`，ID 11，角色 user，状态 active）\n- 当前并发上限：**78**\n- 当前余额：5\n\n说明：\n- 之前提交的并发上限变更（`concurrency=78`，id=11）已成功执行且保留，其回执返回的更新后资料也是并发 78（Fact `f068829c…`）。\n- 变更后重新读取的确认结果同样显示并发上限为 78（最近一次读取 Fact `2cb4e95b…`，以及此前的多次读取 `e9665d28…`、`8a1c6419…`、`f3859293…`、`0935c02c…` 一致）。\n- 因此 Page5 的实际并发上限现为 78，其他字段（邮箱、用户名、角色、状态、余额）未受影响。\n\n本轮未再进行任何数据修改。",
+              "model_usage": {
+                "budget_tokens": 91938,
+                "cached_input_requests": 16,
+                "cached_input_tokens": 56704,
+                "cost_available": false,
+                "elapsed_ms": 55388,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 0,
+                "input_tokens": 82173,
+                "invalid_responses": 0,
+                "output_tokens": 9765,
+                "priced_requests": 0,
+                "reasoning_output_requests": 14,
+                "reasoning_output_tokens": 8094,
+                "reported_requests": 16,
+                "requests": 16,
+                "retry_attempts": 0
+              },
+              "findings": []
+            }
+          ]
+        },
+        {
+          "name": "memory_turn_scope",
+          "pass": true,
+          "started_at": "2026-10-03T10:01:19.485Z",
+          "finished_at": "2026-10-03T10:01:54.005Z",
+          "calls": [
+            {
+              "capability": "ui.list_users",
+              "args": {
+                "page": 1,
+                "page_size": 100,
+                "search": "page5@example.test"
+              },
+              "run_id": "399bd0da-d0a5-558d-8f2c-57134d0e7edc",
+              "command_id": "2acf500f-6c97-55ba-8348-de9eedfae9e2",
+              "started_at": "2026-10-03T10:01:23.798Z",
+              "result": {
+                "items": [
+                  {
+                    "id": 11,
+                    "username": "Page5",
+                    "email": "page5@example.test",
+                    "role": "user",
+                    "status": "active",
+                    "balance": 5,
+                    "concurrency": 78
+                  }
+                ],
+                "total": 1,
+                "page": 1,
+                "page_size": 100,
+                "pages": 1
+              }
+            },
+            {
+              "capability": "ui.get_user",
+              "args": {
+                "id": 11
+              },
+              "run_id": "399bd0da-d0a5-558d-8f2c-57134d0e7edc",
+              "command_id": "10b7ea19-6b73-5478-85b7-1024fe1bda5b",
+              "started_at": "2026-10-03T10:01:37.079Z",
+              "result": {
+                "id": 11,
+                "username": "Page5",
+                "email": "page5@example.test",
+                "role": "user",
+                "status": "active",
+                "balance": 5,
+                "concurrency": 78
+              }
+            },
+            {
+              "capability": "ui.list_groups",
+              "args": {
+                "page": 1,
+                "page_size": 100,
+                "search": "Lab-Alpha"
+              },
+              "run_id": "433541ba-a045-5de3-acc1-3ae9199c599e",
+              "command_id": "827cbb20-ae83-5e9c-b55b-38b6531ef2fd",
+              "started_at": "2026-10-03T10:01:50.307Z",
+              "result": {
+                "items": [
+                  {
+                    "id": 2,
+                    "name": "Lab-Alpha",
+                    "description": "synthetic integration fixture",
+                    "platform": "openai",
+                    "status": "active",
+                    "rate_multiplier": 1.4
+                  }
+                ],
+                "total": 1,
+                "page": 1,
+                "page_size": 100,
+                "pages": 1
+              }
+            }
+          ],
+          "steering": [
+            {
+              "run_id": "399bd0da-d0a5-558d-8f2c-57134d0e7edc",
+              "text": "取消刚才的修改要求。不要修改任何用户，只重新读取 Page5 的当前资料，用表格回答。",
+              "request_id": "99467803-5e9e-4568-a834-af48df1965e8"
+            }
+          ],
+          "memories": [
+            {
+              "id": "e138b319-f0ca-4b40-b0a2-a1eba9cf395c",
+              "scope": "user",
+              "pack_id": "",
+              "key": "report.format",
+              "value": "",
+              "kind": "preference",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 7,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791019203.1864269,
+              "updated_at": 1791021512.5371141
+            },
+            {
+              "id": "4559dcd4-9330-4598-82a0-0f6a8c9ef600",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "clarification.missing_parameters",
+              "value": "Ask the user for missing required parameters using single-choice options instead of guessing",
+              "kind": "constraint",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 3,
+              "evidence_count": 1,
+              "source_id": "eac833da-423f-566a-a786-4fa47ea3c26a:instruction",
+              "quote": "平台还没决定，请用单选选项向我追问，不能猜测",
+              "created_at": 1791021563.717359,
+              "updated_at": 1791021588.662668
+            },
+            {
+              "id": "dae36642-4d14-473a-84fe-010ef0825e13",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.create.check_duplicate_first",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 4,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020681.7658398,
+              "updated_at": 1791021512.54192
+            },
+            {
+              "id": "935a71de-d280-4351-be92-ffd32f544527",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.create.verify_reread",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 4,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020681.76601,
+              "updated_at": 1791021512.544825
+            },
+            {
+              "id": "80c8cca1-e955-4e5e-b90e-de0a1c3e3c05",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.update.preserve_fields",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 4,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020705.018624,
+              "updated_at": 1791021512.5480452
+            },
+            {
+              "id": "4f1be961-96e2-4a92-a558-f9ce8ab29516",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.update.verify_reread",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 4,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020705.019076,
+              "updated_at": 1791021512.550403
+            },
+            {
+              "id": "11d61f37-7135-40a0-b453-d01ded604d2c",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "missing.parameters",
+              "value": "",
+              "kind": "constraint",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 9,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791019460.0355158,
+              "updated_at": 1791021512.551965
+            },
+            {
+              "id": "25df9c65-ef14-49c4-baa4-18e1f0a5d7d1",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "page5.read_only",
+              "value": "",
+              "kind": "constraint",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 7,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791019203.185643,
+              "updated_at": 1791021512.553791
+            },
+            {
+              "id": "33ae11d1-1246-4aac-9013-2e1cdcdc0471",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "platform.description",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 5,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020743.8716218,
+              "updated_at": 1791021512.555711
+            },
+            {
+              "id": "58e92162-6457-48b8-a43e-60b4800cbdaa",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "platform.provider",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 5,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020743.870959,
+              "updated_at": 1791021512.566206
+            },
+            {
+              "id": "0d257b96-f46f-4ac8-a05e-f77155d237a1",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "platform.rate_multiplier",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 5,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020743.8713531,
+              "updated_at": 1791021512.5689301
+            },
+            {
+              "id": "ebd0062d-8ca2-4b88-a22c-32c81d3be28e",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "report.format",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 4,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020426.6898181,
+              "updated_at": 1791021512.572263
+            },
+            {
+              "id": "88b2c92e-a887-4be5-aac9-6aead1121b28",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "response.language",
+              "value": "",
+              "kind": "preference",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 3,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791021270.968852,
+              "updated_at": 1791021512.574184
+            },
+            {
+              "id": "f5a60294-8c8c-4525-a932-956153929644",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "search.read_only",
+              "value": "",
+              "kind": "constraint",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 4,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020299.73343,
+              "updated_at": 1791021512.575562
+            },
+            {
+              "id": "cc453954-705b-437f-91a6-ca4b0db32809",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "user.update.concurrency_limit",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 11,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020879.208864,
+              "updated_at": 1791021512.577145
+            },
+            {
+              "id": "ac1da409-989d-4f59-b008-d3cb40415cdf",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "user.update.preserve_fields",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 15,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020482.259629,
+              "updated_at": 1791021512.5788732
+            },
+            {
+              "id": "d97d911e-c6f7-489a-83cf-ef98f9dc9fd2",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "user.update.verify_reread",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 15,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020482.2597928,
+              "updated_at": 1791021512.580075
+            }
+          ],
+          "steps": [
+            {
+              "run_id": "399bd0da-d0a5-558d-8f2c-57134d0e7edc",
+              "instruction": "把 page5@example.test 的并发上限改为 77，保留其他字段，修改后重新读取确认。",
+              "status": "completed",
+              "answer": "已按新指令**取消修改**：没有任何用户被改动（`ui.update_user` 调用以 `steering_superseded` 失败，未落库），下面只是重新读取的 Page5 当前资料。\n\n| 字段 | 值 |\n|---|---|\n| id | 11 |\n| username | Page5 |\n| email | page5@example.test |\n| role | user |\n| status | active |\n| concurrency | 78 |\n| balance | 5 |\n\n数据来源：取消修改后本次运行重新执行的 `ui.get_user(id=11)`，并发上限仍为 **78**，与最初 `ui.list_users` 查询结果一致，说明未被修改。",
+              "model_usage": {
+                "budget_tokens": 41833,
+                "cached_input_requests": 10,
+                "cached_input_tokens": 25088,
+                "cost_available": false,
+                "elapsed_ms": 21305,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 0,
+                "input_tokens": 38387,
+                "invalid_responses": 0,
+                "output_tokens": 3446,
+                "priced_requests": 0,
+                "reasoning_output_requests": 8,
+                "reasoning_output_tokens": 2372,
+                "reported_requests": 10,
+                "requests": 10,
+                "retry_attempts": 0
+              },
+              "findings": [
+                {
+                  "category": "business",
+                  "code": "steering_superseded",
+                  "capability": "ui.update_user",
+                  "message": "业务操作未完成。",
+                  "next_action": "核对业务接口的返回状态与实际数据。",
+                  "recovered": false,
+                  "actionable": true
+                }
+              ]
+            },
+            {
+              "run_id": "433541ba-a045-5de3-acc1-3ae9199c599e",
+              "instruction": "重新查询 Lab-Alpha 的平台和倍率。",
+              "status": "completed",
+              "answer": "已重新查询 **Lab-Alpha**（本次运行执行 `ui.list_groups(search=\"Lab-Alpha\")`，匹配数 total=1）：\n\n| 字段 | 值 |\n|---|---|\n| id | 2 |\n| name | Lab-Alpha |\n| platform | openai |\n| rate_multiplier | 1.4 |\n| status | active |\n| description | synthetic integration fixture |\n\n即：平台为 **openai**，倍率为 **1.4**。",
+              "model_usage": {
+                "budget_tokens": 13482,
+                "cached_input_requests": 4,
+                "cached_input_tokens": 9600,
+                "cost_available": false,
+                "elapsed_ms": 6225,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 0,
+                "input_tokens": 12636,
+                "invalid_responses": 0,
+                "output_tokens": 846,
+                "priced_requests": 0,
+                "reasoning_output_requests": 3,
+                "reasoning_output_tokens": 480,
+                "reported_requests": 4,
+                "requests": 4,
+                "retry_attempts": 0
+              },
+              "findings": []
+            }
+          ]
+        },
+        {
+          "name": "memory_lasting",
+          "pass": true,
+          "started_at": "2026-10-03T10:01:54.006Z",
+          "finished_at": "2026-10-03T10:02:03.745Z",
+          "calls": [
+            {
+              "capability": "ui.list_groups",
+              "args": {
+                "search": "Lab-Alpha"
+              },
+              "run_id": "eb52ce8c-6a54-547e-9c0d-11422e2ffd8b",
+              "command_id": "b8270f59-8635-5996-887a-1c57adeeea93",
+              "started_at": "2026-10-03T10:02:00.595Z",
+              "result": {
+                "items": [
+                  {
+                    "id": 2,
+                    "name": "Lab-Alpha",
+                    "description": "synthetic integration fixture",
+                    "platform": "openai",
+                    "status": "active",
+                    "rate_multiplier": 1.4
+                  }
+                ],
+                "total": 1,
+                "page": 1,
+                "page_size": 20,
+                "pages": 1
+              }
+            }
+          ],
+          "memories": [
+            {
+              "id": "e138b319-f0ca-4b40-b0a2-a1eba9cf395c",
+              "scope": "user",
+              "pack_id": "",
+              "key": "report.format",
+              "value": "",
+              "kind": "preference",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 7,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791019203.1864269,
+              "updated_at": 1791021512.5371141
+            },
+            {
+              "id": "4559dcd4-9330-4598-82a0-0f6a8c9ef600",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "clarification.missing_parameters",
+              "value": "Ask the user for missing required parameters using single-choice options instead of guessing",
+              "kind": "constraint",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 3,
+              "evidence_count": 1,
+              "source_id": "eac833da-423f-566a-a786-4fa47ea3c26a:instruction",
+              "quote": "平台还没决定，请用单选选项向我追问，不能猜测",
+              "created_at": 1791021563.717359,
+              "updated_at": 1791021588.662668
+            },
+            {
+              "id": "dae36642-4d14-473a-84fe-010ef0825e13",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.create.check_duplicate_first",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 4,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020681.7658398,
+              "updated_at": 1791021512.54192
+            },
+            {
+              "id": "935a71de-d280-4351-be92-ffd32f544527",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.create.verify_reread",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 4,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020681.76601,
+              "updated_at": 1791021512.544825
+            },
+            {
+              "id": "80c8cca1-e955-4e5e-b90e-de0a1c3e3c05",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.update.preserve_fields",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 4,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020705.018624,
+              "updated_at": 1791021512.5480452
+            },
+            {
+              "id": "4f1be961-96e2-4a92-a558-f9ce8ab29516",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "group.update.verify_reread",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 4,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020705.019076,
+              "updated_at": 1791021512.550403
+            },
+            {
+              "id": "11d61f37-7135-40a0-b453-d01ded604d2c",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "missing.parameters",
+              "value": "",
+              "kind": "constraint",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 9,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791019460.0355158,
+              "updated_at": 1791021512.551965
+            },
+            {
+              "id": "25df9c65-ef14-49c4-baa4-18e1f0a5d7d1",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "page5.read_only",
+              "value": "",
+              "kind": "constraint",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 7,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791019203.185643,
+              "updated_at": 1791021512.553791
+            },
+            {
+              "id": "33ae11d1-1246-4aac-9013-2e1cdcdc0471",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "platform.description",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 5,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020743.8716218,
+              "updated_at": 1791021512.555711
+            },
+            {
+              "id": "58e92162-6457-48b8-a43e-60b4800cbdaa",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "platform.provider",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 5,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020743.870959,
+              "updated_at": 1791021512.566206
+            },
+            {
+              "id": "0d257b96-f46f-4ac8-a05e-f77155d237a1",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "platform.rate_multiplier",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 5,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020743.8713531,
+              "updated_at": 1791021512.5689301
+            },
+            {
+              "id": "ebd0062d-8ca2-4b88-a22c-32c81d3be28e",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "report.format",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 4,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020426.6898181,
+              "updated_at": 1791021512.572263
+            },
+            {
+              "id": "88b2c92e-a887-4be5-aac9-6aead1121b28",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "response.language",
+              "value": "zh-CN",
+              "kind": "preference",
+              "status": "active",
+              "origin": "explicit",
+              "revision": 4,
+              "evidence_count": 1,
+              "source_id": "ed94dcab-906b-5517-a927-e2abdc38af91:instruction",
+              "quote": "以后这个项目的所有回答都用中文，记住这个偏好。",
+              "created_at": 1791021270.968852,
+              "updated_at": 1791021715.509032
+            },
+            {
+              "id": "f5a60294-8c8c-4525-a932-956153929644",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "search.read_only",
+              "value": "",
+              "kind": "constraint",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 4,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020299.73343,
+              "updated_at": 1791021512.575562
+            },
+            {
+              "id": "cc453954-705b-437f-91a6-ca4b0db32809",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "user.update.concurrency_limit",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 11,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020879.208864,
+              "updated_at": 1791021512.577145
+            },
+            {
+              "id": "ac1da409-989d-4f59-b008-d3cb40415cdf",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "user.update.preserve_fields",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 15,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020482.259629,
+              "updated_at": 1791021512.5788732
+            },
+            {
+              "id": "d97d911e-c6f7-489a-83cf-ef98f9dc9fd2",
+              "scope": "pack",
+              "pack_id": "sub2api",
+              "key": "user.update.verify_reread",
+              "value": "",
+              "kind": "convention",
+              "status": "forgotten",
+              "origin": "manual",
+              "revision": 15,
+              "evidence_count": 0,
+              "source_id": "",
+              "quote": "",
+              "created_at": 1791020482.2597928,
+              "updated_at": 1791021512.580075
+            }
+          ],
+          "steps": [
+            {
+              "run_id": "ed94dcab-906b-5517-a927-e2abdc38af91",
+              "instruction": "以后这个项目的所有回答都用中文，记住这个偏好。",
+              "status": "completed",
+              "answer": "好的，已记住：在这个项目（sub2api）中，我之后的回答都会使用中文。\n\n如果需要进行分组或用户的查询、创建、修改等操作，直接告诉我具体需求即可。",
+              "model_usage": {
+                "budget_tokens": 4232,
+                "cached_input_requests": 2,
+                "cached_input_tokens": 3456,
+                "cost_available": false,
+                "elapsed_ms": 1721,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 0,
+                "input_tokens": 4058,
+                "invalid_responses": 0,
+                "output_tokens": 174,
+                "priced_requests": 0,
+                "reasoning_output_requests": 1,
+                "reasoning_output_tokens": 58,
+                "reported_requests": 2,
+                "requests": 2,
+                "retry_attempts": 0
+              },
+              "findings": []
+            },
+            {
+              "run_id": "eb52ce8c-6a54-547e-9c0d-11422e2ffd8b",
+              "instruction": "Query Lab-Alpha current platform and rate multiplier.",
+              "status": "completed",
+              "answer": "查询结果：**Lab-Alpha**（分组 ID 2）\n\n- 平台：`openai`\n- 倍率：**1.4**\n- 状态：active\n\n该名称在分组列表中仅有 1 条匹配（total = 1），因此结果唯一确定。",
+              "model_usage": {
+                "budget_tokens": 13053,
+                "cached_input_requests": 4,
+                "cached_input_tokens": 9728,
+                "cost_available": false,
+                "elapsed_ms": 5067,
+                "estimated_cost_usd": 0,
+                "estimated_requests": 0,
+                "format_recovery_requests": 0,
+                "input_tokens": 12350,
+                "invalid_responses": 0,
+                "output_tokens": 703,
+                "priced_requests": 0,
+                "reasoning_output_requests": 3,
+                "reasoning_output_tokens": 397,
+                "reported_requests": 4,
+                "requests": 4,
+                "retry_attempts": 0
+              },
+              "findings": []
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "cases": 5,
+        "passed": 5,
+        "messages": 7,
+        "model_requests": 54,
+        "business_handlers": 16
+      },
+      "steering_extractions": [
+        {
+          "text": "取消刚才的修改要求。不要修改任何用户，只重新读取 Page5 的当前资料，用表格回答。",
+          "existing": [
+            {
+              "id": "4559dcd4-9330-4598-82a0-0f6a8c9ef600",
+              "key": "clarification.missing_parameters",
+              "kind": "constraint",
+              "pack_id": "sub2api",
+              "revision": 3,
+              "scope": "pack",
+              "value": "Ask the user for missing required parameters using single-choice options instead of guessing"
+            }
+          ],
+          "proposals": [],
+          "task_scope_guidance": true
+        }
+      ]
+    }
+  ]
+}
