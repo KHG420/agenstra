@@ -108,6 +108,23 @@ func TestMCPHTTPReturnsOnCompleteEventWithoutWaitingForStreamClosure(t *testing.
 	}
 }
 
+func TestMCPHTTPRecognizesSSEMediaTypes(t *testing.T) {
+	for _, contentType := range []string{"text/event-stream", "Text/Event-Stream", "TEXT/EVENT-STREAM; charset=UTF-8", "text/event-stream ; charset=\"utf-8\""} {
+		t.Run(contentType, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", contentType)
+				_, _ = fmt.Fprint(w, "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capacity\":2400}}\n\n")
+			}))
+			defer server.Close()
+			transport := &httpMCP{url: server.URL, client: server.Client()}
+			result, err := transport.Request(t.Context(), "tools/call", JSON{})
+			if err != nil || fmt.Sprint(result["capacity"]) != "2400" {
+				t.Fatalf("valid SSE content type was not recognized: %v %v", result, err)
+			}
+		})
+	}
+}
+
 func TestMCPPackConnectsAndInvokesUsingMultilineSSE(t *testing.T) {
 	tool := JSON{"name": "record.read", "description": "Read record", "inputSchema": JSON{"type": "object", "properties": JSON{}, "additionalProperties": false}, "outputSchema": JSON{"type": "object", "properties": JSON{"id": JSON{"type": "string"}}, "required": []any{"id"}, "additionalProperties": false}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -278,7 +279,8 @@ func (c *httpMCP) request(ctx context.Context, method string, params JSON, notif
 		return nil, nil
 	}
 	var reply JSON
-	if strings.HasPrefix(res.Header.Get("Content-Type"), "text/event-stream") {
+	mediaType, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type"))
+	if mediaType == "text/event-stream" {
 		scanner := bufio.NewScanner(io.LimitReader(res.Body, 16<<20))
 		scanner.Buffer(make([]byte, 4096), 16<<20)
 		scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
