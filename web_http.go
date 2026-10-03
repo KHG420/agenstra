@@ -345,6 +345,21 @@ func (s *HTTPServer) browserHTTP(w http.ResponseWriter, r *http.Request, owner s
 		return
 	}
 	if len(parts) == 3 && parts[0] == "sessions" && r.Method == "POST" {
+		if parts[2] == "resume" || parts[2] == "observation" || parts[2] == "poll" {
+			var session BrowserSession
+			if e := webLoad(s.Web.Store.store.DB, "web_sessions", parts[1], owner, &session); e != nil {
+				webError(w, e)
+				return
+			}
+			if !s.Web.sessionKeyMatches(owner, session.ID, key) {
+				apiError(w, 401, "browser_session_invalid", false)
+				return
+			}
+			if _, e := s.Host.policy(r.Context(), owner, session.IntegrationID, false); e != nil {
+				webError(w, e)
+				return
+			}
+		}
 		switch parts[2] {
 		case "recover":
 			var b struct {
@@ -489,6 +504,15 @@ func (s *HTTPServer) browserHTTP(w http.ResponseWriter, r *http.Request, owner s
 		}
 		if !s.Web.sessionKeyMatches(owner, c.SessionID, key) {
 			apiError(w, 401, "browser_session_invalid", false)
+			return
+		}
+		binding, e := s.Web.Store.binding(owner, c.RunID)
+		if e != nil {
+			webError(w, e)
+			return
+		}
+		if _, e = s.Host.policy(r.Context(), owner, binding.IntegrationID, false); e != nil {
+			webError(w, e)
 			return
 		}
 		writeJSON(w, 200, c)

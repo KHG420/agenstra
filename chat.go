@@ -42,6 +42,7 @@ func (w *WebIntegration) ListConversations(ctx context.Context, owner, integrati
 	if !w.Config.Chat {
 		return nil, hostError("chat_disabled")
 	}
+	visible := []string{}
 	if integration != "" {
 		pack, e := w.integrationPack(integration)
 		if e != nil {
@@ -50,8 +51,45 @@ func (w *WebIntegration) ListConversations(ctx context.Context, owner, integrati
 		if _, e = w.Host.policy(ctx, owner, pack, false); e != nil {
 			return nil, e
 		}
+		visible = append(visible, integration)
+	} else {
+		rows, e := w.Store.store.DB.Query("SELECT DISTINCT payload->>'integration_id' FROM web_conversations WHERE owner=?", owner)
+		if e != nil {
+			return nil, e
+		}
+		integrations := []string{}
+		for rows.Next() {
+			var id string
+			if e = rows.Scan(&id); e != nil {
+				break
+			}
+			integrations = append(integrations, id)
+		}
+		e = errors.Join(e, rows.Err(), rows.Close())
+		if e != nil {
+			return nil, e
+		}
+		for _, id := range integrations {
+			pack, err := w.integrationPack(id)
+			if err == nil {
+				_, err = w.Host.policy(ctx, owner, pack, false)
+			}
+			if err != nil {
+				switch ErrorCode(err) {
+				case "integration_unknown", "access_denied", "forbidden", "identity_unverified":
+					continue
+				default:
+					return nil, err
+				}
+			}
+			visible = append(visible, id)
+		}
 	}
-	rows, e := w.Store.store.DB.Query("SELECT payload FROM web_conversations WHERE owner=? AND (?='' OR payload->>'integration_id'=?) ORDER BY rowid DESC LIMIT 100", owner, integration, integration)
+	filter, e := json.Marshal(visible)
+	if e != nil {
+		return nil, e
+	}
+	rows, e := w.Store.store.DB.Query("SELECT payload FROM web_conversations WHERE owner=? AND payload->>'integration_id' IN (SELECT value FROM json_each(?)) ORDER BY rowid DESC LIMIT 100", owner, string(filter))
 	if e != nil {
 		return nil, e
 	}
