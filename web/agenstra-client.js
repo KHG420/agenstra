@@ -374,8 +374,11 @@ export class AgenstraClient {
   }
   async snapshot() { const conversation = await this.getConversation(); return this.request("/chat/v1/conversations/" + conversation.id); }
   async send(text, { clientId = this.id(), sources = [] } = {}) {
-    const conversation = await this.getConversation();
-    try { await this.connectBrowser(); return await this.request("/chat/v1/conversations/" + conversation.id + "/messages", { method: "POST", browserKey: this.browser?.key, body: { client_id: clientId, text, ...(sources.length ? { sources } : {}), session_id: this.browser?.id || "" } }); }
+    try {
+      const conversation = await this.getConversation();
+      await this.connectBrowser();
+      return await this.request("/chat/v1/conversations/" + conversation.id + "/messages", { method: "POST", browserKey: this.browser?.key, body: { client_id: clientId, text, ...(sources.length ? { sources } : {}), session_id: this.browser?.id || "" } });
+    }
     catch (error) { error.clientId = clientId; throw error; }
   }
   watchConversation(callback) {
@@ -447,8 +450,10 @@ export class AgenstraClient {
   reconcile(id, revision) { return this.request("/browser/v1/commands/" + id + "/reconcile", { method: "POST", body: { revision } }); }
   reconcileInvocation(id, invocation, revision) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/reconcile", { method: "POST", body: { invocation_id: invocation.invocation_id, arguments_sha256: invocation.arguments_sha256, revision } }); }
   async run(instruction, { requestId = this.id(), sources = [] } = {}) {
-    await this.connectBrowser();
-    return this.request("/browser/v1/runs", { method: "POST", browserKey: this.browser.key, body: { integration_id: this.options.integration, session_id: this.browser.id, instruction, ...(sources.length ? { sources } : {}), request_id: requestId } });
+    try {
+      await this.connectBrowser();
+      return await this.request("/browser/v1/runs", { method: "POST", browserKey: this.browser.key, body: { integration_id: this.options.integration, session_id: this.browser.id, instruction, ...(sources.length ? { sources } : {}), request_id: requestId } });
+    } catch (error) { error.requestId = requestId; throw error; }
   }
   async destroy({ closeSession = true } = {}) {
     if (this.closed) return;

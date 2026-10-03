@@ -214,6 +214,8 @@ SDK 的 `id()` 在没有 `crypto.randomUUID` 的 HTTP 页面使用 `crypto.getRa
 
 仅聊天省略 browser、handlerVersion、getPageObservation 和注册动作。仅控制桥用 `await client.run(instruction, {requestId})`，再以 `getRun()` 读取状态。聊天 UI 使用 `watchConversation`、`send`、`supplyInput`、`approve`、`cancelMessage`，自行渲染补充输入、精确审批参数和取消按钮。发送失败后在原会话保留原 `clientId` 重试；SDK 错误附带 clientId，不要换 ID 自动重发同一操作，也不要把重试移到另一个会话。
 
+`run()` 失败时，错误附带原 `requestId`，包括 SDK 自动生成的 ID。连接失败、响应丢失或 JSON 无法解析时，不能假定任务没有创建；重试应复用该 ID、原 instruction、sources 和浏览器绑定，取回同一个任务。`send()` 在会话初始化失败时也保留原 `clientId`。这些方法不会自动重发业务任务。
+
 普通问候、致谢、能力介绍、解释和方案讨论可以直接答复并结束本轮，不要求调用工具或先提出业务任务。`request_input` 仅用于已有具体任务缺少执行所必需的信息；讨论中的普通问题可以随答复提出，不必挂起任务。回复结束的是这一轮，会话仍然保留。业务查询和操作继续使用原能力、授权、审批和已确认的结果。
 
 会话 snapshot 的每条消息可包含 `input_history: [{field, prompt, text}]`，按接受顺序返回已经提交的补充信息及对应追问；`prompt` 在原检查点没有保存时省略。宿主应依次显示原用户消息、各条追问和用户补充，再显示最终答复；当前尚未回答的追问仍从活跃 run 的 `input_prompt` 展示。补充信息继续同一个任务，不创建新任务，也不替换原始消息。该展示记录由框架从持久化的 `decisions`／`followups` 生成，任务完成、失败、停止和服务重启后仍可读取，宿主不需要自行保存聊天历史。已存在的补充输入同样可恢复，无需数据库迁移。
