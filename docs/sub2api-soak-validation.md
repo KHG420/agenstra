@@ -252,3 +252,9 @@ HY3 通道使用本任务独立分组和模型账号，直接采用 Chat Complet
 真实 SDK 加本地 fetch 替身的三项回归覆盖：auth store 已清空后的退出、切换 owner，以及同 owner 离开路由、恢复同一 session、最终退出关闭；Vitest **3/3**、`vue-tsc --noEmit`、目标文件 ESLint 与 diff 检查通过。上海时间 **12:26–12:27**，原生点击“用户管理”再回助手，数据库确认同一 session 离开时保持打开，返回后 generation 从 1 增至 2；正常退出登录后，该 session 的 `closed=true`。UI15 的管理员 B 退出也已确认关闭。这些结果不追溯清除修复前的历史 open session；较早四个 session 记录仍保留，最后心跳已超过活动期限。
 
 用于这次生命周期验收的 UI16 并发修改请求最终为 `failed/model_decision_invalid`，没有审批、写 invocation 或写 command。它曾在未读取当前上下文时被拒绝，随后取得上下文并成功按 ID 读取；成功读取的 command 与终态 Fact 一致。独立新登录 GET 确认本人并发仍为 4，目标 5 没有达成。因此生命周期修复通过与这次业务任务失败分别记录，不把没有写入当作审批成功，也没有重发这个原请求。
+
+上海时间 **12:29–12:45**，同一管理员通过实际页面发起另一个分组修改场景 UI17，将专属分组 19 的倍率从 1.1 改为 1.2。审批前重新核对可信 owner、原 session/generation、run 修订版本、原 invocation、能力加参数摘要、精确目标与字段、审批期限和最新业务基线，确认尚无写命令。审批控件在 Shadow DOM 内，Chrome AX 未暴露；对已观察控件发送原生 Return 后，原调用仍为 `needs_approval`、attempts 为 0、无 approved hash，未把工具返回成功当作审批成功。再次核对原状态后，通过现有 cua-driver 页面工具点击带有原 invocation 标记的唯一可见“批准操作”按钮，没有直接调用 SDK 审批接口或重发任务。
+
+原写 invocation 和 command 最终均为 `succeeded`，attempts 为 **1**；approved hash 与 Host 参数摘要一致，BrowserCommand 的原参数摘要分别按自己的契约核对。原成功 receipt、同 command ID 的终态 `ui.command_status` Fact 和结果一致，原 run 为 `completed`，随后按 ID 的业务读取成功。独立新登录 GET 确认倍率为 1.2，名称、描述、平台和状态与基线一致。正常退出后 session 已关闭；本任务测试标签已关闭并实际确认原八个标签和 Chrome 进程保留。这一结果仍不等于 Sub2API 写 API 提供原生幂等键。
+
+上海时间 **12:47**，连续 SDK 驱动累计 **55 案通过、2 案已核实的模型失败、6 案在途**，六身份均未暂停；这里按 case 计数，同会话追问有自己的 run，不混为一个 run。原监督器及九项登记进程身份核验通过，最新分钟样本为 12:47:02，专用两个数据库容器及用户原有三个网关容器仍运行。原 72 小时窗口尚未结束，已知空档、模型失败、历史未关闭会话和未验证范围继续保留，不能称为 72 小时连续健康验收完成。
