@@ -377,7 +377,11 @@ func (w *WebIntegration) Tick(ctx context.Context) error {
 	if !w.Config.Chat {
 		return nil
 	}
-	rows, e := w.Store.store.DB.Query("SELECT id,owner FROM web_conversations ORDER BY rowid")
+	rows, e := w.Store.store.DB.Query(`SELECT c.id,c.owner FROM web_conversations c
+		WHERE EXISTS (SELECT 1 FROM web_messages m
+			WHERE m.conversation=c.id AND m.owner=c.owner
+				AND json_extract(m.payload,'$.status') IN ('queued','creating','active','cancelling'))
+		ORDER BY c.rowid`)
 	if e != nil {
 		return e
 	}
