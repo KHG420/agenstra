@@ -203,7 +203,7 @@ await client.send("查询待处理订单", { clientId: client.id() });
 
 `hostRouter` 和 `hostChatView` 代表宿主已有的路由和 UI。SDK 不创建任何 DOM 或样式。一个 tab 对同一 endpoint/integration 使用一个 client。React/Vue 中优先由应用或登录会话持有 client，路由组件只订阅和解除订阅；这样切换页面后仍可处理已绑定的任务和回执。
 
-如果 client 由路由组件持有，组件卸载时调用 `client.destroy({ closeSession: false })`，停止本地轮询和订阅，保留服务端绑定及恢复身份。回到页面后创建 client、注册相同 handlers，再调用 `connectBrowser()` 恢复；离开期间任务可能等待浏览器，等待仍受原任务期限约束。默认 `client.destroy()` 会永久关闭服务端浏览器会话，仅用于退出登录、切换登录用户或明确结束该绑定。把默认关闭用于普通路由卸载，会使原任务留在已关闭的 session 上；新的页面即使显示已连接，也不能执行原任务。
+如果 client 由路由组件持有，组件卸载时调用 `client.destroy({ closeSession: false })`，停止本地轮询和订阅，保留服务端绑定及恢复身份。回到页面后创建 client、注册相同 handlers，再调用 `connectBrowser()` 恢复；离开期间任务可能等待浏览器，等待仍受原任务期限约束。默认 `client.destroy()` 尝试永久关闭服务端浏览器会话，仅用于退出登录、切换登录用户或明确结束该绑定。仅当服务端返回 HTTP 200 且 `status` 为 `closed` 时清除持久化绑定；网络失败、错误响应或关闭尚未确认时保留原 key 和恢复请求身份，供同一用户的新 client 恢复。`destroy()` 仍停止本地工作并返回 `Promise<void>`，返回本身不证明服务端已经关闭。把默认关闭用于普通路由卸载，会使原任务留在已关闭的 session 上；新的页面即使显示已连接，也不能执行原任务。
 
 默认 `sessionStorage` 保存所选会话 ID、tab 绑定和执行回执，不保存 Agent 会话上下文；可传 `storage: null`。禁用存储后仍可通过会话列表手动恢复，服务端仍阻止重复认领；上述销毁并重建 client 的自动浏览器恢复需要保留存储。
 

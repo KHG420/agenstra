@@ -15,6 +15,46 @@ function bridge(t, fetch, store = storage(), version = "1") {
 }
 function observation(path, version = "1") { return response({ session: { ...(path.includes("new-tab") ? { ...replacement, handler_version: version } : old), context_revision: 1 } }); }
 
+for (const failure of ["network", "non-2xx", "unconfirmed-200"]) test(`failed browser close preserves the original session after ${failure}`, async t => {
+  const store = storage();let closes = 0, resumes = 0;
+  const fetch = async (path, options) => {
+    if (path.endsWith("/close")) {
+      closes++;
+      assert.equal(options.headers["X-Agenstra-Browser-Key"], old.key);
+      assert.equal(JSON.parse(options.body).generation, closes === 1 ? 1 : 2);
+      if (closes === 1 && failure === "network") throw new Error("close response lost");
+      if (closes === 1 && failure === "non-2xx") return response({ code: "request_failed" }, 503);
+      if (closes === 1) return response({ status: "pending" });
+      return response({ status: "closed" });
+    }
+    if (path.endsWith("/resume")) {
+      resumes++;
+      assert.equal(options.headers["X-Agenstra-Browser-Key"], old.key);
+      assert.deepEqual(JSON.parse(options.body), { generation: 1, request_id: "original-resume" });
+      return response({ session: { ...old, generation: 2, context_revision: 2 } });
+    }
+    if (path.endsWith("/observation")) return response({ session: { ...old, generation: 2, context_revision: 3 } });
+    return response({ commands: [] });
+  };
+  const first = bridge(t, fetch, store);first.browser = old;first.token = "ticket";
+  first.browserResume = { session_id: old.id, generation: 1, request_id: "original-resume" };
+  first.save("browser_resume", first.browserResume);
+  assert.equal(await first.destroy(), undefined);
+  assert.deepEqual(first.load("browser"), old);
+  assert.deepEqual(first.load("browser_resume"), first.browserResume);
+
+  const resumed = bridge(t, fetch, store);
+  await resumed.connectBrowser();clearTimeout(resumed.browserTimer);
+  assert.equal(resumes, 1);
+  assert.equal(resumed.browser.id, old.id);
+  assert.equal(resumed.browser.key, old.key);
+  assert.equal(resumed.browser.generation, 2);
+  assert.equal(await resumed.destroy(), undefined);
+  assert.equal(closes, 2);
+  assert.equal(resumed.load("browser"), null);
+  assert.equal(resumed.load("browser_resume"), null);
+});
+
 for (const version of ["1", "2"]) test(`an idle profile upgrade replaces the connection with client handler version ${version}`, async t => {
   const paths = [], bodies = [];
   const c = bridge(t, async (path, options) => {

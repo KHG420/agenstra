@@ -504,10 +504,14 @@ export class AgenstraClient {
     this.listeners.clear();
     if (closeSession && this.browser && this.token) {
       const aborter = new AbortController();const timer = setTimeout(() => aborter.abort(), 2000);
-      try { await this.fetch(this.endpoint + "/browser/v1/sessions/" + this.browser.id + "/close", { method: "POST", headers: { Authorization: "Bearer " + this.token, "Content-Type": "application/json", "X-Agenstra-Browser-Key": this.browser.key }, body: JSON.stringify({ generation: this.browser.generation }), signal: aborter.signal, credentials: "same-origin", keepalive: true }); } catch { /* The server expires interrupted actions independently. */ }
+      try {
+        const response = await this.fetch(this.endpoint + "/browser/v1/sessions/" + this.browser.id + "/close", { method: "POST", headers: { Authorization: "Bearer " + this.token, "Content-Type": "application/json", "X-Agenstra-Browser-Key": this.browser.key }, body: JSON.stringify({ generation: this.browser.generation }), signal: aborter.signal, credentials: "same-origin", keepalive: true });
+        if (response.status === 200 && (await response.json())?.status === "closed") {
+          this.remove("browser");
+          this.browserResume = null; this.remove("browser_resume");
+        }
+      } catch { /* Keep the original session key when close is unconfirmed. */ }
       finally { clearTimeout(timer); }
-      this.remove("browser");
-      this.browserResume = null; this.remove("browser_resume");
     }
   }
 }
