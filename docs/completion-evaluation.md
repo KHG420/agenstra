@@ -10,7 +10,7 @@
 
 遥测中的 `completion_review` 单独记录这部分请求和用量。标准聊天组件直接显示执行回执；任务或回答生成失败不会把已成功的业务操作显示成未执行。自定义界面可使用已有的 `run.state.runtime.invocation_receipts`，无需解析模型文字。
 
-这是针对执行结果叙述的模型语义复核，并不是自由文本正确性的数学证明；确定的执行状态仍以框架回执为准。它不代替业务专用字段规则。具体问题证据、真实模型回放与边界测试见[动作成功但回答否认执行的修复记录](completion-consistency-findings.md)。
+这是针对执行结果叙述的模型语义复核，并不是自由文本正确性的数学证明；确定的执行状态仍以框架回执为准。它不代替业务专用字段规则。
 
 嵌入式宿主可配置 `AgentHost.CompletionValidator`；临时运行可配置 `AgentRuntime.CompletionValidator`。回调在引用检查通过后接收完整 Fact、观察、任务、补充输入及拟返回的回答，应保持只读并响应取消。返回 nil 才会完成；返回 `CompletionValidationError` 会把安全的错误码和明确反馈加入观察，让模型在原轮次预算内修正。其他错误仅暴露 `completion_validation_failed`，不会把内部错误详情发给模型。重启后的宿主应使用相同业务校验配置。
 

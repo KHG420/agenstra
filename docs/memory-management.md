@@ -1,25 +1,10 @@
 # 记忆：自动学习与宿主管理
 
-调研与实现日期：2026-10-01。
-
 记忆保存同一用户跨运行使用的偏好、长期约束和项目约定。用户明确表达的长期规则立即生效；没有说“以后”或“记住”，但在 **3 个独立输入中表现出相同选择**的习惯，也自动成为默认偏好。宿主通过公开 Go 方法、认证后的 HTTP API 和 JS SDK 管理同一份记忆。
 
-## 1. 调研取舍
+记忆独立于运行状态、Fact 和聊天历史，按认证 owner 与 pack 隔离，使用已有 Go 与 SQLite 管理少量结构化默认值。
 
-本次实际读取的官方文档和 GitHub 源码如下。源码链接固定到读取的提交。
-
-| 来源 | 借鉴的机制 | Agenstra 第一版的取舍 |
-| --- | --- | --- |
-| [LangGraph memory](https://docs.langchain.com/oss/python/concepts/memory) 与 [Store](https://github.com/langchain-ai/langgraph/blob/b36b1d58a8b408455b512cfad3b1b26e02927282/libs/checkpoint/langgraph/store/base/__init__.py) | 会话检查点与跨会话 Store 分开，按命名空间管理。 | 记忆独立于 RuntimeState、Fact 和聊天历史，按认证 owner 与 pack 隔离。 |
-| [Letta memory blocks](https://docs.letta.com/v1-sdk/memory/memory-blocks) | 用可编辑的有界记忆块提供长期信息。 | 宿主拥有 CRUD 与历史接口；模型只接收有界 MemoryView。 |
-| [Mem0 memory](https://github.com/mem0ai/mem0/blob/94c3fe9f238f3dbf29c9ce98643bd71eb13077cd/mem0/memory/main.py) 与 [prompts](https://github.com/mem0ai/mem0/blob/94c3fe9f238f3dbf29c9ce98643bd71eb13077cd/mem0/configs/prompts.py) | 分阶段提取、更新、删除并保留变更历史。 | 模型提出候选，Host 校验来源，在 SQLite 事务中提交；修改用 revision 防止丢失更新。 |
-| [Graphiti edges](https://github.com/getzep/graphiti/blob/3c427640abf909f12f71f963fce15eb514a3c493/graphiti_core/edges.py) 与 [maintenance](https://github.com/getzep/graphiti/blob/3c427640abf909f12f71f963fce15eb514a3c493/graphiti_core/utils/maintenance/edge_operations.py) | 用有效、失效和过期时间处理关系变化与冲突。 | 实现版本和旧投影失效；暂不引入图谱或自动到期规则。 |
-| [OpenViking memory API](https://github.com/volcengine/OpenViking/blob/39a39e80cc830aac1aa71019e6e292356953378a/docs/zh/api/16-memory.md) 与 [updater](https://github.com/volcengine/OpenViking/blob/39a39e80cc830aac1aa71019e6e292356953378a/openviking/session/memory/memory_updater.py) | 把长期信息组织为可维护条目，区分新增和更新。 | 用稳定 topic key 合并等价表达，避免重复偏好。 |
-| [Hindsight retain](https://hindsight.vectorize.io/developer/api/retain) 与 [reflect](https://hindsight.vectorize.io/developer/reflect) | 区分保存信息和基于记忆形成回答。 | 学习与业务决策分开，提取失败有诊断且不阻断业务任务。 |
-
-第一版复用 Go 和 SQLite，不增加向量数据库、生产依赖或新服务。记忆用于少量结构化默认值。OpenAI 官方文档请求返回 403，Anthropic memory 页面转至地区不可用页面，未把这些未读内容作为设计证据。
-
-## 2. 学习规则与作用域
+## 1. 学习规则与作用域
 
 | 输入/操作 | 结果 |
 | --- | --- |
@@ -41,7 +26,7 @@ key 必须匹配 `^[a-z][a-z0-9_.-]{0,63}$`，例如 `report.language`、`report
 
 取消、改口、只读限制、审批选择和缺参数追问通常属于当前任务。提取提示要求模型将这些指令归为 `temporary` 或不提出候选，只有当前原文明确把规则延伸到未来任务时才作为长期约束；旧条目不能替当前输入提供长期意图。普通语言、格式、单位偏好仍可按习惯规则学习。
 
-## 3. Go 宿主接口
+## 2. Go 宿主接口
 
 公开方法复用当前 owner/pack 的授权检查：
 
@@ -66,7 +51,7 @@ forgotten, err := host.DeleteMemory(ctx, ownerID, packID, item.ID, item.Revision
 
 Memory 返回 id、scope、pack_id、key、value、kind、status、origin、revision、evidence_count、source_id、quote、created_at、updated_at。MemoryHistory 返回最新在前、分别最多 100 条的 revisions 和 evidence；未采用的相反习惯也能在 evidence 中查看。宿主设定的值通过 manual 修订记录来源。
 
-## 4. HTTP API
+## 3. HTTP API
 
 服务端凭据使用现有用户 `Authorization: Bearer ...`；身份从凭据解析。响应设置 `Cache-Control: no-store`。
 
@@ -89,7 +74,7 @@ curl -X POST http://127.0.0.1:8091/memories \
 
 Web 入口使用 `/web/v1/memories`，每条请求的 query 传 integration_id，其余契约相同。owner 来自短期票据，pack 来自服务端 integration 配置；其他 pack_id 会被拒绝。复用现有 origin 和票据认证，无需 browser key、页面观察或 conversation ID。需启用现有 Web 集成，无需创建浏览器会话。短期票据不能访问服务端 `/memories`。
 
-## 5. JS SDK
+## 4. JS SDK
 
 宿主沿用已认证的客户端，无需恢复上下文或提交历史消息：
 
@@ -106,7 +91,7 @@ await client.deleteMemory(current.id, current.revision);
 
 方法复用 ClientOptions.integration 和 getSession()，包括票据续期和请求取消；TypeScript 同步提供 Memory、MemoryUpdate、MemoryHistory。宿主可实现自己的列表和编辑界面，框架不预设 UI。
 
-## 6. 执行、预算与遗忘边界
+## 5. 执行、预算与遗忘边界
 
 ```mermaid
 flowchart LR
@@ -134,9 +119,7 @@ HTTPJSONDecisionModel 实现可选的 MemoryExtractor。每个未处理来源在
 
 本版没有自动过期、向量检索、跨用户团队记忆、管理 UI 或批量历史回填。独立 agenstra CLI 直接调用 AgentRuntime，不具备持久 owner/store；跨运行自动记忆使用 AgentHost、agenstra-serve 或基于 Host 的 Web 集成。
 
-## 7. 验证范围
-
-回归覆盖三次自动采用、显式更正、临时例外、输入重放、恢复、owner/pack 隔离、pack 优先、并发 revision 冲突、遗忘和旧快照失效、聊天只学习当前消息、定时任务重复去重、提取失败不阻断、丢失租约、预算和 IO 预检，以及 HTTP/Web/SDK 管理契约。
+## 6. 测试与模型评测
 
 普通测试使用 SQLite、模型替身和 httptest 的真实 HTTP 适配器协议，不调用真实模型。可选的 `TestLiveMemoryTaskScopeEvaluation` 使用合成文本，在选定模型上检查临时任务、明确长期规则和语言偏好；12 次提取调用，仅在显式设置 `AGENSTRA_LIVE_EVAL=1` 时执行。配置 `AGENT_MODEL`、`AGENT_MODEL_BASE_URL`、`AGENT_MODEL_API_KEY` 以及所选 API 所需的 `AGENT_MODEL_API_TYPE`、`AGENT_MODEL_THINKING` 后运行：
 
@@ -144,6 +127,6 @@ HTTPJSONDecisionModel 实现可选的 MemoryExtractor。每个未处理来源在
 AGENSTRA_LIVE_EVAL=1 go test -run '^TestLiveMemoryTaskScopeEvaluation$' -count=1 -v
 ```
 
-可用 `AGENSTRA_MEMORY_EVIDENCE_PATH` 指定评测 JSON 保存位置。该文件包含合成输入、候选、结果与请求用量，不含认证头。真实模型样本与完整宿主复测见 [Sub2API 第二轮评测](sub2api-round2-findings.md)；准确率、归一化效果、延迟和成本仍需在部署方选择的模型上验收。
+可用 `AGENSTRA_MEMORY_EVIDENCE_PATH` 指定评测 JSON 保存位置。该文件包含合成输入、候选、结果与请求用量，不含认证头。准确率、归一化效果、延迟和成本仍需在部署方选择的模型上验收。
 
 跨项目任务可通过可选 `sources` 明确选择目标能力，并按发起项目委派、目标验证权限和任务范围取交集。目标身份、实际凭据、版本固定、项目记忆和各入口的完整接入说明见[跨项目任务、身份与授权](cross-project-tasks.md)。所有读取与轮询也必须明确授权。

@@ -1,8 +1,6 @@
-# 成熟系统接入 Agenstra：实施顺序与年会抽奖参考
+# 成熟系统接入 Agenstra
 
 宿主负责界面、登录和业务规则；Agenstra 负责会话、上下文、任务、审批和回执。接入的主要工作是把原系统已有操作登记为明确的能力，并用 handler 调用原函数或原接口。不要为 Agent 另写一套业务规则。
-
-年会抽奖的操作覆盖、来源身份、审批与真实运行结果见[历史接入验证记录](annual-lottery-integration.md)。该记录注明了当时的代码基线与验证日期，现行接入步骤以本指南和[快速接入指南](quick-integration.md)为准。
 
 框架的基本目标是让已有软件以尽量少的工作接入 Agent：宿主声明、绑定和授权原能力，选择模型与运行策略；框架完成 Agent 特有的协调，并向宿主提供可用的任务状态和执行证据。优化以减少接入代码、减少没有信息增量的模型决策、正确恢复实际执行结果为依据，使用业务断言检验效果。
 
@@ -31,25 +29,17 @@
 
 SDK 在 `web/agenstra-client.js`，导出命令和完整配置见 [Web integration guide](web-integration.md)。headless client 不加载 DOM 或样式；宿主也可单独导入标准聊天组件和服务端票据助手。同一个 SDK 可供不同系统使用，实际页面行为仍由宿主绑定。
 
-## 年会抽奖的实际接法
-
-这次在 Agenstra 的 `codex/lottery-agent-integration` 与抽奖项目的 `codex/agent-integration` 工作树完成接入。框架起点为 main `e89023a`；抽奖起点为 `5210c90`，已有用户工作保存为 `ca73831`。抽奖实际应用位于内层 `lottery-ui` 仓库，原工作区保留。
-
-抽奖宿主使用 React/Vinext、Cloudflare Worker 和 D1。已有业务执行链为 `LotteryClient → /api/activity → applyCommand`。浏览器 handler 复用此链，因此仍用当前浏览器身份，服务端仍校验管理员、活动版本、抽奖锁定、人员/奖项配额和中奖身份。Agenstra 服务独立运行，通过宿主受限同源代理访问。pack 只提供服务健康读取与模型指导，29 个宿主动作覆盖业务及页面操作。
-
-抽奖项目的 `agent/contracts.mjs` 是能力源，脚本导出 frontend、pack 和本机 deployment；`lib/agent-actions.ts` 对应原业务及 UI port；`components/lottery-agent.tsx` 是该宿主自己的界面。完整步骤、全部操作映射和启动命令保存在抽奖仓库的 `docs/agent-integration.md`。这些宿主文件不进入框架核心。
-
-## 本次反哺框架的通用修正
+## 浏览器 SDK 的接线与恢复
 
 - SDK 可以无 npm 依赖导出 JS 与 TypeScript 声明，并附 SHA-256；宿主构建使用固定字节，升级时明确重新导出。
 - SDK 心跳同步手动页面变化，读取或 handler 未改变观察时不增加版本。
 - 同一任务多步控制页面时，可反复读取两个内置动态观察能力。业务写操作的重复限制和总预算仍保留。
-- 内置观察不再被提示为需要前置页面观察的宿主动作；一次读取成功后继续实际动作或 Schema 检查，避免递归读取同一页面。
+- 内置观察不要求前置页面观察；一次读取成功后继续实际动作或 Schema 检查，避免递归读取同一页面。
 - `AgenstraActionError` 区分已证实的未提交失败；未知写结果仍保持 unknown。
 - 没有 `randomUUID` 的 HTTP 页面使用 Web Crypto 生成稳定 ID。
 - 聊天消息保留原 run 的 `error_code`，让宿主能解释终止任务的实际原因。
 
-业务版本与浏览器版本须分开命名。抽奖用 `activityRevision` 表示 `/api/activity` 的版本，写操作传 `expectedRevision`；`ui.get_context` 外层 `revision` 是浏览器桥版本。文件导入使用真实 preview ID、导入模式与业务版本绑定审批，避免批准后被替换文件。
+业务版本与浏览器版本须分开命名。例如，宿主用 `activityRevision` 表示原业务 API 的版本，写操作传 `expectedRevision`；`ui.get_context` 外层 `revision` 是浏览器桥版本。文件导入使用真实 preview ID、导入模式与业务版本绑定审批，避免批准后被替换文件。
 
 文件上传仍需要用户选择文件；Agent 可以执行后续检查、模式选择、审批和导入。下载 handler 确认“下载已发起”，不能假定用户电脑的保存位置。聊天 UI 和动作 handler 都应等待可核对的结果后再显示完成。
 
