@@ -50,10 +50,28 @@ func TestAdminAuthAndRevision(t *testing.T) {
 		server.Handler().ServeHTTP(w, req)
 		return w
 	}
-	if w := call("GET", "/admin/api/overview", "alice-secret", nil); w.Code != 401 {
-		t.Fatalf("non-admin key accepted: %d", w.Code)
+	for _, userKey := range []string{"", "alice-secret", "synthetic-host-jwt", "synthetic-web-ticket"} {
+		for _, endpoint := range []struct{ method, path string }{
+			{http.MethodGet, "/admin/api/overview"},
+			{http.MethodGet, "/admin/api/models"},
+			{http.MethodPut, "/admin/api/models"},
+			{http.MethodGet, "/admin/api/drafts"},
+			{http.MethodPost, "/admin/api/releases"},
+			{http.MethodPut, "/admin/api/bindings/alice/records"},
+			{http.MethodGet, "/admin/api/audit"},
+		} {
+			if w := call(endpoint.method, endpoint.path, userKey, nil); w.Code != http.StatusUnauthorized {
+				t.Fatalf("user credential accepted by developer API %s %s: %d", endpoint.method, endpoint.path, w.Code)
+			}
+		}
 	}
 	key := d.Environment["ADMIN_KEY"]
+	if w := call(http.MethodGet, "/runs", key, nil); w.Code != http.StatusUnauthorized {
+		t.Fatalf("developer key accepted as a user identity: %d", w.Code)
+	}
+	if w := call(http.MethodGet, "/admin", "", nil); w.Code != http.StatusOK || !bytes.Contains(w.Body.Bytes(), []byte("开发者控制台")) {
+		t.Fatalf("framework did not serve its developer console: %d", w.Code)
+	}
 	manifest := testRegistryManifest("records.get")
 	body := map[string]any{"pack_id": "records", "version": "1.0.0", "manifest": manifest, "skills": map[string]string{}}
 	w := call("POST", "/admin/api/releases", key, body)

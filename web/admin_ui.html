@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Agenstra · 能力管理</title>
+  <title>Agenstra · 开发者控制台</title>
   <link rel="stylesheet" href="/admin/assets/admin_ui.css">
   <script src="/admin/assets/admin_drafts.js" defer></script>
   <script src="/admin/assets/admin_models.js" defer></script>
@@ -13,7 +13,7 @@
 <body>
   <header class="topbar">
     <div class="brand"><span class="brand-mark" aria-hidden="true">A</span><span>Agenstra</span></div>
-    <div class="topbar-title">能力管理</div>
+    <div class="topbar-title">开发者控制台</div>
     <span id="connection-state" class="connection-state">未连接</span>
   </header>
 
@@ -33,15 +33,15 @@
       <section class="intro" aria-labelledby="page-title">
         <div>
           <h1 id="page-title">让能力接入有迹可循</h1>
-          <p>校验契约，发布不可变版本，再决定谁可以调用。能力变更不需要停止正在运行的任务。</p>
+          <p>供开发者配置模型、能力和授权。宿主用户在助手中管理自己的会话、任务与用量。</p>
         </div>
         <form id="connect-form" class="connect-form">
-          <label for="admin-key">管理员密钥</label>
+          <label for="admin-key">开发者管理密钥</label>
           <div class="connect-row">
             <input id="admin-key" type="password" autocomplete="off" spellcheck="false" placeholder="输入管理 API 密钥" required>
             <button type="submit" class="button primary">连接</button>
           </div>
-          <small>密钥仅保存在当前页面内存中，刷新页面后需重新输入。</small>
+          <small>使用独立管理密钥连接；宿主登录不授予框架管理权限。密钥仅保存在当前页面内存中。</small>
         </form>
       </section>
 
