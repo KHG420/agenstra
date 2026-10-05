@@ -1037,7 +1037,7 @@ func (r *AgentRuntime) systemPrompt() string {
 	if len(r.Memories) > 0 {
 		prompt += memoryUsagePrompt
 	}
-	return prompt
+	return prompt + "\nReturn exactly one raw JSON object. Do not wrap it in Markdown or code fences, and do not include text outside the JSON object."
 }
 
 func (r *AgentRuntime) skillAllowed(name string) bool {

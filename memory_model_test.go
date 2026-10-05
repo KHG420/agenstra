@@ -91,6 +91,9 @@ func TestMemoryHTTPJSONModelAutomaticallyLearnsAndRecallsAcrossRuns(t *testing.T
 			t.Error(b, err)
 			return
 		}
+		if !strings.Contains(b.Messages[0].Content, "raw JSON object") || !strings.Contains(b.Messages[0].Content, "code fences") {
+			t.Error("model request does not exclude Markdown framing")
+		}
 		if b.Messages[0].Content == memoryExtractionPrompt {
 			extraction.Add(1)
 			var input MemoryExtractionRequest

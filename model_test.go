@@ -43,6 +43,11 @@ func TestHTTPJSONDecisionModelStrictBoundary(t *testing.T) {
 	if err != nil || decision.Kind != "final" {
 		t.Fatalf("valid decision: %+v %v", decision, err)
 	}
+	content = "```json\n" + content + "\n```"
+	_, err = model.Decide(context.Background(), ContextPacket{}, "system")
+	if ErrorCode(err) != "model_decision_invalid" {
+		t.Fatalf("Markdown-framed decision accepted: %v", err)
+	}
 	content = `{"schema":"agenstra.decision.v1","kind":"final","answer_markdown":"Done","unexpected":1}`
 	_, err = model.Decide(context.Background(), ContextPacket{}, "system")
 	if ErrorCode(err) != "model_decision_invalid" {
