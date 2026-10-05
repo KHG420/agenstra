@@ -79,6 +79,41 @@ test("intentional cancellation is a stopped task while uncertain receipts and re
   } finally { globalThis.document = previous; }
 });
 
+test("completed navigation cannot hide a failed destructive business action", () => {
+  const previous = globalThis.document;
+  class Element {
+    constructor() { this.children = []; this.dataset = {}; this.textContent = ""; }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    querySelectorAll() { return []; }
+  }
+  globalThis.document = { createElement: () => new Element() };
+  try {
+    for (const locale of ["en", "zh-CN"]) {
+      const chat = Object.create(AgenstraChat.prototype);
+      chat.log = Object.assign(new Element(), { scrollHeight: 0, scrollTop: 0, clientHeight: 100 });
+      chat.input = { value: "" };
+      const nodes = new Map();
+      chat.shadowRoot = { querySelector: name => { if (!nodes.has(name)) nodes.set(name, new Element()); return nodes.get(name); } };
+      chat.getAttribute = () => locale;
+      chat.text = { statuses: { completed: "Completed" }, placeholder: "Message", send: "Send" };
+      chat.button = () => new Element();
+      chat.render({ conversation: { id: "conversation" }, messages: [{ id: "message", status: "completed", text: "Publish", run: { run_id: "run", status: "completed", state: { runtime: {
+        invocation_receipts: [
+          { invocation_id: "publish", capability: "ui.publish", effect: "destructive", status: "failed", error_code: "capability_input_invalid" },
+          { invocation_id: "navigate", capability: "ui.navigate", effect: "write", status: "succeeded" }
+        ]
+      } } } }] });
+      const turn = chat.log.children[0];
+      const notices = turn.children.filter(node => node.className === "notice action-outcome").map(node => node.textContent);
+      assert.equal(notices.length, 2);
+      assert.match(notices[0], locale === "en" ? /^Action failed: ui.publish/ : /^业务操作失败：ui.publish/);
+      assert.match(notices[1], /ui.navigate/);
+      assert.match(turn.children.find(node => node.className === "status").children[0].textContent, locale === "en" ? /ended.*failed/i : /结束.*失败/);
+    }
+  } finally { globalThis.document = previous; }
+});
+
 test("model HTML and code fence content remain text", () => {
   const previous = globalThis.document;
   class Element {

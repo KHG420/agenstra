@@ -646,6 +646,29 @@ func (h *AgentHost) prepareInvocation(ctx context.Context, run StoredRun, state 
 	}
 	item.Call = normalized
 	item.ArgumentsSHA256 = digest
+	validApproval := item.ApprovedHash != nil && *item.ApprovedHash == digest && item.ApprovedUntil != nil && h.now() < *item.ApprovedUntil
+	if item.Attempts == 0 {
+		// Reject invalid inputs before asking a user to approve them. Providers
+		// retain their execution checks; approval cannot freeze live page state.
+		if cap.InputSchema != nil {
+			schema, err := validateLocalSchema(cap.InputSchema, false)
+			if err != nil || validateSchema(schema, normalized.Arguments) != nil {
+				e = hostError("capability_input_invalid")
+			}
+		}
+		if e == nil && !validApproval {
+			if validator, ok := provider.(invocationValidator); ok {
+				e = validator.validateInvocation(ctx, cap.Name, inv)
+			}
+		}
+		if e != nil {
+			outcome := CallOutcome{ErrorCode: ErrorCode(e)}
+			captureInvocationReceipt(item, cap, outcome, nil)
+			Observe(state, item, outcome)
+			saved, err := h.save(run, state, "", nil, nil)
+			return saved, nil, err
+		}
+	}
 	if item.Status == "in_flight" || item.Status == "unknown" {
 		if cap.Replay == "never" || item.Attempts >= h.runSettings(run).MaxInvocationAttempts {
 			item.Status = "unknown"
@@ -656,7 +679,6 @@ func (h *AgentHost) prepareInvocation(ctx context.Context, run StoredRun, state 
 		}
 		item.Status = "prepared"
 	}
-	validApproval := item.ApprovedHash != nil && *item.ApprovedHash == digest && item.ApprovedUntil != nil && h.now() < *item.ApprovedUntil
 	if (cap.ApprovalRequired || policy.ApprovalCapabilities[cap.Name]) && !validApproval {
 		item.Status = "needs_approval"
 		expires := h.now() + h.runSettings(run).ApprovalSeconds

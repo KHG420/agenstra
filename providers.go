@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -186,15 +187,36 @@ func (c CapabilityDescription) ModelView() JSON {
 		return JSON{}
 	}
 	if utf8.RuneCount(raw) > 2000 {
+		// Union schemas declare the same top-level envelope in their branches.
+		// Keep those fields visible even when the full contract is deferred.
+		seen := map[string]bool{}
+		var collect func(map[string]any)
+		collect = func(schema map[string]any) {
+			if properties, ok := schema["properties"].(map[string]any); ok {
+				for key := range properties {
+					seen[key] = true
+				}
+			}
+			for _, keyword := range []string{"anyOf", "oneOf", "allOf"} {
+				branches, _ := schema[keyword].([]any)
+				for _, branch := range branches {
+					if child, ok := branch.(map[string]any); ok {
+						collect(child)
+					}
+				}
+			}
+		}
+		if schema, ok := m["input_schema"].(map[string]any); ok {
+			collect(schema)
+		}
 		delete(m, "input_schema")
 		fields := []string{}
-		if p, ok := c.InputSchema["properties"].(map[string]any); ok {
-			for k := range p {
-				if len(fields) >= 32 {
-					break
-				}
-				fields = append(fields, k)
-			}
+		for key := range seen {
+			fields = append(fields, key)
+		}
+		sort.Strings(fields)
+		if len(fields) > 32 {
+			fields = fields[:32]
 		}
 		m["input_fields"] = fields
 		m["schema_requires_inspection"] = true
@@ -232,6 +254,12 @@ type CapabilityProvider interface {
 	SystemPrompt() string
 	Invoke(context.Context, string, map[string]any, *InvocationContext) (CapabilityResult, error)
 	Close() error
+}
+
+// invocationValidator checks built-in provider prerequisites without executing
+// the capability. Execution still rechecks live state after approval.
+type invocationValidator interface {
+	validateInvocation(context.Context, string, InvocationContext) error
 }
 
 // ConcurrentCapabilityProvider explicitly opts into simultaneous Invoke calls.

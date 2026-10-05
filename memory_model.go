@@ -2,7 +2,6 @@ package agenstra
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 	"unicode/utf8"
 
@@ -79,8 +78,8 @@ func (m *HTTPJSONDecisionModel) ExtractMemoriesMeasured(ctx context.Context, req
 	var response struct {
 		Proposals []MemoryProposal `json:"proposals"`
 	}
-	if !json.Valid(raw) {
-		metrics.FormatError = modelContentError(raw)
+	if detail := modelJSONFormatError(raw); detail != "" {
+		metrics.FormatError = detail
 		return nil, metrics, hostError("memory_extraction_invalid")
 	}
 	if err = jsonvalue.DecodeStrict(raw, &response); err != nil || response.Proposals == nil {

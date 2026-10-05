@@ -128,6 +128,10 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet ContextPacket
 	if err != nil {
 		return Decision{}, err
 	}
+	if detail := modelJSONFormatError(body); detail != "" {
+		metrics.FormatError = detail
+		return Decision{}, ModelDecisionError{"model_decision_invalid"}
+	}
 	decision, err = strictDecision(body)
 	if err != nil {
 		metrics.FormatError = modelContentError(body)
@@ -356,7 +360,74 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	if envelope.Choices[0].Message.Content == "" {
 		return nil, invalidModelOutput(ctx, "model_output_empty")
 	}
-	return []byte(envelope.Choices[0].Message.Content), nil
+	return unwrapModelJSON([]byte(envelope.Choices[0].Message.Content)), nil
+}
+
+// unwrapModelJSON removes only a complete outer Markdown fence. It does not
+// extract JSON from prose, repair truncated output, or change the enclosed data.
+func unwrapModelJSON(raw []byte) []byte {
+	body := bytes.TrimSpace(raw)
+	firstNewline := bytes.IndexByte(body, '\n')
+	if firstNewline < 0 {
+		return body
+	}
+	opening := strings.TrimSpace(string(body[:firstNewline]))
+	if opening != "```" && !strings.EqualFold(opening, "```json") {
+		return body
+	}
+	lastNewline := bytes.LastIndexByte(body, '\n')
+	if lastNewline <= firstNewline || string(bytes.TrimSpace(body[lastNewline+1:])) != "```" {
+		return body
+	}
+	return bytes.TrimSpace(body[firstNewline+1 : lastNewline])
+}
+
+// modelJSONFormatError keeps model decisions and memory proposals unambiguous.
+// JSON syntax must be complete before token scanning, including nested objects.
+func modelJSONFormatError(body []byte) string {
+	if !json.Valid(body) {
+		return modelContentError(body)
+	}
+	if bytes.TrimSpace(body)[0] != '{' {
+		return "model_decision_schema_invalid"
+	}
+	type objectKeys struct {
+		seen       map[string]bool
+		expectsKey bool
+	}
+	var stack []objectKeys
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return ""
+		}
+		if err != nil {
+			return "model_output_invalid_json"
+		}
+		if len(stack) > 0 {
+			current := &stack[len(stack)-1]
+			if key, ok := token.(string); ok && current.expectsKey {
+				if current.seen[key] {
+					return "model_output_duplicate_key"
+				}
+				current.seen[key], current.expectsKey = true, false
+				continue
+			}
+			current.expectsKey = current.seen != nil
+		}
+		if delimiter, ok := token.(json.Delim); ok {
+			switch delimiter {
+			case '{':
+				stack = append(stack, objectKeys{seen: map[string]bool{}, expectsKey: true})
+			case '[':
+				stack = append(stack, objectKeys{})
+			case '}', ']':
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
 }
 
 func invalidModelOutput(ctx context.Context, detail string) error {

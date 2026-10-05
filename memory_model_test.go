@@ -27,6 +27,10 @@ func TestMemoryHTTPJSONExtractorContractAndBudget(t *testing.T) {
 		valid         bool
 	}{
 		{"empty", `{"proposals":[]}`, true},
+		{"fenced", "```json\n{\"proposals\":[]}\n```", true},
+		{"fenced invalid schema", "```json\n{\"proposals\":[],\"owner\":\"bob\"}\n```", false},
+		{"duplicate", `{"proposals":[],"proposals":[]}`, false},
+		{"nested duplicate", `{"proposals":[{"scope":"user","key":"report.language","value":"en","value":"zh-CN","kind":"preference","mode":"habit","quote":"用中文写报告"}]}`, false},
 		{"habit", `{"proposals":[{"scope":"user","key":"report.language","value":"zh-CN","kind":"preference","mode":"habit","quote":"用中文写报告"}]}`, true},
 		{"missing", `{}`, false},
 		{"null", `{"proposals":null}`, false},

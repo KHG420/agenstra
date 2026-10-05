@@ -9,6 +9,8 @@ const outcomeLabels = {
     accepted: capability => `业务操作已受理，最终结果尚未确认：${capability}`,
     failed: capability => `业务操作失败：${capability}`,
     unknown: capability => `业务操作结果尚未确认：${capability}`,
+    endedWithFailures: "处理已结束 · 有操作失败",
+    endedUnconfirmed: "处理已结束 · 操作结果待核对",
     unavailable: "执行回执已保留，但结果详情未能保存。请核对业务系统中的实际结果。",
     incomplete: "任务未完成。请以上方回执判断操作结果，避免重复提交已成功的操作。"
   },
@@ -17,6 +19,8 @@ const outcomeLabels = {
     accepted: capability => `Action accepted; final outcome unconfirmed: ${capability}`,
     failed: capability => `Action failed: ${capability}`,
     unknown: capability => `Action outcome unconfirmed: ${capability}`,
+    endedWithFailures: "Processing ended · Some actions failed",
+    endedUnconfirmed: "Processing ended · Action outcomes need review",
     unavailable: "The execution receipt was retained, but result details could not be saved. Check the actual result in your system.",
     incomplete: "The task is incomplete. Check the action receipts above and avoid resubmitting actions that succeeded."
   }
@@ -246,11 +250,15 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
       const receipts = new Map((runtime?.invocation_receipts || []).map(receipt => [receipt.invocation_id, receipt]));
       for (const item of runtime?.pending || []) if (item.receipt) receipts.set(item.invocation_id, item.receipt);
       const outcomes = outcomeLabels[this.getAttribute("lang")] || outcomeLabels["zh-CN"];
-      for (const receipt of receipts.values()) {
-        if (receipt.effect !== "write") continue;
+      const actionReceipts = Array.from(receipts.values()).filter(receipt => ["write", "destructive"].includes(receipt.effect));
+      if (state === "completed") {
+        if (actionReceipts.some(receipt => receipt.status === "failed")) caption.textContent = outcomes.endedWithFailures;
+        else if (actionReceipts.some(receipt => receipt.status !== "succeeded")) caption.textContent = outcomes.endedUnconfirmed;
+      }
+      for (const receipt of actionReceipts) {
         const p = document.createElement("p");p.className = "notice action-outcome";
         const describe = typeof outcomes[receipt.status] === "function" ? outcomes[receipt.status] : outcomes.unknown;
-        p.textContent = describe(receipt.capability);turn.append(p);
+        p.textContent = describe(receipt.capability) + (receipt.error_code ? " (" + receipt.error_code + ")" : "");turn.append(p);
         if (receipt.result_error_code) { const detail = document.createElement("p");detail.className = "notice";detail.textContent = outcomes.unavailable;turn.append(detail); }
       }
       if (message.answer_markdown) { const answer = document.createElement("div");answer.className = "answer";appendAnswer(answer, message.answer_markdown);turn.append(answer); }
@@ -258,7 +266,7 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
         const p = document.createElement("p");p.className = "notice";
         p.textContent = [ref.label || ref.entity_type || (this.getAttribute("lang") === "en" ? "Result" : "业务对象"), ref.id].join(": ");turn.append(p);
       }
-      if (message.error_code && !(state === "cancelled" && message.error_code === "cancel_requested")) { const p = document.createElement("p");p.className = "notice";p.textContent = (Array.from(receipts.values()).some(receipt => receipt.effect === "write") ? outcomes.incomplete : t.error) + " (" + message.error_code + ")";turn.append(p); }
+      if (message.error_code && !(state === "cancelled" && message.error_code === "cancel_requested")) { const p = document.createElement("p");p.className = "notice";p.textContent = (actionReceipts.length ? outcomes.incomplete : t.error) + " (" + message.error_code + ")";turn.append(p); }
       if (state === "needs_input") {
         this.awaitingInput = { run, runtime, messageID: message.id };
         const p = document.createElement("p");p.id = "input-prompt-" + message.id;p.className = "notice";p.textContent = runtime.input_prompt;turn.append(p);

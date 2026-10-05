@@ -18,6 +18,17 @@ type contextBudgetProvider struct {
 	skills map[string]Skill
 }
 
+func TestDeferredUnionSchemaKeepsTopLevelWrapperFields(t *testing.T) {
+	cap := CapabilityDescription{Name: "records.write", InputSchema: JSON{"type": "object", "anyOf": []any{
+		JSON{"type": "object", "properties": JSON{"operation": JSON{"const": "create"}, "arguments": JSON{"type": "object", "description": strings.Repeat("x", 2100), "properties": JSON{"request": JSON{"type": "object"}}}}},
+		JSON{"allOf": []any{JSON{"properties": JSON{"operation": JSON{"const": "update"}, "arguments": JSON{"type": "object"}}}}},
+	}}}
+	view := cap.ModelView()
+	if view["schema_requires_inspection"] != true || !reflect.DeepEqual(view["input_fields"], []string{"arguments", "operation"}) {
+		t.Fatal("union schema lost its wrapper fields", view)
+	}
+}
+
 func (p *contextBudgetProvider) Skills() map[string]Skill { return p.skills }
 
 type contextBudgetModel func(context.Context, ContextPacket, string) (Decision, error)

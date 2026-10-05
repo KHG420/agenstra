@@ -22,7 +22,7 @@ func actionOutcomes(state *RuntimeState, capabilities map[string]CapabilityDescr
 	receipts := map[string]InvocationReceipt{}
 	order := []string{}
 	put := func(receipt InvocationReceipt) {
-		if receipt.Effect != "write" {
+		if receipt.Effect != "write" && receipt.Effect != "destructive" {
 			return
 		}
 		if _, exists := receipts[receipt.InvocationID]; !exists {
@@ -51,7 +51,7 @@ func actionOutcomes(state *RuntimeState, capabilities map[string]CapabilityDescr
 			continue
 		}
 		capability, exists := capabilities[observation.Capability]
-		if !exists || capability.Effect != "write" {
+		if !exists || (capability.Effect != "write" && capability.Effect != "destructive") {
 			continue
 		}
 		id := deterministicInvocationID(state.RunID, observation.CallRef)

@@ -565,6 +565,20 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		}
 		if len(state.ModelObservations) > 0 {
 			last := state.ModelObservations[len(state.ModelObservations)-1]
+			if last.ErrorCode != nil && *last.ErrorCode == "capability_input_invalid" {
+				prompt += fmt.Sprintf("\nYour previous call to %q failed its input contract. Inspect its full input_schema and repair the failing structure before retrying. ToolCall.arguments contains the capability input; any nested arguments object declared by that schema must also be preserved. Do not infer a business validation cause from this error.", last.Capability)
+				if cap, ok := r.Provider.Capabilities()[last.Capability]; ok && cap.InputSchema != nil {
+					arguments := last.Arguments
+					for _, observation := range state.Observations {
+						if observation.CallRef == last.CallRef {
+							arguments = observation.Arguments
+						}
+					}
+					if detail := inputValidationFeedback(cap.InputSchema, arguments); detail != "" {
+						prompt += "\nLocal input schema validation errors (contract data): " + detail
+					}
+				}
+			}
 			if last.ErrorCode != nil && *last.ErrorCode == "repeated_equivalent_call" && last.FactID != nil {
 				prompt += "\nYour previous call repeated a completed calculation. Use existing Fact " + *last.FactID + " to answer or inspect its needed path. Do not issue another equivalent tool call."
 			}
@@ -728,7 +742,15 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		} else if errors.As(err, &oversized) {
 			feedback = "\nYour previous decision was invalid: tool_batch.calls has at most 4 items. Return one valid agenstra.decision.v1 JSON decision with no more than 4 calls."
 		} else {
-			feedback = "\nYour previous response was not a valid agenstra.decision.v1 JSON decision. Return exactly one valid decision object. Do not put read_skill, inspect_capability, or inspect_fact inside tool_batch.calls."
+			feedback = "\nYour previous response was not a valid agenstra.decision.v1 JSON decision. Return exactly one raw JSON object without Markdown or code fences. Preserve the capability's input structure, including any nested arguments object required by its schema. Do not put read_skill, inspect_capability, or inspect_fact inside tool_batch.calls."
+			switch metrics.FormatError {
+			case "model_output_duplicate_key":
+				feedback += " Each object key must occur only once, including in nested capability arguments."
+			case "model_output_invalid_json":
+				feedback += " The JSON must be complete, with no comments, trailing text, or multiple values."
+			case "model_decision_schema_invalid":
+				feedback += " Include all required fields and only fields permitted for the selected decision kind."
+			}
 		}
 	}
 	recordDecision(state, decision)

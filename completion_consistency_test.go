@@ -223,6 +223,15 @@ func TestActionOutcomesPreserveDistinctAttemptsAndFailureSemantics(t *testing.T)
 		t.Fatal("failure, denied approval or unknown outcome lost", got)
 	}
 }
+func TestDestructiveOutcomesIncludeFailedReceiptsAndRejectedInputs(t *testing.T) {
+	state := &RuntimeState{RunID: "run", InvocationReceipts: []InvocationReceipt{
+		{InvocationID: "write", Capability: "records.remove", Effect: "destructive", Status: "failed", ErrorCode: "operation_failed"},
+	}, Observations: []Observation{{CallRef: "invalid", Capability: "records.remove", Status: "failed", ErrorCode: strptr("capability_input_invalid")}}}
+	got := actionOutcomes(state, map[string]CapabilityDescription{"records.remove": {Name: "records.remove", Effect: "destructive", ApprovalRequired: true}})
+	if len(got) != 2 || got[0].Status != "failed" || got[1].ErrorCode != "capability_input_invalid" || !got[0].ApprovalRequired {
+		t.Fatal("destructive failures hidden from final review", got)
+	}
+}
 
 func TestHostCompletionReviewAfterApprovalDoesNotReplayWrite(t *testing.T) {
 	p := &hostProvider{caps: map[string]CapabilityDescription{"records.get": {Name: "records.get", Effect: "write", Replay: "never", ApprovalRequired: true, InputSchema: JSON{"type": "object"}}}}

@@ -40,6 +40,23 @@ func (m *coreTestModel) Decide(_ context.Context, _ ContextPacket, _ string) (De
 	return m.decisions[i], nil
 }
 
+func TestInputValidationFeedbackIdentifiesMissingWrapper(t *testing.T) {
+	cap := CapabilityDescription{Name: "records.create", Effect: "write", InputSchema: JSON{"type": "object", "properties": JSON{"arguments": JSON{"type": "object"}}, "required": []any{"arguments"}, "additionalProperties": false}}
+	r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{cap.Name: cap}}, Grants: map[string]bool{cap.Name: true}}
+	s := &RuntimeState{RunID: "run", Status: "queued", Instruction: "Create a record"}
+	obs := Observation{CallRef: "create-1", Capability: cap.Name, Status: "failed", ErrorCode: strptr("capability_input_invalid"), Arguments: JSON{"request": JSON{}}}
+	s.Observations, s.ModelObservations = []Observation{obs}, []Observation{obs}
+	r.Model = decisionModelFunc(func(_ context.Context, _ ContextPacket, prompt string) (Decision, error) {
+		if !strings.Contains(prompt, "missing property 'arguments'") || !strings.Contains(prompt, "records.create") || strings.Contains(prompt, "file://") {
+			t.Fatal("model did not receive the actual input validation error", prompt)
+		}
+		return Decision{Kind: "inspect_capability", Name: cap.Name}, nil
+	})
+	if err := r.Step(t.Context(), s, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRuntimeReducesUncodedModelErrorsToSafeCodes(t *testing.T) {
 	for _, tc := range []struct {
 		name string

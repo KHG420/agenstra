@@ -245,6 +245,36 @@ func TestBrowserApprovalAndLiveGrantRevocation(t *testing.T) {
 		t.Fatal(ok, e)
 	}
 }
+func TestBrowserPrerequisitesCheckedBeforeApproval(t *testing.T) {
+	for _, scenario := range []struct {
+		name      string
+		decisions []Decision
+		code      string
+	}{
+		{"invalid input", []Decision{browserDecisions()[0], {Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []ToolCall{{CallRef: "bad", Capability: "ui.navigate", Arguments: JSON{"unknown": "orders"}, Reason: "Open orders"}}}}, "capability_input_invalid"},
+		{"missing context", browserDecisions()[1:], "browser_context_required"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			f := newWebFixture(t, &hostModel{decisions: scenario.decisions}, true)
+			r := f.run(t)
+			if r.Status != "completed" {
+				t.Fatal("invalid action requested approval", r.Status)
+			}
+			s, err := f.h.restore(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			last := s.Observations[len(s.Observations)-1]
+			if last.ErrorCode == nil || *last.ErrorCode != scenario.code {
+				t.Fatal(last)
+			}
+			var count int
+			if err := f.w.Store.store.DB.QueryRow("SELECT count(*) FROM web_commands").Scan(&count); err != nil || count != 0 {
+				t.Fatal("invalid action enqueued", count, err)
+			}
+		})
+	}
+}
 func TestChatQueuePrebindingIdempotenceAndRecovery(t *testing.T) {
 	f := newWebFixture(t, &hostModel{}, false)
 	c, e := f.w.CreateConversation(t.Context(), "alice", "records-web")

@@ -83,6 +83,54 @@ func createTestHostRun(t *testing.T, h *AgentHost) StoredRun {
 	}
 	return r
 }
+func TestHostValidatesNestedInputBeforeApproval(t *testing.T) {
+	cap := CapabilityDescription{Name: "records.get", Effect: "destructive", Replay: "never", ApprovalRequired: true, InputSchema: JSON{
+		"type": "object", "additionalProperties": false,
+		"properties": JSON{"operation": JSON{"type": "string"}, "arguments": JSON{"type": "object"}},
+		"anyOf": []any{JSON{"properties": JSON{"operation": JSON{"const": "create"}, "arguments": JSON{
+			"type": "object", "properties": JSON{"request": JSON{"type": "object", "properties": JSON{"title": JSON{"type": "string"}}, "required": []any{"title"}, "additionalProperties": false}},
+			"required": []any{"request"}, "additionalProperties": false,
+		}}, "required": []any{"operation", "arguments"}}},
+	}}
+	p := &hostProvider{caps: map[string]CapabilityDescription{cap.Name: cap}}
+	m := &hostModel{}
+	for i, args := range []JSON{
+		{"operation": "create", "request": JSON{"title": "Test"}},
+		{"operation": "create", "arguments": JSON{"request": JSON{"title": 7}}},
+		{"operation": "create", "arguments": JSON{"request": JSON{"title": "Test"}}},
+	} {
+		m.decisions = append(m.decisions, Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []ToolCall{{CallRef: fmt.Sprintf("create-%d", i), Capability: cap.Name, Arguments: args, Reason: "Create a record"}}})
+	}
+	h := testHost(t, testStore(t), p, m)
+	r := createTestHostRun(t, h)
+	r, err := h.Drive(t.Context(), r.RunID, "alice")
+	if err != nil || r.Status != "needs_approval" {
+		t.Fatal(r.Status, err)
+	}
+	s, err := h.restore(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Observations) != 2 || p.calls != 0 {
+		t.Fatalf("invalid calls reached approval or execution: observations=%+v calls=%d", s.Observations, p.calls)
+	}
+	for _, observation := range s.Observations {
+		if observation.ErrorCode == nil || *observation.ErrorCode != "capability_input_invalid" {
+			t.Fatal(observation)
+		}
+	}
+	item := s.Pending[0]
+	if item.Call.CallRef != "create-2" {
+		t.Fatal("approval must cover the corrected call", item)
+	}
+	if _, err = h.Approve(t.Context(), r.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, r.Revision, true); err != nil {
+		t.Fatal(err)
+	}
+	r, err = h.Drive(t.Context(), r.RunID, "alice")
+	if err != nil || r.Status != "completed" || p.calls != 1 {
+		t.Fatal(r.Status, p.calls, err)
+	}
+}
 func TestHostDurableRunAndInput(t *testing.T) {
 	s := testStore(t)
 	p := &hostProvider{}
