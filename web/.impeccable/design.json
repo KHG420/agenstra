@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-05T16:29:09Z",
+  "title": "Design System: Agenstra 开发者控制台",
+  "extensions": {
+    "colorMeta": {
+      "ink": { "role": "neutral", "displayName": "深墨色" },
+      "muted": { "role": "neutral", "displayName": "灰绿" },
+      "ground": { "role": "neutral", "displayName": "浅底色" },
+      "paper": { "role": "neutral", "displayName": "白纸" },
+      "line": { "role": "neutral", "displayName": "细分隔线" },
+      "accent": { "role": "primary", "displayName": "配置青绿" },
+      "accent-dark": { "role": "primary", "displayName": "深青绿" },
+      "danger": { "role": "danger", "displayName": "危险红" },
+      "sidebar": { "role": "neutral", "displayName": "浅绿侧栏" },
+      "sidebar-active": { "role": "primary", "displayName": "浅绿选中面" }
+    },
+    "typographyMeta": {
+      "body": { "displayName": "正文", "purpose": "配置说明、字段值和反馈。" },
+      "heading": { "displayName": "模块标题", "purpose": "当前一级管理模块的标题。" },
+      "label": { "displayName": "字段标签", "purpose": "紧凑表单中的字段名称。" }
+    },
+    "breakpoints": [
+      { "name": "narrow-desktop", "value": "1100px" },
+      { "name": "compact", "value": "760px" }
+    ],
+    "motion": [
+      { "name": "button-state", "value": "background 160ms ease, color 160ms ease, border-color 160ms ease", "purpose": "按钮悬停状态；减少动态效果偏好时停用。" }
+    ]
+  },
+  "components": [
+    {
+      "name": "主要按钮",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "连接、保存、发布和创建任务的主要动作。",
+      "html": "<button class=\"ds-button-primary\" type=\"button\">保存全部配置</button>",
+      "css": ".ds-button-primary { min-height: 36px; padding: 7px 13px; border: 1px solid transparent; border-radius: 5px; background: var(--accent, #116b64); color: #fff; font: 650 .87rem -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif; cursor: pointer; transition: background 160ms ease; } .ds-button-primary:hover { background: var(--accent-dark, #09524d); } .ds-button-primary:focus-visible { outline: 3px solid #77bdb1; outline-offset: 3px; } .ds-button-primary:disabled { opacity: .5; cursor: not-allowed; } @media (prefers-reduced-motion: reduce) { .ds-button-primary { transition: none; } }"
+    },
+    {
+      "name": "次要按钮",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "重新读取、检查等辅助动作。",
+      "html": "<button class=\"ds-button-secondary\" type=\"button\">重新读取</button>",
+      "css": ".ds-button-secondary { min-height: 36px; padding: 7px 13px; border: 1px solid #b8cdc6; border-radius: 5px; background: #fff; color: #165950; font: 650 .87rem -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif; cursor: pointer; transition: background 160ms ease; } .ds-button-secondary:hover { background: #e8f2ed; } .ds-button-secondary:focus-visible { outline: 3px solid #77bdb1; outline-offset: 3px; } @media (prefers-reduced-motion: reduce) { .ds-button-secondary { transition: none; } }"
+    },
+    {
+      "name": "危险按钮",
+      "kind": "button",
+      "description": "移除配置和停用连接等危险动作。",
+      "html": "<button class=\"ds-button-danger\" type=\"button\">停用连接</button>",
+      "css": ".ds-button-danger { min-height: 36px; padding: 7px 13px; border: 1px solid #e3b8b1; border-radius: 5px; background: #fff; color: var(--danger, #a5352c); font: 650 .87rem -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif; cursor: pointer; transition: background 160ms ease; } .ds-button-danger:hover { background: #f9eae7; } .ds-button-danger:focus-visible { outline: 3px solid #77bdb1; outline-offset: 3px; } @media (prefers-reduced-motion: reduce) { .ds-button-danger { transition: none; } }"
+    },
+    {
+      "name": "配置字段",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "标签、紧凑原生输入框和字段说明的组合。",
+      "html": "<div class=\"ds-field\"><label class=\"ds-field-label\" for=\"ds-model-name\">模型名称</label><input class=\"ds-field-input\" id=\"ds-model-name\" type=\"text\" placeholder=\"服务提供的模型 ID\"><small class=\"ds-field-help\">填写服务提供的模型 ID。</small></div>",
+      "css": ".ds-field { color: var(--ink, #18313b); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif; } .ds-field-label { display: block; margin-bottom: 7px; font-size: .82rem; font-weight: 700; } .ds-field-input { width: 100%; min-height: 39px; padding: 9px 11px; border: 1px solid #bdcdc9; border-radius: 5px; background: #fff; color: var(--ink, #18313b); font: inherit; caret-color: var(--accent, #116b64); } .ds-field-input:focus-visible { outline: 3px solid #77bdb1; outline-offset: 3px; } .ds-field-help { display: block; margin-top: 5px; color: #5b6e71; font-size: .77rem; line-height: 1.5; }"
+    },
+    {
+      "name": "侧栏当前模块",
+      "kind": "nav",
+      "refersTo": "sidebar-active",
+      "description": "六个一级模块中的当前页面状态。",
+      "html": "<nav class=\"ds-nav\" aria-label=\"管理模块\"><a class=\"ds-nav-link\" aria-current=\"page\" href=\"#models\">模型配置</a><a class=\"ds-nav-link\" href=\"#publish\">能力草稿</a></nav>",
+      "css": ".ds-nav { width: 200px; padding: 16px; background: #eef3f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif; } .ds-nav-link { display: block; margin-bottom: 7px; padding: 12px 14px; border-radius: 5px; color: var(--muted, #51636a); text-decoration: none; font-size: 14px; font-weight: 600; } .ds-nav-link:hover { background: #dbe9e3; color: var(--accent-dark, #09524d); } .ds-nav-link[aria-current='page'] { background: #dcece3; color: var(--accent-dark, #09524d); } .ds-nav-link:focus-visible { outline: 3px solid #77bdb1; outline-offset: 3px; }"
+    },
+    {
+      "name": "模型页签",
+      "kind": "nav",
+      "description": "模型服务与用途分配之间的当前视图指示。",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\" aria-label=\"模型配置视图\"><button class=\"ds-tab\" role=\"tab\" aria-selected=\"true\" type=\"button\">模型服务</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\" type=\"button\">用途分配</button></div>",
+      "css": ".ds-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--line, #d8e0dc); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif; } .ds-tab { padding: 10px 0 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted, #51636a); font-size: 14px; font-weight: 650; font-family: inherit; cursor: pointer; } .ds-tab:hover { color: var(--accent-dark, #09524d); } .ds-tab[aria-selected='true'] { color: var(--accent-dark, #09524d); border-bottom-color: var(--accent, #116b64); } .ds-tab:focus-visible { outline: 3px solid #77bdb1; outline-offset: 3px; }"
+    },
+    {
+      "name": "保存状态栏",
+      "kind": "custom",
+      "description": "编辑区底部的保存动作和状态文案。",
+      "html": "<div class=\"ds-save\"><p class=\"ds-save-state\" role=\"status\">配置已保存。</p><button class=\"ds-save-button\" type=\"button\">保存全部配置</button></div>",
+      "css": ".ds-save { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 18px; align-items: center; padding: 16px 0; border-top: 1px solid var(--line, #d8e0dc); background: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif; } .ds-save-state { margin: 0; color: var(--muted, #51636a); font-size: .85rem; } .ds-save-button { min-height: 36px; padding: 7px 13px; border: 0; border-radius: 5px; background: var(--accent, #116b64); color: #fff; font-size: .87rem; font-weight: 650; font-family: inherit; cursor: pointer; } .ds-save-button:hover { background: var(--accent-dark, #09524d); } .ds-save-button:focus-visible { outline: 3px solid #77bdb1; outline-offset: 3px; } @media (max-width: 760px) { .ds-save { grid-template-columns: 1fr; } }"
+    },
+    {
+      "name": "成功反馈",
+      "kind": "custom",
+      "description": "保存或读取成功后显示的状态反馈。",
+      "html": "<p class=\"ds-feedback\" role=\"status\">已重新读取服务端配置。</p>",
+      "css": ".ds-feedback { margin: 0; padding: 12px 15px; border-radius: 8px; background: #e0f1e9; color: #14583d; font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "清爽配置台",
+    "overview": "这个系统只描述框架直接提供的独立 `/admin` 开发者控制台。它服务于配置模型、能力包、连接与授权的开发者；不延伸到无 UI Web SDK、可选聊天组件或宿主应用界面。宿主可以保留自己的视觉设计。\n\n界面以白色工作区、白色顶栏、浅绿侧栏和克制的青绿色状态为骨架。配置表单保持平整，标题、说明、字段和当前状态按操作顺序排列。一次只展示一个管理模块；模型配置里的“模型服务”和“用途分配”再用两个页签分开。浅色分隔线与留白承担层次，视觉重点留给当前导航、选中页签和主要保存动作。",
+    "keyCharacteristics": [
+      "六个管理模块组成固定侧栏：版本目录、模型配置、能力草稿、连接与授权、试运行、变更记录。",
+      "独立的开发者管理密钥入口和连接状态留在顶栏；连接表单可展开。",
+      "表单使用紧凑原生控件，较复杂的参数通过原生 `details` 按需展开。",
+      "模型和草稿编辑区在底部保留保存动作及状态反馈。"
+    ],
+    "rules": [
+      { "name": "The Active State Rule", "body": "侧栏选中项与当前页签同时使用青绿文字或浅绿背景，并保留清楚的当前位置指示。", "section": "colors" },
+      { "name": "The One Module Rule", "body": "主工作区同一时间只呈现一个一级管理模块；二级模型页签和草稿步骤也只呈现其当前内容。顶栏管理密钥区独立于模块导航。", "section": "layout" }
+    ],
+    "dos": [
+      "Do 让页面保持一个清楚的活动模块，使用模块标题、简短说明、字段和保存状态建立阅读顺序。",
+      "Do 对主要提交使用配置青绿，对危险动作使用现有危险红，并在结果区写出明确状态。",
+      "Do 把高级参数收进现有折叠区，保留原生表单标签、焦点指示与键盘页签操作。"
+    ],
+    "donts": [
+      "Don't 把开发者控制台的视觉规则套用到无 UI SDK、可选聊天组件或宿主业务页面。",
+      "Don't 用浮层、重阴影或装饰性卡片替代现有平整表单与细线分隔。",
+      "Don't 让保存结果只靠颜色表达，或让保存按钮离开其状态说明。"
+    ]
+  }
+}

@@ -9,6 +9,7 @@ class Node {
   replaceChildren(...nodes) { this.children = nodes; }
   addEventListener(type, callback) { this.listeners.set(type, callback); }
   querySelectorAll() { return []; }
+  checkValidity() { return true; }
   reportValidity() { return true; }
   async emit(type) { this.listeners.get(type)?.({ preventDefault() {} }); await new Promise(resolve => setImmediate(resolve)); }
 }
@@ -22,7 +23,7 @@ function fixture() {
     business: { api_type: "deepseek_chat", model: "business-model", base_url: "https://example.com", api_key_ref: "MODEL_KEY", thinking: "enabled", reasoning_effort: "low" },
     memory: { api_type: "deepseek_chat", model: "memory-model", base_url: "https://example.com", api_key_ref: "MODEL_KEY", thinking: "disabled" },
   } };
-  const editor = window.installModelEditor({ feedback() {}, api: async (path, options) => {
+  const editor = window.installModelEditor({ feedback() {}, revealProfile() { get("model-services-view").hidden = false; get("model-purposes-view").hidden = true; }, api: async (path, options) => {
     requests.push({ path, options: structuredClone(options) });
     if (!options) return { available: true, revision: 2, config: structuredClone(config) };
     if (options.method === "PUT") return { revision: 3, config: structuredClone(options.body.config) };
@@ -78,4 +79,19 @@ test("completion review usage has its own label", () => {
   const row = container.children[0].children[0].children[1].children[0];
   assert.equal(row.children[0].textContent, "回答复核");
   assert.equal(row.children[1].textContent, "1");
+});
+
+test("saving from purpose selection reveals invalid profile fields without submitting", async () => {
+  const { editor, get, requests } = fixture();
+  await editor.refresh();
+  get("model-name").value = "";
+  await get("model-profile-form").emit("input");
+  get("model-profile-form").checkValidity = () => false;
+  get("model-profile-form").reportValidity = () => false;
+  get("model-services-view").hidden = true;
+  get("model-purposes-view").hidden = false;
+  await get("models-save").emit("click");
+  assert.equal(get("model-services-view").hidden, false);
+  assert.equal(get("model-purposes-view").hidden, true);
+  assert.equal(requests.some(request => request.options?.method === "PUT"), false);
 });

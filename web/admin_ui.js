@@ -3,6 +3,59 @@
 
   const state = { token: "", overview: null, openapiSpec: null };
   const $ = (id) => document.getElementById(id);
+  const pages = [...document.querySelectorAll("[data-admin-panel]")];
+  const navigation = [...document.querySelectorAll("[data-admin-page]")];
+  function showPage(focus = false) {
+    const requested = location.hash.slice(1);
+    const active = pages.find(page => page.id === requested) || $("models");
+    pages.forEach(page => { page.hidden = page !== active; });
+    navigation.forEach(link => {
+      if (link.dataset.adminPage === active.id) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
+    const heading = active.querySelector("h2");
+    document.title = `${heading.textContent} · Agenstra 开发者控制台`;
+    if (focus) {
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+      window.scrollTo({ top: 0, behavior: "instant" });
+    }
+  }
+  window.addEventListener("hashchange", () => showPage(true));
+  navigation.forEach(link => link.addEventListener("click", () => {
+    if (location.hash === link.getAttribute("href")) showPage(true);
+  }));
+  showPage();
+
+  function connectionPanel(open) {
+    $("connection-panel").hidden = !open;
+    $("connection-toggle").setAttribute("aria-expanded", String(open));
+  }
+  $("connection-toggle").addEventListener("click", () => {
+    const open = $("connection-panel").hidden;
+    connectionPanel(open);
+    if (open) $("admin-key").focus();
+  });
+
+  const modelTabs = [...document.querySelectorAll("[data-model-view]")];
+  function showModelView(view, focus = false) {
+    for (const tab of modelTabs) {
+      const selected = tab.dataset.modelView === view;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      $(tab.getAttribute("aria-controls")).hidden = !selected;
+      if (selected && focus) tab.focus();
+    }
+  }
+  for (const tab of modelTabs) {
+    tab.addEventListener("click", () => showModelView(tab.dataset.modelView));
+    tab.addEventListener("keydown", event => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const view = event.key === "Home" ? "services" : event.key === "End" ? "purposes" : tab.dataset.modelView === "services" ? "purposes" : "services";
+      showModelView(view, true);
+    });
+  }
   const messages = {
     model_revision_conflict: "模型配置已被其他管理员更新。请重新读取后合并修改。",
     model_configuration_invalid: "模型配置不完整，请检查名称、模型 ID 和凭据引用。",
@@ -60,6 +113,7 @@
         state.token = "";
         $("connection-state").textContent = "未连接";
         $("connection-state").classList.remove("connected");
+        connectionPanel(true);
       }
       const code = data.detail?.code || data.code || `HTTP ${response.status}`;
       throw new Error(messages[code] || data.detail?.message || `操作失败：${code}`);
@@ -211,7 +265,7 @@
       empty(list, "发布和授权操作会显示在这里。");
       return;
     }
-    const labels = { publish: "发布版本", activate: "启用版本", bind: "保存连接", disable_binding: "停用连接", save_draft: "保存草稿" };
+    const labels = { publish: "发布版本", activate: "启用版本", bind: "保存连接", disable_binding: "停用连接", save_draft: "保存草稿", models_configured: "保存模型配置" };
     for (const event of state.overview.audit) {
       const row = document.createElement("div");
       row.className = "audit-row";
@@ -257,6 +311,7 @@
     try {
       await refresh();
       $("admin-key").value = "";
+      connectionPanel(false);
       feedback("已连接管理服务。", "success");
     } catch (error) {
       state.token = "";
@@ -320,7 +375,7 @@
     } catch (error) { feedback(error.message, "error", "binding-feedback"); }
   });
   const drafts = window.installDraftEditor({ api, feedback, names, formatDate, onPublish: refresh, getOverview: () => state.overview });
-  const models = window.installModelEditor({ api, feedback });
+  const models = window.installModelEditor({ api, feedback, revealProfile: () => showModelView("services") });
 
   let diagnosticBusy = false;
   let diagnosticCreate = null;

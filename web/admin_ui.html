@@ -11,29 +11,34 @@
   <script src="/admin/assets/admin_ui.js" defer></script>
 </head>
 <body>
+  <!-- Developer console: focused settings modules, light navigation, persistent save state.
+       The approved A preview is the visual reference; existing management contracts remain authoritative. -->
   <header class="topbar">
     <div class="brand"><span class="brand-mark" aria-hidden="true">A</span><span>Agenstra</span></div>
     <div class="topbar-title">开发者控制台</div>
     <span id="connection-state" class="connection-state">未连接</span>
+    <button id="connection-toggle" class="button secondary" type="button" aria-expanded="true" aria-controls="connection-panel">管理密钥</button>
   </header>
 
   <div class="shell">
     <aside class="sidebar" aria-label="管理导航">
-      <p class="sidebar-label">工作区</p>
-      <a href="#releases">版本目录</a>
-      <a href="#models">模型配置</a>
-      <a href="#publish">草稿编辑</a>
-      <a href="#bindings">连接与授权</a>
-      <a href="#diagnostics">试运行与诊断</a>
-      <a href="#audit">变更记录</a>
-      <div class="sidebar-note">发布版本后，新任务会读取当前启用版本。已有任务继续使用其固定版本。</div>
+      <nav aria-label="管理模块">
+        <a href="#releases" data-admin-page="releases">版本目录</a>
+        <a href="#models" data-admin-page="models" aria-current="page">模型配置</a>
+        <a href="#publish" data-admin-page="publish">能力草稿</a>
+        <a href="#bindings" data-admin-page="bindings">连接与授权</a>
+        <a href="#diagnostics" data-admin-page="diagnostics">试运行</a>
+        <a href="#audit" data-admin-page="audit">变更记录</a>
+      </nav>
+      <div class="sidebar-note"><strong>独立开发者权限</strong><p>宿主用户在助手中管理自己的会话、上下文和用量。</p><p>新任务使用当前配置，已有任务保留其固定版本。</p></div>
     </aside>
 
     <main>
-      <section class="intro" aria-labelledby="page-title">
+      <h1 id="page-title" class="sr-only">开发者控制台</h1>
+      <section id="connection-panel" class="intro" aria-labelledby="connection-panel-title">
         <div>
-          <h1 id="page-title">让能力接入有迹可循</h1>
-          <p>供开发者配置模型、能力和授权。宿主用户在助手中管理自己的会话、任务与用量。</p>
+          <h2 id="connection-panel-title">连接管理服务</h2>
+          <p>使用独立开发者管理密钥。宿主登录不授予框架管理权限。</p>
         </div>
         <form id="connect-form" class="connect-form">
           <label for="admin-key">开发者管理密钥</label>
@@ -41,13 +46,13 @@
             <input id="admin-key" type="password" autocomplete="off" spellcheck="false" placeholder="输入管理 API 密钥" required>
             <button type="submit" class="button primary">连接</button>
           </div>
-          <small>使用独立管理密钥连接；宿主登录不授予框架管理权限。密钥仅保存在当前页面内存中。</small>
+          <small>密钥仅保存在当前页面内存中，刷新页面后需要重新连接。</small>
         </form>
       </section>
 
       <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
 
-      <section id="releases" class="section" aria-labelledby="releases-title">
+      <section id="releases" class="section" data-admin-panel aria-labelledby="releases-title" hidden>
         <div class="section-heading">
           <div><h2 id="releases-title">版本目录</h2><p>每次发布都有固定内容哈希；启用或回滚只改变新任务的默认版本。</p></div>
           <button id="refresh" class="button secondary" type="button">刷新</button>
@@ -61,12 +66,15 @@
         <p id="release-feedback" class="feedback inline-feedback" role="status" aria-live="polite"></p>
       </section>
 
-      <section id="models" class="section" aria-labelledby="models-title">
+      <section id="models" class="section" data-admin-panel aria-labelledby="models-title">
         <div class="section-heading"><div><h2 id="models-title">模型配置</h2><p>选择模型服务和推理参数，分别用于业务决策与记忆提取。保存后用于新任务，已有任务保留原配置。</p></div><button id="models-reload" class="button secondary" type="button">重新读取</button></div>
-        <p id="models-status" role="status">连接管理服务后读取配置。</p>
-        <div id="models-editor" class="two-column" hidden>
+        <div id="models-editor" hidden>
+          <div class="model-tabs" role="tablist" aria-label="模型配置视图">
+            <button id="model-services-tab" type="button" role="tab" aria-selected="true" aria-controls="model-services-view" data-model-view="services">模型服务</button>
+            <button id="model-purposes-tab" type="button" role="tab" aria-selected="false" aria-controls="model-purposes-view" tabindex="-1" data-model-view="purposes">用途分配</button>
+          </div>
+          <div id="model-services-view" role="tabpanel" aria-labelledby="model-services-tab">
           <form id="model-profile-form" class="form-panel">
-            <h3>模型服务与参数</h3>
             <label for="model-profile-list">编辑配置</label><select id="model-profile-list"><option value="">添加模型配置</option></select>
             <div class="form-grid"><div><label for="model-profile-id">配置名称</label><input id="model-profile-id" type="text" required placeholder="business"></div><div><label for="model-api-type">API 接口</label><select id="model-api-type"><option value="compatible_chat">通用 Chat Completions</option><option value="openai_chat">OpenAI Chat Completions</option><option value="deepseek_chat">DeepSeek Chat Completions</option></select></div></div>
             <label for="model-name">模型名称</label><input id="model-name" type="text" required placeholder="服务提供的模型 ID">
@@ -84,23 +92,30 @@
             </details>
             <div class="actions"><button class="button secondary" type="submit">应用到配置草稿</button><button id="model-remove" class="button danger" type="button">移除此配置</button></div>
           </form>
-          <div class="form-panel model-selection-panel">
-            <h3>按用途选择</h3>
+          <details class="model-validation">
+            <summary>验证结构化输出</summary><p>对草稿中所选模型发送一条合成请求，会产生模型调用费用。不会执行业务动作。验证通过只代表当前样本符合协议。</p>
+            <label for="model-check-purpose">验证用途</label><select id="model-check-purpose"><option value="decision">业务决策</option><option value="memory_extraction">记忆提取</option></select>
+            <div class="actions"><button id="models-check" class="button secondary" type="button">验证当前编辑的模型</button></div>
+            <div id="model-check-result" aria-live="polite"></div>
+          </details>
+          </div>
+          <div id="model-purposes-view" class="form-panel model-selection-panel" role="tabpanel" aria-labelledby="model-purposes-tab" hidden>
+            <h3>按用途选择模型</h3>
+            <p>默认模型与用途选择一起保存。用途未指定时使用默认配置。</p>
             <label for="model-default">默认模型配置</label><select id="model-default"></select>
             <label for="model-decision">业务决策</label><select id="model-decision"></select>
             <label for="model-memory">记忆提取</label><select id="model-memory"></select>
             <p>记忆提取可以选择较小推理预算。业务决策需结合真实任务、审批和业务状态验收选择参数。</p>
-            <div class="actions"><button id="models-save" class="button primary" type="button">保存全部配置</button></div>
-            <h3>验证结构化输出</h3><p>对草稿中所选模型发送一条合成请求，会产生模型调用费用。不会执行业务动作。验证通过只代表当前样本符合协议。</p>
-            <label for="model-check-purpose">验证用途</label><select id="model-check-purpose"><option value="decision">业务决策</option><option value="memory_extraction">记忆提取</option></select>
-            <div class="actions"><button id="models-check" class="button secondary" type="button">验证当前编辑的模型</button></div>
           </div>
         </div>
-        <div id="model-check-result" aria-live="polite"></div>
-        <p id="models-feedback" class="feedback inline-feedback" role="status" aria-live="polite"></p>
+        <div class="section-save model-save">
+          <p id="models-status" role="status">连接管理服务后读取配置。</p>
+          <button id="models-save" class="button primary" type="button" disabled>保存全部配置</button>
+          <p id="models-feedback" class="feedback inline-feedback" role="status" aria-live="polite"></p>
+        </div>
       </section>
 
-      <section id="publish" class="section" aria-labelledby="publish-title">
+      <section id="publish" class="section" data-admin-panel aria-labelledby="publish-title" hidden>
         <div class="section-heading"><div><h2 id="publish-title">分步编辑能力包</h2><p>先保存草稿，逐步补齐连接、契约和规则。Web 与 CLI 共用草稿，发布后再启用和授权。</p></div></div>
         <div class="draft-toolbar">
           <div><label for="draft-list">继续编辑已有草稿</label><select id="draft-list"><option value="">连接后选择草稿</option></select></div>
@@ -198,12 +213,11 @@
             </div>
             <details class="advanced"><summary>查看 / 编辑完整清单 JSON</summary><label for="manifest-editor">完整清单</label><textarea id="manifest-editor" rows="15" spellcheck="false"></textarea><button id="apply-json" class="button secondary" type="button">应用 JSON 到草稿</button><small>应用会替换当前编辑内容；已有技能正文保留，发布前检查引用是否一致。</small></details>
           </section>
-          <div class="draft-footer"><button id="save-draft" class="button primary" type="button">保存草稿</button><button id="next-step" class="button secondary" type="button">保存并下一步</button><span id="draft-progress">尚未创建草稿</span></div>
-          <p id="publish-feedback" class="feedback inline-feedback" role="status" aria-live="polite"></p>
+          <div class="draft-footer section-save"><button id="save-draft" class="button primary" type="button">保存草稿</button><button id="next-step" class="button secondary" type="button">保存并下一步</button><span id="draft-progress">尚未创建草稿</span><p id="publish-feedback" class="feedback inline-feedback" role="status" aria-live="polite"></p></div>
         </div>
       </section>
 
-      <section id="bindings" class="section" aria-labelledby="bindings-title">
+      <section id="bindings" class="section" data-admin-panel aria-labelledby="bindings-title" hidden>
         <div class="section-heading"><div><h2 id="bindings-title">连接与授权</h2><p>配置环境变量引用和当前用户的能力范围。密钥值不会进入清单或管理记录。</p></div></div>
         <div class="two-column">
           <form id="binding-form" class="form-panel">
@@ -231,7 +245,7 @@
         </div>
       </section>
 
-      <section id="diagnostics" class="section" aria-labelledby="diagnostics-title">
+      <section id="diagnostics" class="section" data-admin-panel aria-labelledby="diagnostics-title" hidden>
         <div class="section-heading"><div><h2 id="diagnostics-title">试运行与任务诊断</h2><p>使用接入用户的权限验证真实任务；执行操作会遵守能力的审批规则。</p></div></div>
         <form id="diagnostic-form" class="form-panel">
           <label for="diagnostic-key">接入用户的 API key</label><input id="diagnostic-key" type="password" autocomplete="off" required><small>仅用于本页请求，不保存到浏览器存储。管理员密钥不会代替用户权限。</small>
@@ -243,7 +257,7 @@
         </form>
       </section>
 
-      <section id="audit" class="section" aria-labelledby="audit-title">
+      <section id="audit" class="section" data-admin-panel aria-labelledby="audit-title" hidden>
         <div class="section-heading"><div><h2 id="audit-title">变更记录</h2><p>发布、启用、授权和停用的最近操作。</p></div></div>
         <div id="audit-list" class="audit-list"><p class="empty">连接后查看变更记录。</p></div>
       </section>

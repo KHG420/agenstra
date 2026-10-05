@@ -16,7 +16,7 @@
     model_memory_schema_invalid: "JSON 未满足记忆提取结构。",
   };
 
-  function installModelEditor({ api, feedback }) {
+  function installModelEditor({ api, feedback, revealProfile }) {
     const $ = id => document.getElementById(id);
     let config = null, revision = 0, editing = "", busy = false, dirty = false;
     function status(text) { $("models-status").textContent = text; }
@@ -60,6 +60,7 @@
       return value;
     }
     function applyProfile() {
+      if (!$("model-profile-form").checkValidity()) revealProfile();
       if (!$("model-profile-form").reportValidity()) throw new Error("请补齐模型配置中的必填字段。");
       const id = $("model-profile-id").value.trim();
       if (!/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/.test(id)) throw new Error("配置名称需要以英文字母开头，只能使用字母、数字、点、下划线和短横线。");
@@ -97,7 +98,7 @@
       if (busy) return; busy = true;
       const buttons = [...$("models").querySelectorAll("button")]; buttons.forEach(node => { node.disabled = true; });
       try { await fn(); } catch (error) { feedback(error.message, "error", "models-feedback"); }
-      finally { busy = false; buttons.forEach(node => { node.disabled = false; }); $("model-remove").disabled = !editing; }
+      finally { busy = false; buttons.forEach(node => { node.disabled = false; }); $("model-remove").disabled = !editing; $("models-save").disabled = !config; }
     }
     async function refresh() {
       // Global catalog refresh must not discard a model form being edited.
@@ -106,6 +107,7 @@
       $("models-editor").hidden = !data.available;
       if (!data.available) { status("当前服务使用自定义模型。部署服务使用 ModelManager 后可在这里配置。"); return; }
       config = structuredClone(data.config); revision = data.revision;
+      $("models-save").disabled = false;
       editing = config.decision_profile || config.default_profile;
       selectors(); loadProfile(editing); dirty = false;
       status(`服务端配置版本 ${revision} · 选择已保存。`);
