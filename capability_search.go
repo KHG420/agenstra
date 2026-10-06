@@ -1,6 +1,7 @@
 package agenstra
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 	"unicode"
@@ -58,11 +59,56 @@ func capabilityQueryTerms(query string, significantOnly bool) []string {
 
 func capabilitySearchText(cap CapabilityDescription) (string, string, string) {
 	fields := []string{}
-	if properties, ok := cap.InputSchema["properties"].(map[string]any); ok {
-		for field := range properties {
-			fields = append(fields, field)
+	// Search the complete input contract even when ModelView defers its schema.
+	// Union discriminators and nested parameter guidance carry operation intent.
+	var collect func(map[string]any)
+	collect = func(schema map[string]any) {
+		if description, ok := schema["description"].(string); ok {
+			fields = append(fields, description)
+		}
+		if value, ok := schema["const"].(string); ok {
+			fields = append(fields, value)
+		}
+		if values, ok := schema["enum"].([]any); ok {
+			for _, value := range values {
+				if text, ok := value.(string); ok {
+					fields = append(fields, text)
+				}
+			}
+		}
+		if properties, ok := schema["properties"].(map[string]any); ok {
+			for name, property := range properties {
+				fields = append(fields, name)
+				if child, ok := property.(map[string]any); ok {
+					collect(child)
+				}
+			}
+		}
+		for _, keyword := range []string{"anyOf", "oneOf", "allOf"} {
+			branches, _ := schema[keyword].([]any)
+			for _, branch := range branches {
+				if child, ok := branch.(map[string]any); ok {
+					collect(child)
+				}
+			}
+		}
+		for _, keyword := range []string{"items", "additionalProperties"} {
+			if child, ok := schema[keyword].(map[string]any); ok {
+				collect(child)
+			}
 		}
 	}
+	// Normalize valid JSON containers, as ModelView does: SDK providers may
+	// declare enum as []string or union branches as []JSON.
+	raw, err := json.Marshal(cap.InputSchema)
+	var schema map[string]any
+	if err == nil {
+		err = json.Unmarshal(raw, &schema)
+	}
+	if err == nil {
+		collect(schema)
+	}
+	sort.Strings(fields)
 	return strings.ToLower(cap.Name), strings.ToLower(cap.Description), strings.ToLower(strings.Join(fields, " "))
 }
 

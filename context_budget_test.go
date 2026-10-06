@@ -29,6 +29,27 @@ func TestDeferredUnionSchemaKeepsTopLevelWrapperFields(t *testing.T) {
 	}
 }
 
+func TestSelectedUnionSchemaDefersWithinContextBudget(t *testing.T) {
+	cap := CapabilityDescription{Name: "records.write", InputSchema: JSON{"anyOf": []any{
+		JSON{"properties": JSON{"operation": JSON{"const": "archive"}, "arguments": JSON{"type": "object", "description": strings.Repeat("x", 6000)}}},
+	}}}
+	runtime := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]CapabilityDescription{cap.Name: cap}}, Grants: map[string]bool{cap.Name: true}, MaxContextCapabilities: 1}
+	runtime.MaxContextCharacters = 2600 + utf8.RuneCountInString(runtime.systemPrompt())
+	state, err := runtime.NewState("Check the record contract", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet := runtime.Context(state)
+	assertContextBudget(t, packet, runtime.systemPrompt(), runtime.MaxContextCharacters)
+	if len(packet.Capabilities) != 1 {
+		t.Fatal("budget lost capability identity", packet.Capabilities)
+	}
+	view := packet.Capabilities[0]
+	if view["schema_requires_inspection"] != true || !reflect.DeepEqual(view["input_fields"], []string{"arguments", "operation"}) {
+		t.Fatal("budget lost union wrapper fields", view)
+	}
+}
+
 func (p *contextBudgetProvider) Skills() map[string]Skill { return p.skills }
 
 type contextBudgetModel func(context.Context, ContextPacket, string) (Decision, error)

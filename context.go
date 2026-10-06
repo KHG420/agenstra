@@ -104,13 +104,29 @@ func budgetContext(packet ContextPacket, state *RuntimeState, available int) Con
 		deferred := maps.Clone(view)
 		delete(deferred, "input_schema")
 		fields := []string{}
-		if properties, ok := schema["properties"].(map[string]any); ok {
-			for name := range properties {
-				fields = append(fields, name)
+		seenFields := map[string]bool{}
+		var collectFields func(map[string]any)
+		collectFields = func(input map[string]any) {
+			if properties, ok := input["properties"].(map[string]any); ok {
+				for name := range properties {
+					seenFields[name] = true
+				}
 			}
-			sort.Strings(fields)
-			fields = fields[:min(32, len(fields))]
+			for _, keyword := range []string{"anyOf", "oneOf", "allOf"} {
+				branches, _ := input[keyword].([]any)
+				for _, branch := range branches {
+					if child, ok := branch.(map[string]any); ok {
+						collectFields(child)
+					}
+				}
+			}
 		}
+		collectFields(schema)
+		for name := range seenFields {
+			fields = append(fields, name)
+		}
+		sort.Strings(fields)
+		fields = fields[:min(32, len(fields))]
 		deferred["input_fields"] = fields
 		deferred["schema_requires_inspection"] = true
 		if contextCharacters(deferred) < contextCharacters(view) {

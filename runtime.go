@@ -368,7 +368,7 @@ func (r *AgentRuntime) contextCandidate(state *RuntimeState) ContextPacket {
 		if !r.Grants[cap.Name] {
 			continue
 		}
-		v := cap.ModelView()
+		v := cap.modelView(r.MaxContextCapabilities > 0)
 		v["authorized"] = true
 		caps = append(caps, v)
 	}

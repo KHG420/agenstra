@@ -161,6 +161,12 @@ func (c CapabilityDescription) MarshalJSON() ([]byte, error) {
 
 // ModelView returns a model catalog entry with bounded input schema detail.
 func (c CapabilityDescription) ModelView() JSON {
+	return c.modelView(false)
+}
+
+// A runtime with a selected catalog can disclose complete contracts first;
+// the context budget still defers schemas when the whole packet is too large.
+func (c CapabilityDescription) modelView(fullInputSchema bool) JSON {
 	b, err := json.Marshal(c)
 	if err != nil {
 		return JSON{}
@@ -186,7 +192,7 @@ func (c CapabilityDescription) ModelView() JSON {
 	if err != nil {
 		return JSON{}
 	}
-	if utf8.RuneCount(raw) > 2000 {
+	if !fullInputSchema && utf8.RuneCount(raw) > 2000 {
 		// Union schemas declare the same top-level envelope in their branches.
 		// Keep those fields visible even when the full contract is deferred.
 		seen := map[string]bool{}

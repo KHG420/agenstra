@@ -69,6 +69,10 @@ Fact 预览计算对象和数组的结构开销以及标量替代值。整体能
 - `inspect_capability(name)` 获取完整契约，`read_skill(name)` 重新加载技能。
 - `reference_available=false` 表示引用不可继续使用；历史证据保留不等于恢复连接内 ID 或过期引用的有效性。
 
+启用 `max_context_capabilities` 后，运行先选择数量受限的授权能力，优先提供这些能力的完整输入 Schema；整份上下文预算不足时才缩略契约并保留 `schema_requires_inspection` 标记。`search_capabilities(query)` 在当前固定版本及实时授权范围内检索名称、描述和完整输入 Schema 中的字段、`const` / `enum` 字符串及参数说明，包括联合分支和嵌套参数。它只读取目录，不调用业务接口；命中能力进入下一轮目录，仍被缩略的契约通过 `inspect_capability` 展开。宿主应在模块描述中保留可执行操作名和业务词汇，避免大 Schema 延迟展开后只剩“修改”等笼统说明。空搜索结果只表示当前查询没有授权匹配，不能推断宿主不支持该操作或用户没有权限；历史回答也不能覆盖当前目录。未启用目录数量限制时，沿用原有 `ModelView` 的 2,000 字符缩略规则。
+
+这个取舍参考了 [OpenAI Tool Search](https://developers.openai.com/api/docs/guides/tools-tool-search)、[Anthropic Tool Search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool) 和 [Pydantic AI Tool Search](https://pydantic.dev/docs/ai/capabilities/tool-search/) 的按需发现机制。框架沿用已有 JSON 决策与本地搜索，不要求供应商原生工具搜索；相比 [LangChain LLM Tool Selector](https://docs.langchain.com/oss/python/langchain/middleware/built-in#llm-tool-selector)，这里无需每轮增加一次模型筛选请求。词法搜索的召回取决于宿主描述和查询词，仍须在实际模型上验收，不能把单次无匹配当成完整能力审计。
+
 全部 Fact 身份、能力目录和技能目录都必须保留；最小元数据本身超限时，运行明确失败。字符预算不代表供应商的 token 容量，模型质量、延迟和费用需要在部署方选择的模型上评估。
 
 ## 4. 长任务进度与停滞检测

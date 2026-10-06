@@ -111,6 +111,46 @@ func TestCapabilitySearchEmptyStableAndLegacy(t *testing.T) {
 	}
 }
 
+func TestCapabilitySearchFindsDeferredUnionOperationsAndNestedParameters(t *testing.T) {
+	cap := CapabilityDescription{Name: "records.write", Description: "Manage records", InputSchema: JSON{"anyOf": []JSON{
+		JSON{"properties": JSON{
+			"operation": JSON{"const": "archiveRecord"},
+			"arguments": JSON{"type": "object", "properties": JSON{"recordIDs": JSON{"type": "array", "items": JSON{"type": "string"}}}},
+		}},
+		JSON{"allOf": []JSON{JSON{"properties": JSON{
+			"operation": JSON{"enum": []string{"changeQuantity"}},
+			"arguments": JSON{"properties": JSON{"quantity": JSON{"type": "integer", "description": "调整库存数量"}, "memo": JSON{"type": "string", "description": strings.Repeat("x", 2100)}}},
+		}}}},
+	}}}
+	caps := map[string]CapabilityDescription{cap.Name: cap, "alpha.read": {Name: "alpha.read", Description: "Read unrelated data"}, "private.write": {Name: "private.write", InputSchema: cap.InputSchema}}
+	grants := map[string]bool{cap.Name: true, "alpha.read": true}
+	if cap.ModelView()["schema_requires_inspection"] != true {
+		t.Fatal("test contract must be deferred")
+	}
+	for _, query := range []string{"archiveRecord", "CHANGEQUANTITY", "recordIDs", "库存数量"} {
+		got := searchAuthorizedCapabilities(caps, grants, query, 2)
+		if len(got) != 1 || got[0] != cap.Name {
+			t.Fatalf("query %q did not discover the authorized union contract: %v", query, got)
+		}
+	}
+	r := &AgentRuntime{Provider: &coreTestProvider{caps: caps}, Grants: grants, MaxContextCapabilities: 1}
+	state, err := r.NewState("archiveRecord", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet := r.Context(state)
+	if names := capabilityNames(packet); len(names) != 1 || names[0] != cap.Name {
+		t.Fatal("initial selection lost operation match", names)
+	}
+	if _, ok := packet.Capabilities[0]["input_schema"]; !ok || packet.Capabilities[0]["schema_requires_inspection"] == true {
+		t.Fatal("selected capability was discovered without its contract", packet.Capabilities[0])
+	}
+	grants[cap.Name] = false
+	if got := searchAuthorizedCapabilities(caps, grants, "archiveRecord", 2); len(got) != 0 {
+		t.Fatal("schema search leaked a revoked capability", got)
+	}
+}
+
 func TestChineseNaturalInstructionsSelectActionsWithPrerequisite(t *testing.T) {
 	caps := map[string]CapabilityDescription{
 		"alpha.delete":     {Name: "alpha.delete", Description: "删除人员"},
