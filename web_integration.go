@@ -63,7 +63,7 @@ type compiledFrontend struct {
 }
 
 func compileFrontend(p FrontendProfile) (*compiledFrontend, error) {
-	if p.Schema != "agenstra.frontend-profile.v1" || len(p.Version) < 1 || len(p.Version) > 80 || len(p.HandlerVersion) < 1 || len(p.HandlerVersion) > 80 || len(p.Actions) > 100 {
+	if p.Schema != "agenstra.frontend-profile.v1" || len(p.Version) < 1 || len(p.Version) > 80 || len(p.HandlerVersion) < 1 || len(p.HandlerVersion) > 80 || len(p.Actions) > 200 {
 		return nil, errors.New("invalid frontend profile")
 	}
 	c := &compiledFrontend{profile: p, inputs: map[string]*jsonschema.Schema{}, outputs: map[string]*jsonschema.Schema{}}

@@ -49,7 +49,7 @@ function checkSchema(schema, label) {
 // remains responsible for compiling and validating complete JSON Schemas.
 function checkProfile(profile) {
   knownFields(profile, ["schema", "version", "handler_version", "context_schema", "actions"], "profile");
-  if (profile.schema !== "agenstra.frontend-profile.v1" || !boundedString(profile.version, 80) || !boundedString(profile.handler_version, 80) || !Array.isArray(profile.actions) || profile.actions.length > 100) throw new Error("Invalid frontend profile schema, version, handler_version or actions");
+  if (profile.schema !== "agenstra.frontend-profile.v1" || !boundedString(profile.version, 80) || !boundedString(profile.handler_version, 80) || !Array.isArray(profile.actions) || profile.actions.length > 200) throw new Error("Invalid frontend profile schema, version, handler_version or actions");
   checkSchema(profile.context_schema, "context_schema");
   const seen = new Set();
   for (const action of profile.actions) {

@@ -15,7 +15,7 @@ func (w *WebIntegration) browserRegistration(ctx context.Context, owner, integra
 	if _, e := w.Host.policy(ctx, owner, integration, true); e != nil {
 		return nil, e
 	}
-	if handlerVersion != p.profile.HandlerVersion || len(handlers) > 100 {
+	if handlerVersion != p.profile.HandlerVersion || len(handlers) > 200 {
 		return nil, hostError("browser_handler_version_mismatch")
 	}
 	names := map[string]bool{}

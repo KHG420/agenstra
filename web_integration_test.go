@@ -29,6 +29,46 @@ type webFixture struct {
 func frontendTestProfile(approval bool) FrontendProfile {
 	return FrontendProfile{Schema: "agenstra.frontend-profile.v1", Version: "1", HandlerVersion: "1", ContextSchema: JSON{"type": "object"}, Actions: []FrontendAction{{Name: "ui.navigate", Description: "Open a page", InputSchema: JSON{"type": "object", "properties": JSON{"page": JSON{"type": "string"}}, "required": []any{"page"}, "additionalProperties": false}, OutputSchema: JSON{"type": "object", "properties": JSON{"page": JSON{"type": "string"}}, "required": []any{"page"}, "additionalProperties": false}, Effect: "write", ApprovalRequired: approval, TimeoutSeconds: 5}}}
 }
+
+func TestFrontendLargeCatalogPreservesApprovalProperties(t *testing.T) {
+	profile := frontendTestProfile(false)
+	base := profile.Actions[0]
+	profile.Actions = make([]FrontendAction, 200)
+	for i := range profile.Actions {
+		action := base
+		action.Name = fmt.Sprintf("ui.action_%d", i)
+		if i%2 == 1 {
+			action.Effect = "destructive"
+			action.ApprovalRequired = true
+		}
+		profile.Actions[i] = action
+	}
+	compiled, err := compileFrontend(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, action := range compiled.profile.Actions {
+		if action.ApprovalRequired != (i%2 == 1) {
+			t.Fatalf("action %d approval changed", i)
+		}
+	}
+	f := newWebFixture(t, &hostModel{}, false)
+	f.w.profiles["records-web"] = compiled
+	handlers := make([]string, len(profile.Actions))
+	for i, action := range profile.Actions {
+		handlers[i] = action.Name
+	}
+	if _, _, err := f.w.CreateBrowserSession(t.Context(), "alice", "records-web", "1", handlers); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.w.CreateBrowserSession(t.Context(), "alice", "records-web", "1", append(handlers, "ui.overflow")); ErrorCode(err) != "browser_handler_version_mismatch" {
+		t.Fatalf("oversized handler registration: %v", err)
+	}
+	profile.Actions = append(profile.Actions, FrontendAction{Name: "ui.overflow"})
+	if _, err := compileFrontend(profile); err == nil {
+		t.Fatal("oversized profile accepted")
+	}
+}
 func newWebFixture(t *testing.T, model *hostModel, approval bool) *webFixture {
 	t.Helper()
 	dir := t.TempDir()
