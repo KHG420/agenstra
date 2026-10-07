@@ -85,6 +85,9 @@ func TestHTTPJSONDecisionModelOutputFraming(t *testing.T) {
 		{"array", "```json\n[]\n```", "model_decision_schema_invalid"},
 		{"unknown field", "```json\n{\"kind\":\"final\",\"answer_markdown\":\"ok\",\"unexpected\":true}\n```", "model_decision_schema_invalid"},
 		{"invalid kind", "```json\n{\"kind\":\"run\"}\n```", "model_decision_schema_invalid"},
+		{"tools alias", `{"schema":"agenstra.decision.v1","kind":"tool_batch","tools":[{"name":"notice.create","input":{}}]}`, "model_decision_schema_invalid"},
+		{"decision alias", `{"decision":"tool_batch","calls":[{"name":"notice.create","arguments":{}}]}`, "model_decision_schema_invalid"},
+		{"call name alias", `{"kind":"tool_batch","calls":[{"call_ref":"publish","name":"notice.create","arguments":{},"reason":"Publish the notice"}]}`, "model_decision_schema_invalid"},
 		{"duplicate kind", `{"kind":"final","kind":"tool_batch","calls":[]}`, "model_output_duplicate_key"},
 		{"escaped duplicate", `{"kind":"final","k\u0069nd":"tool_batch","calls":[]}`, "model_output_duplicate_key"},
 		{"nested duplicate", "```json\n" + `{"kind":"tool_batch","calls":[{"call_ref":"publish","capability":"notice.create","arguments":{"operation":"create","arguments":{"request":{"status":"draft","status":"active"}}}}]}` + "\n```", "model_output_duplicate_key"},
@@ -135,6 +138,9 @@ func TestRuntimeJSONRecoveryIsBoundedBeforeExecution(t *testing.T) {
 		{"non JSON", "Here is the result: " + valid, "still not JSON", "no comments, trailing text, or multiple values", false},
 		{"duplicate keys", `{"kind":"final","kind":"tool_batch","calls":[]}`, `{"kind":"final","kind":"tool_batch","calls":[]}`, "Each object key must occur only once", false},
 		{"corrected output", "invalid JSON", "```json\n" + valid + "\n```", "no comments, trailing text, or multiple values", true},
+		{"corrected tools alias", `{"schema":"agenstra.decision.v1","kind":"tool_batch","tools":[{"name":"notice.create","input":{}}]}`, valid, "Decision object field names (these are literal JSON keys):", true},
+		{"corrected decision alias", `{"decision":"tool_batch","calls":[{"name":"notice.create","arguments":{}}]}`, valid, "Decision object field names (these are literal JSON keys):", true},
+		{"repeated tools alias", `{"kind":"tool_batch","tools":[{"name":"notice.create","input":{}}]}`, `{"kind":"tool_batch","tools":[{"name":"notice.create","input":{}}]}`, "Decision object field names (these are literal JSON keys):", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests atomic.Int32
@@ -145,8 +151,14 @@ func TestRuntimeJSONRecoveryIsBoundedBeforeExecution(t *testing.T) {
 					return
 				}
 				var input struct{ Messages []struct{ Content string } }
-				if err := json.NewDecoder(r.Body).Decode(&input); err != nil || len(input.Messages) != 2 || !strings.Contains(input.Messages[0].Content, tc.correction) {
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil || len(input.Messages) != 2 {
 					t.Error("retry did not explain the rejection", err, input)
+				} else {
+					feedback := input.Messages[0].Content
+					start := strings.LastIndex(feedback, "Your previous response")
+					if start < 0 || !strings.Contains(feedback[start:], tc.correction) {
+						t.Error("retry feedback did not explain the rejected decision shape")
+					}
 				}
 				memoryModelReply(t, w, tc.second)
 			}))

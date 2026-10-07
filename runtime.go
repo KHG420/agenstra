@@ -749,7 +749,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			case "model_output_invalid_json":
 				feedback += " The JSON must be complete, with no comments, trailing text, or multiple values."
 			case "model_decision_schema_invalid":
-				feedback += " Include all required fields and only fields permitted for the selected decision kind."
+				feedback += " Include all required fields and only fields permitted for the selected decision kind.\n" + decisionObjectShapePrompt
 			}
 		}
 	}
