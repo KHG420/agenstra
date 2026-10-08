@@ -199,6 +199,34 @@ func TestCapabilitySearchFindsDeferredUnionOperationsAndNestedParameters(t *test
 	}
 }
 
+func TestCapabilitySearchDoesNotLetBroadSchemaFieldsDisplaceNamedSubjects(t *testing.T) {
+	caps := map[string]CapabilityDescription{
+		"alpha.bulk_read": {Name: "alpha.bulk_read", Description: "Manage unrelated records", InputSchema: JSON{"type": "object", "properties": JSON{
+			"today": JSON{"type": "string"}, "usage": JSON{"type": "string"}, "statistics": JSON{"type": "string"}, "batch": JSON{"type": "string"},
+			"system": JSON{"type": "string"}, "version": JSON{"type": "string"}, "host": JSON{"type": "string"},
+		}}},
+		"zeta.usage_read":  {Name: "zeta.usage_read", Description: "Read current user usage", InputSchema: JSON{"type": "object", "description": "Get usage statistics"}},
+		"zeta.system_read": {Name: "zeta.system_read", Description: "Read system version", InputSchema: JSON{"type": "object", "description": "Get current version"}},
+	}
+	grants := map[string]bool{"alpha.bulk_read": true, "zeta.usage_read": true, "zeta.system_read": true}
+	for _, tc := range []struct{ query, want string }{
+		{"today usage statistics batch", "zeta.usage_read"},
+		{"system version host", "zeta.system_read"},
+	} {
+		if got := searchAuthorizedCapabilities(caps, grants, tc.query, 1); len(got) != 1 || got[0] != tc.want {
+			t.Fatalf("subject query %q displaced by incidental schema fields: %v", tc.query, got)
+		}
+	}
+	// Field-only searches still discover a contract without widening grants.
+	if got := searchAuthorizedCapabilities(caps, grants, "batch", 1); len(got) != 1 || got[0] != "alpha.bulk_read" {
+		t.Fatal("field search lost the authorized contract", got)
+	}
+	grants["alpha.bulk_read"] = false
+	if got := searchAuthorizedCapabilities(caps, grants, "batch", 1); len(got) != 0 {
+		t.Fatal("field search exposed a revoked contract", got)
+	}
+}
+
 func TestChineseNaturalInstructionsSelectActionsWithPrerequisite(t *testing.T) {
 	caps := map[string]CapabilityDescription{
 		"alpha.delete":     {Name: "alpha.delete", Description: "删除人员"},
