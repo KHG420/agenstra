@@ -40,7 +40,11 @@ func decisionOutputTools() []any {
 		object(JSON{"type": JSON{"type": "string", "enum": []string{"date"}}}, "type"),
 		object(JSON{"type": JSON{"type": "string", "enum": []string{"enum"}}, "enum": JSON{"type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": JSON{"type": "string", "minLength": 1, "maxLength": 200}}}, "type", "enum"),
 	}}
-	tools := []any{}
+	tools := []any{JSON{"type": "function", "function": JSON{
+		"name":        "submit_tool_call",
+		"description": "Submit exactly one capability call as a tool_batch decision. Structured output only; does not execute capabilities or grant permission.",
+		"parameters":  call,
+	}}}
 	add := func(kind string, properties JSON, required ...string) {
 		tools = append(tools, JSON{"type": "function", "function": JSON{
 			"name":        "submit_" + kind,
@@ -72,15 +76,17 @@ func decisionOutputToolPrompt(prompt string) string {
 	for _, line := range lines {
 		if strings.HasPrefix(line, "Return one JSON object with schema") ||
 			strings.HasPrefix(line, "Skill: {") ||
-			strings.HasPrefix(line, "Return exactly one raw JSON object.") {
+			strings.HasPrefix(line, "Return exactly one raw JSON object.") || line == decisionObjectShapePrompt {
 			continue
 		}
 		line = strings.ReplaceAll(line, "Return exactly one raw JSON object without Markdown or code fences.", "Submit exactly one matching decision output tool.")
 		line = strings.ReplaceAll(line, "agenstra.decision.v1 JSON decision", "typed agenstra.decision.v1 decision")
+		line = strings.ReplaceAll(line, "no tools or other decision kinds", "no capability calls or other decision kinds")
+		line = strings.ReplaceAll(line, "propose any tool call", "propose any capability call")
 		retained = append(retained, line)
 	}
 	bindings := decisionOutputFieldBindings()
-	return strings.Join(retained, "\n") + "\nSubmit exactly one typed decision by calling the matching submit_<kind> output tool. The selected tool name identifies the decision kind. Arguments contain only the fields declared by that tool, with native JSON arrays and objects; omit schema and kind. The adapter supplies the fixed schema and kind from the registered tool name. This replaces content-only JSON output. Output tools do not execute business operations; tool_batch is a proposed decision that the runtime will separately validate and authorize.\nUse the exact output-tool field names and native types below. Do not substitute aliases such as answer, response, content or text for answer_markdown.\n" + strings.Join(bindings, "\n")
+	return strings.Join(retained, "\n") + "\nSubmit exactly one typed decision by calling the matching submit_<kind> output tool. The response must contain exactly one tool_calls entry, including for read_skill, inspect_capability and inspect_fact; choose one inspection and wait for its result before the next decision. The selected tool name identifies the decision kind. Arguments contain only the fields declared by that tool, with native JSON arrays and objects; omit schema and kind. The adapter supplies the fixed schema and kind from the registered tool name. This replaces content-only JSON output. Output tools do not execute business operations; tool_batch is a proposed decision that the runtime will separately validate and authorize.\nFor exactly one capability call, prefer submit_tool_call with call_ref, capability, arguments and reason directly as native fields. Do not wrap these fields in calls. The adapter constructs the one-item tool_batch. Use submit_tool_batch for multiple independent calls; calls must remain a native JSON array. In either tool, arguments must match the selected capability's input_schema, preserving all required nested objects. call_ref must match ^[a-z][a-z0-9-]{0,63}$; use a new lowercase local reference such as read-1. Preserve exact capability and operation names in their own fields.\nUse the exact output-tool field names and native types below. Do not substitute aliases such as answer, response, content or text for answer_markdown.\n" + strings.Join(bindings, "\n")
 }
 
 func decisionOutputFieldBindings() []string {
@@ -115,6 +121,8 @@ func decisionOutputToolBody(calls []decisionOutputToolCall) ([]byte, string) {
 	}
 	kind := strings.TrimPrefix(calls[0].Function.Name, "submit_")
 	switch calls[0].Function.Name {
+	case "submit_tool_call":
+		kind = "tool_batch"
 	case "submit_tool_batch", "submit_final", "submit_request_input", "submit_search_capabilities", "submit_read_skill", "submit_inspect_capability", "submit_inspect_fact":
 	default:
 		return nil, "model_output_tool_calls_invalid"
@@ -126,6 +134,13 @@ func decisionOutputToolBody(calls []decisionOutputToolCall) ([]byte, string) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil || fields["kind"] != nil || fields["schema"] != nil {
 		return nil, "model_decision_schema_invalid"
+	}
+	if calls[0].Function.Name == "submit_tool_call" {
+		batch, err := json.Marshal([]map[string]json.RawMessage{fields})
+		if err != nil {
+			return nil, "model_decision_schema_invalid"
+		}
+		fields = map[string]json.RawMessage{"calls": batch}
 	}
 	fields["schema"] = json.RawMessage(`"agenstra.decision.v1"`)
 	encodedKind, err := json.Marshal(kind)

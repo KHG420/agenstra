@@ -63,6 +63,10 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 宿主沿用已有业务能力绑定和接线；部署管理员在框架开发者控制台的模型配置中保存输出策略即可。实际业务输入仍按该能力的 `input_schema` 校验，合法的决策输出不能代替业务参数或任务结果验收。
 
+单次能力调用优先通过 `submit_tool_call` 直接提交 `call_ref`、`capability`、`arguments`、`reason`；适配器将对象包装为原有 `tool_batch` 的一项，减少单次调用的数组嵌套。多个独立调用仍使用 `submit_tool_batch` 的原生 `calls` 数组。两者都只提出决策，业务参数、授权、审批和真实回执继续由运行内核校验。字符串形式的对象或数组不会被自动转换；减少包装不能保证模型遵守业务契约。对象输出工具的参考实现见 [Pydantic AI](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_output.py#L1546-L1578)。
+
+网关仍可能在 `parallel_tool_calls=false` 时返回多个输出工具。框架拒绝整个响应，在原有纠正次数与预算内明确反馈每轮只能有一个输出工具，包括检查 Fact 时也须逐轮进行，不选择其中一个执行或自动合并。类型化输出的纠正提示移除旧内容 JSON 示例，保留字段、引用和完成复核约束。明确反馈多个结构化输出的参考实现见 [LangChain](https://github.com/langchain-ai/langchain/blob/007cc15b713cea17df63ba603aca6c7b27086638/libs/langchain_v1/langchain/agents/factory.py#L1287-L1308)。
+
 可选限制包括 `max_output_tokens`、`token_limit_field`、`timeout_seconds`、`max_attempts`、`context_window_tokens`、`max_input_tokens`、`protocol_reserve_tokens`。最大尝试次数包含首次请求，1 表示不做传输重试。配置的超时及 token 上限仍受任务冻结的部署限制、总预算和截止时间约束；选大模型不能扩大原有运行预算。已知上下文窗口应配合明确的输出预留。
 
 依据：[OpenAI Chat Completions API](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)、[DeepSeek 推理模式](https://api-docs.deepseek.com/guides/thinking_mode)。不同模型的实际参数支持可以不同，接口类型本身不保证模型兼容。

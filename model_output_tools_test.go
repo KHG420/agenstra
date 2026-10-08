@@ -26,6 +26,16 @@ func TestDecisionOutputToolsRejectMalformedOutput(t *testing.T) {
 		{"truncated", "submit_final", valid, "", "length", "model_output_truncated", 1},
 		{"unknown field", "submit_final", `{"answer_markdown":"ok","fact_ids":[],"execute":true}`, "", "tool_calls", "model_decision_invalid", 1},
 		{"bad ref", "submit_tool_batch", `{"calls":[{"call_ref":"Get-1","capability":"x","arguments":{},"reason":"read"}]}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"stringified batch", "submit_tool_batch", `{"calls":"[{\"call_ref\":\"read-1\",\"capability\":\"x\",\"arguments\":{},\"reason\":\"read\"}]"}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single bad ref", "submit_tool_call", `{"call_ref":"Get-1","capability":"x","arguments":{},"reason":"read"}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single stringified arguments", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":"{}","reason":"read"}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single unknown field", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read","execute":true}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single schema override", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read","schema":"agenstra.decision.v1"}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single kind override", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read","kind":"final"}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single duplicate key", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read","reason":"write"}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single batch wrapper", "submit_tool_call", `{"calls":[{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read"}]}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single multiple outputs", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read"}`, "", "tool_calls", "model_decision_invalid", 2},
+		{"single truncated", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read"}`, "", "length", "model_output_truncated", 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -36,7 +46,7 @@ func TestDecisionOutputToolsRejectMalformedOutput(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 					t.Error(err)
 				}
-				if payload["response_format"] != nil || payload["tool_choice"] != "required" || len(payload["tools"].([]any)) != 7 {
+				if payload["response_format"] != nil || payload["tool_choice"] != "required" || len(payload["tools"].([]any)) != 8 {
 					t.Error("incorrect output tool request")
 				}
 				calls := []any{}
@@ -62,6 +72,56 @@ func TestDecisionOutputToolsRejectMalformedOutput(t *testing.T) {
 			}
 			if requests != 1 {
 				t.Fatalf("unexpected retry: %d", requests)
+			}
+		})
+	}
+}
+
+func TestDecisionOutputToolsPreserveSingleAndBatchCalls(t *testing.T) {
+	call := `{"call_ref":"read-1","capability":"pack.read","arguments":{"operation":"GetByID","arguments":{"id":2,"values":[true,"line 1\nline 2",null]}},"reason":"Read the requested object"}`
+	for _, name := range []string{"submit_tool_call", "submit_tool_batch"} {
+		t.Run(name, func(t *testing.T) {
+			arguments := call
+			if name == "submit_tool_batch" {
+				arguments = `{"calls":[` + call + `,` + strings.Replace(call, "read-1", "read-2", 1) + `]}`
+			}
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if err := json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{
+					"message":       JSON{"tool_calls": []any{JSON{"type": "function", "function": JSON{"name": name, "arguments": arguments}}}},
+					"finish_reason": "tool_calls",
+				}}}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer upstream.Close()
+			m, err := NewHTTPJSONDecisionModel("compatible-test-model", upstream.URL, "test-key", time.Second, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m.DecisionOutputMode = "output_tools"
+			decision, err := m.Decide(context.Background(), ContextPacket{Schema: "agenstra.context.v1"}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantBody := `{"schema":"agenstra.decision.v1","kind":"tool_batch","calls":[` + call + `]}`
+			if name == "submit_tool_batch" {
+				wantBody = `{"schema":"agenstra.decision.v1","kind":"tool_batch","calls":[` + call + `,` + strings.Replace(call, "read-1", "read-2", 1) + `]}`
+			}
+			want, err := strictDecision([]byte(wantBody))
+			if err != nil {
+				t.Fatal(err)
+			}
+			decision.ModelCall = nil
+			gotJSON, err := CanonicalJSON(decision)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantJSON, err := CanonicalJSON(want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(gotJSON) != string(wantJSON) {
+				t.Fatalf("got %s, want %s", gotJSON, wantJSON)
 			}
 		})
 	}
@@ -115,6 +175,44 @@ func TestDecisionOutputToolsMeasurementAndMemoryIsolation(t *testing.T) {
 	}
 }
 
+func TestDecisionOutputToolsRecoveryRejectsMultipleInspectionsBeforeExecution(t *testing.T) {
+	requests := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var payload JSON
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		function := JSON{"name": "submit_inspect_fact", "arguments": `{"fact_id":"12345678-1234-1234-1234-123456789012","path":["data"]}`}
+		calls := []any{JSON{"type": "function", "function": function}, JSON{"type": "function", "function": function}}
+		if requests == 2 {
+			prompt := payload["messages"].([]any)[0].(map[string]any)["content"].(string)
+			if !strings.Contains(prompt, "response did not contain exactly one valid registered output tool") || !strings.Contains(prompt, "never return several output functions") {
+				t.Error("missing actionable output-count feedback", prompt)
+			}
+			calls = []any{JSON{"type": "function", "function": JSON{"name": "submit_final", "arguments": `{"answer_markdown":"hello","fact_ids":[]}`}}}
+		}
+		if err := json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{"message": JSON{"tool_calls": calls}, "finish_reason": "tool_calls"}}}); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer upstream.Close()
+	m, err := NewHTTPJSONDecisionModel("compatible-test-model", upstream.URL, "test-key", time.Second, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.DecisionOutputMode = "output_tools"
+	provider := &coreTestProvider{caps: map[string]CapabilityDescription{}}
+	runtime := &AgentRuntime{Provider: provider, Model: m}
+	result, err := runtime.Run(t.Context(), "hello")
+	if err != nil || result.Status != "completed" || requests != 2 || provider.called != 0 || len(result.Observations) != 0 || len(result.ModelCalls) != 2 {
+		t.Fatalf("result=%+v requests=%d invoked=%d err=%v", result, requests, provider.called, err)
+	}
+	if result.ModelCalls[0].FormatError != "model_output_tool_calls_invalid" || !result.ModelCalls[1].FormatRecovery || result.ModelUsage.FormatRecoveryRequests != 1 {
+		t.Fatal("output-count failure or recovery not accounted for", result.ModelCalls, result.ModelUsage)
+	}
+}
+
 func TestDecisionOutputToolPromptRetainsRuntimeRules(t *testing.T) {
 	prompt := "Keep authorization and evidence.\nReturn one JSON object with schema agenstra.decision.v1. Tool example: {}.\nSkill: {}\nReturn exactly one raw JSON object. Do not wrap it in Markdown."
 	got := decisionOutputToolPrompt(prompt)
@@ -124,9 +222,9 @@ func TestDecisionOutputToolPromptRetainsRuntimeRules(t *testing.T) {
 }
 
 func TestDecisionOutputToolsRecoveryKeepsConstraintsWithoutConflictingFormat(t *testing.T) {
-	prompt := "Your previous review was invalid. Return exactly one final agenstra.decision.v1 JSON decision; no tools or other decision kinds are allowed during completion review.\nYour previous decision was invalid: tool_batch.calls has at most 4 items. Return one valid agenstra.decision.v1 JSON decision with no more than 4 calls.\nYour previous response was not a valid agenstra.decision.v1 JSON decision. Return exactly one raw JSON object without Markdown or code fences. Preserve the capability's input structure."
+	prompt := "Your previous review was invalid. Return exactly one final agenstra.decision.v1 JSON decision; no tools or other decision kinds are allowed during completion review.\nYour previous decision was invalid: tool_batch.calls has at most 4 items. Return one valid agenstra.decision.v1 JSON decision with no more than 4 calls.\nYour previous response was not a valid agenstra.decision.v1 JSON decision. Return exactly one raw JSON object without Markdown or code fences. Preserve the capability's input structure.\n" + decisionObjectShapePrompt
 	got := decisionOutputToolPrompt(prompt)
-	if strings.Contains(got, "JSON decision") || strings.Contains(got, "Return exactly one raw JSON") || !strings.Contains(got, "no more than 4 calls") || !strings.Contains(got, "no tools or other decision kinds") || !strings.Contains(got, "Preserve the capability's input structure") {
+	if strings.Contains(got, "JSON decision") || strings.Contains(got, "Return exactly one raw JSON") || strings.Contains(got, decisionObjectShapePrompt) || !strings.Contains(got, "no more than 4 calls") || !strings.Contains(got, "no capability calls or other decision kinds") || !strings.Contains(got, "Preserve the capability's input structure") || !strings.Contains(got, "new lowercase local reference") {
 		t.Fatal(got)
 	}
 }
