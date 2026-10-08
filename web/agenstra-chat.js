@@ -1,4 +1,6 @@
 /** Optional UI. Importing the headless client never loads this component. */
+import { AgenstraActionError } from "./agenstra-client.js";
+
 const labels = {
   "zh-CN": { title: "Agenstra 助手", subtitle: "查询数据、执行操作，并同步当前页面", chatOnly: "通过已授权的系统能力完成任务", empty: "从一个具体任务开始", hint: "描述要查询的信息或要执行的操作。", placeholder: "描述你想完成的操作…", choose: "请选择…", send: "发送", queue: "添加任务", stop: "停止任务", approve: "批准操作", reject: "拒绝操作", approval: "执行前请核对操作和参数", input: "请补充以下信息", invalidInput: "请按提示填写有效信息。", invalidChoice: "请选择列表中的一个选项。", invalidDate: "请输入有效日期。", unknown: "操作结果尚未确认。核对实际页面后再继续；也可以停止此任务。", unknownStopped: "操作结果仍待核对。核对只更新结果，任务仍保持停止。", reconcile: "读取已确认的回执", connected: "已连接", disconnected: "连接中断，正在重试", loading: "正在连接系统…", error: "请求未完成，请检查连接或重试。", retry: "重试发送", statuses: { queued: "等待执行", creating: "准备任务", active: "正在执行", cancelling: "正在停止", completed: "已完成", failed: "未完成", cancelled: "已停止", needs_input: "等待补充信息", needs_approval: "等待确认", waiting: "等待操作结果", needs_reconciliation: "等待核对", needs_authorization: "需要恢复授权" } },
   en: { title: "Agenstra assistant", subtitle: "Query data, take action, and update this page", chatOnly: "Complete tasks using authorized system capabilities", empty: "Start with a specific task", hint: "Describe the information you need or the action you want to take.", placeholder: "Describe what you want to do…", choose: "Choose…", send: "Send", queue: "Queue task", stop: "Stop task", approve: "Approve action", reject: "Reject action", approval: "Review the action and arguments before proceeding", input: "More information is needed", invalidInput: "Enter a value that matches the request.", invalidChoice: "Choose an option from the list.", invalidDate: "Enter a valid date.", unknown: "The action outcome is unconfirmed. Check the actual page before continuing, or stop this task.", unknownStopped: "The operation result still needs verification. Verification only updates the result; this task stays stopped.", reconcile: "Read the verified receipt", connected: "Connected", disconnected: "Disconnected. Retrying…", loading: "Connecting to your system…", error: "The request did not complete. Check the connection or retry.", retry: "Retry send", statuses: { queued: "Queued", creating: "Preparing", active: "Working", cancelling: "Stopping", completed: "Completed", failed: "Incomplete", cancelled: "Stopped", needs_input: "Waiting for input", needs_approval: "Waiting for approval", waiting: "Waiting for the result", needs_reconciliation: "Needs review", needs_authorization: "Authorization needed" } }
@@ -138,6 +140,9 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
   activeInput() { return this.choice.hidden ? this.dateInput.hidden ? this.input : this.dateInput : this.choice; }
   showError(error) {
     if (error?.name === "AbortError") return;
+    // Confirmed tool failures belong to the task's durable receipt and answer.
+    // They do not mean the message submission or browser connection failed.
+    if (error instanceof AgenstraActionError) return;
     const invalid = error?.status === 422 || error?.code === "input_invalid";
     const type = this.awaitingInput?.runtime?.input_schema?.type;
     const hint = type === "enum" ? this.text.invalidChoice : type === "date" ? this.text.invalidDate : this.text.invalidInput;

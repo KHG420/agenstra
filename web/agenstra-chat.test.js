@@ -1,7 +1,40 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { appendAnswer, AgenstraChat } from "./agenstra-chat.js";
-import { AgenstraClient } from "./agenstra-client.js";
+import { AgenstraClient, AgenstraActionError, AgenstraError } from "./agenstra-client.js";
+
+test("a known tool failure stays in its receipt without marking the composer as failed", async t => {
+  const chat = Object.create(AgenstraChat.prototype);
+  chat.feedback = { textContent: "" };
+  chat.text = { error: "The request did not complete." };
+  const posted = [];
+  const client = new AgenstraClient({ integration: "test", storage: null, getSession: async () => "ticket", fetch: async (path, options) => {
+    const data = path.endsWith("/begin") ? { accepted: true } : path.endsWith("/result") ? { status: JSON.parse(options.body).status } : { status: "waiting" };
+    if (path.endsWith("/result")) posted.push(JSON.parse(options.body));
+    return { status: 200, ok: true, json: async () => data };
+  } });
+  t.after(() => client.destroy({ closeSession: false }));
+  client.browser = { id: "tab", generation: 1, key: "key", context_revision: 1 };
+  client.on("error", error => chat.showError(error));
+  client.registerActions({ "ui.read": ({ id }) => {
+    if (id === 999999) throw new AgenstraActionError("host_request_rejected");
+    return { id, title: "Existing record" };
+  } });
+  const command = { run_id: "run", session_id: "tab", generation: 1, action: "ui.read", context_revision: 1 };
+  await client.executeCommand({ ...command, id: "missing", arguments: { id: 999999 } });
+  assert.equal(posted[0].status, "failed");
+  assert.equal(posted[0].error_code, "host_request_rejected");
+  assert.equal(chat.feedback.textContent, "", "a tool's confirmed failure is not a failed submission or connection");
+  await client.executeCommand({ ...command, id: "existing", arguments: { id: 2 } });
+  assert.equal(posted[1].status, "succeeded");
+  assert.equal(chat.feedback.textContent, "");
+  client.emit("error", new AgenstraError("connection_error"));
+  assert.match(chat.feedback.textContent, /connection_error/, "transport failures must remain visible");
+  client.emit("error", new AgenstraActionError("host_request_rejected"));
+  assert.match(chat.feedback.textContent, /connection_error/, "a tool outcome must not erase an unrelated connection failure");
+  client.emit("error", new Error("Unconfirmed handler outcome"));
+  assert.match(chat.feedback.textContent, /connection_error/, "unconfirmed exceptions must remain visible");
+});
 
 test("write receipts remain visible when a task fails and accepted is never success", () => {
   const previous = globalThis.document;
