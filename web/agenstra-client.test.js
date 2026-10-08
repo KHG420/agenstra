@@ -240,6 +240,38 @@ test("destroy aborts pending work and stops reconnection", async () => {
   await assert.rejects(c.getRun("run-1"), { code: "client_closed" });
   assert.equal(c.aborters.size, 0);
 });
+test("pagehide preserves a cached page's client and destroys an unloaded page's client", async t => {
+  const listeners = new Map();
+  const add = globalThis.addEventListener, remove = globalThis.removeEventListener;
+  globalThis.addEventListener = (name, callback) => listeners.set(name, callback);
+  globalThis.removeEventListener = (name, callback) => { if (listeners.get(name) === callback) listeners.delete(name); };
+  t.after(() => { globalThis.addEventListener = add; globalThis.removeEventListener = remove; });
+  const c = client(async () => response({ status: "running" }));
+  t.after(() => c.destroy({ closeSession: false }));
+  c.registerActions({ "ui.navigate": async () => ({ page: "orders" }) });
+  c.receipts["cmd-1"] = { status: "succeeded", result: { page: "orders" } };
+  let updates = 0;
+  c.on("update", () => updates++);
+  const pagehide = listeners.get("pagehide");
+  pagehide({ persisted: true });
+  // BFCache restores this same object, its handlers, subscriptions and receipts.
+  assert.equal(c.closed, false);
+  assert.equal((await c.getRun("run-1")).status, "running");
+  assert.equal(c.actions.has("ui.navigate"), true);
+  assert.equal(c.receipts["cmd-1"].status, "succeeded");
+  c.emit("update", {}); assert.equal(updates, 1);
+  assert.equal(listeners.get("pagehide"), pagehide);
+  pagehide({ persisted: false });
+  await assert.rejects(c.getRun("run-1"), { code: "client_closed" });
+  assert.equal(listeners.has("pagehide"), false);
+});
+test("explicit destroy stays closed even when pagehide is persisted", async t => {
+  const c = client(async () => response({ status: "closed" }));
+  t.after(() => c.destroy({ closeSession: false }));
+  await c.destroy();
+  c.pagehide({ persisted: true });
+  await assert.rejects(c.getRun("run-1"), { code: "client_closed" });
+});
 test("bridge-only run does not create a chat conversation", async () => {
   const paths = [];
   const c = client(async path => { paths.push(path);return response({ run_id: "run-1" }); });

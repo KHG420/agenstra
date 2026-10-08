@@ -83,6 +83,50 @@ func createTestHostRun(t *testing.T, h *AgentHost) StoredRun {
 	}
 	return r
 }
+func TestHostRefreshesReadAfterEachWrite(t *testing.T) {
+	version, reads, writes := 0, 0, 0
+	p := &hostProvider{caps: map[string]CapabilityDescription{
+		"records.get":    {Name: "records.get", Effect: "read", Replay: "safe", InputSchema: JSON{"type": "object"}},
+		"records.update": {Name: "records.update", Effect: "write", Replay: "never", InputSchema: JSON{"type": "object"}},
+	}, hook: func(_ context.Context, name string, _ JSON, _ *InvocationContext) (CapabilityResult, error) {
+		if name == "records.update" {
+			writes++
+			version++
+		} else {
+			reads++
+		}
+		return CapabilityResult{Data: JSON{"version": version}}, nil
+	}}
+	m := &hostModel{}
+	for i := 0; i < 3; i++ {
+		read := callDecision("records.get")
+		read.Calls[0].CallRef = fmt.Sprintf("read-%d", i)
+		m.decisions = append(m.decisions, read)
+		if i < 2 {
+			write := callDecision("records.update")
+			write.Calls[0].CallRef = fmt.Sprintf("write-%d", i)
+			write.Calls[0].Arguments["value"] = i + 1
+			m.decisions = append(m.decisions, write)
+		}
+	}
+	h := NewAgentHost(testStore(t), func(context.Context, string, string) (CapabilityProvider, error) { return p, nil }, m,
+		func(context.Context, string, string) (ExecutionPolicy, error) {
+			return ExecutionPolicy{GrantedCapabilities: map[string]bool{"records.get": true, "records.update": true}, AllowModelData: true}, nil
+		})
+	r := createTestHostRun(t, h)
+	r, err := h.Drive(t.Context(), r.RunID, "alice")
+	if err != nil || r.Status != "completed" || reads != 3 || writes != 2 {
+		t.Fatalf("refresh: status=%s reads=%d writes=%d err=%v", r.Status, reads, writes, err)
+	}
+	state, err := h.restore(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest := state.Facts[len(state.Facts)-1]
+	if latest.SourceCapability != "records.get" || fmt.Sprint(latest.Value["data"].(map[string]any)["version"]) != "2" {
+		t.Fatal("latest read did not observe the second write", latest)
+	}
+}
 func TestHostValidatesNestedInputBeforeApproval(t *testing.T) {
 	cap := CapabilityDescription{Name: "records.get", Effect: "destructive", Replay: "never", ApprovalRequired: true, InputSchema: JSON{
 		"type": "object", "additionalProperties": false,

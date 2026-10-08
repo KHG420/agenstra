@@ -226,6 +226,24 @@ func NewWebIntegration(h *AgentHost, d *Deployment, c WebIntegrationConfig) (*We
 
 // Close releases the optional integration store after its callers have stopped.
 func (w *WebIntegration) Close() error { return w.Store.Close() }
+
+func (w *WebIntegration) putBrowserBinding(owner, integration string, c ConnectionConfig) error {
+	// Browser handlers run in the authenticated host page. Backend credentials
+	// and identity/delegation settings belong to the separate business binding.
+	if len(c.Environment) != 0 || len(c.BindingEnvironment) != 0 || c.Identity != nil || len(c.Delegations) != 0 {
+		return registryError("invalid_browser_binding")
+	}
+	names := map[string]bool{"ui.get_context": true, "ui.command_status": true}
+	for _, action := range w.profiles[integration].profile.Actions {
+		names[action.Name] = true
+	}
+	config, err := objectOf(c)
+	if err != nil {
+		return err
+	}
+	return w.deployment.Registry.putBinding(owner, integration, config, names)
+}
+
 func (w *WebIntegration) policy(ctx context.Context, owner, pack string) (ExecutionPolicy, error) {
 	conf, ok := w.Config.Integrations[pack]
 	if !ok || w.profiles[pack] == nil {
@@ -246,10 +264,41 @@ func (w *WebIntegration) policy(ctx context.Context, owner, pack string) (Execut
 	// Frontend-only integrations grant ui.* in the existing connection policy.
 	// Combined integrations retain their separate browser action selection.
 	actions := []string{}
+	managed := false
 	if conf.PackID != "" {
 		actions = w.deployment.Config.Users[owner].BrowserActions[pack]
+		if registry := w.deployment.Registry; registry != nil {
+			present, binding, err := registry.Binding(owner, pack)
+			if err != nil {
+				return p, err
+			}
+			if present {
+				if binding == nil {
+					return p, hostError("access_denied")
+				}
+				raw, err := json.Marshal(binding)
+				if err != nil {
+					return p, err
+				}
+				var c ConnectionConfig
+				if err = jsonvalue.DecodeStrict(raw, &c); err != nil {
+					return p, err
+				}
+				managed = true
+				actions = c.GrantedCapabilities
+				p.AllowModelData = p.AllowModelData && c.AllowModelData
+				approvals := map[string]bool{}
+				for name, required := range p.ApprovalCapabilities {
+					approvals[name] = required
+				}
+				for _, name := range c.ApprovalCapabilities {
+					approvals[name] = true
+				}
+				p.ApprovalCapabilities = approvals
+			}
+		}
 	}
-	if conf.PackID != "" && w.ResolveBrowserActions != nil {
+	if conf.PackID != "" && !managed && w.ResolveBrowserActions != nil {
 		actions, e = w.ResolveBrowserActions(ctx, owner, pack)
 		if e != nil {
 			return p, e

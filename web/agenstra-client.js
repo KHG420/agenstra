@@ -34,7 +34,9 @@ export class AgenstraClient {
     this.aborters = new Set();
     this.browserEpoch = 0;
     this.browserConnected = false;
-    this.pagehide = () => { this.destroy({ closeSession: false }); };
+    // BFCache freezes and restores this object, including timers and receipts.
+    // Only a real unload should permanently stop the client.
+    this.pagehide = event => { if (!event.persisted) this.destroy({ closeSession: false }); };
     globalThis.addEventListener?.("pagehide", this.pagehide);
   }
   on(name, callback) {

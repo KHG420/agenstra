@@ -163,6 +163,8 @@ Web and CLI also share saved REST/MCP drafts: configure one section at a time, a
 
 For an existing login system, optional `host_auth: {"url_env":"HOST_AUTH_URL","owner_path":["owner_id"]}` verifies each bearer token through a trusted HTTP endpoint. `owner_path` defaults to `owner_id`. This requires management and an explicit registry binding for each dynamic owner; a dynamic owner never inherits a static user's grants. Static API keys retain their existing behavior.
 
+Browser actions use the same management binding API with the integration ID and a policy containing `granted_capabilities`, `approval_capabilities`, and `allow_model_data`. The server validates actions against its frontend profile, so browser-only integrations need no placeholder backend release. Combined integrations keep backend bindings and browser policies separate; both must permit model data, and browser grants remain scoped to their integration. See the [Web integration guide](docs/web-integration.md).
+
 ## Supported capability sources
 
 | Source | Built-in integration | Review still required |

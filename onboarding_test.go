@@ -142,6 +142,74 @@ func TestDeploymentCompletionRequiredOperationRejectsFinalWithoutAction(t *testi
 	}
 }
 
+func TestDeploymentCompletionAllowsDeniedApprovalWithoutSkippingOtherEvidence(t *testing.T) {
+	for _, required := range []bool{false, true} {
+		h := &AgentHost{}
+		d := &Deployment{Config: DeploymentConfig{CompletionChecks: map[string][]FactRequirement{"records": {
+			{Capability: "records.update", Path: []any{"data", "ok"}, Value: true, Required: required},
+			{Capability: "records.other", Path: []any{"data", "ok"}, Value: true},
+		}}}}
+		if err := configureDeploymentChecks(h, d); err != nil {
+			t.Fatal(err)
+		}
+		denied := Observation{CallRef: "denied", Capability: "records.update", Status: "failed", ErrorCode: strptr("approval_denied")}
+		result := CompletionContext{OriginPackID: "records", AnswerMarkdown: "你已拒绝审批，本次没有执行写入。", Observations: []Observation{denied}}
+		if err := h.CompletionValidator(t.Context(), result); err != nil {
+			t.Fatal("denied approval could not finish", required, err)
+		}
+		fact := Fact{FactID: NewID(), SourceCapability: "records.update", Value: JSON{"data": JSON{"ok": false}}}
+		result.Facts, result.FactIDs = []Fact{fact}, []string{fact.FactID}
+		result.Observations = []Observation{{CallRef: "earlier", Capability: fact.SourceCapability, Status: "succeeded", FactID: &fact.FactID}, denied}
+		if code := ErrorCode(h.CompletionValidator(t.Context(), result)); code != "completion_evidence_mismatch" {
+			t.Fatal("denial bypassed an earlier operation's evidence", code)
+		}
+		result.Facts, result.FactIDs = nil, nil
+		result.Observations[0].Status = "failed"
+		result.Observations[0].ErrorCode = strptr("operation_failed")
+		if code := ErrorCode(h.CompletionValidator(t.Context(), result)); code != "completion_operation_failed" {
+			t.Fatal("denial hid an earlier failed operation", code)
+		}
+		result.Observations[0].Capability = "records.other"
+		if code := ErrorCode(h.CompletionValidator(t.Context(), result)); code != "completion_operation_failed" {
+			t.Fatal("denial bypassed an independent capability check", code)
+		}
+	}
+}
+
+func TestHostFinishesTruthfulAnswerAfterDeniedApprovalWithCompletionCheck(t *testing.T) {
+	cap := CapabilityDescription{Name: "records.get", Effect: "write", Replay: "never", ApprovalRequired: true, InputSchema: JSON{"type": "object"}}
+	p := &hostProvider{caps: map[string]CapabilityDescription{cap.Name: cap}}
+	answer := "你已拒绝审批，本次没有执行写入。"
+	m := &hostModel{decisions: []Decision{callDecision(cap.Name), {Kind: "final", AnswerMarkdown: answer}, {Kind: "final", AnswerMarkdown: answer}}}
+	h := testHost(t, testStore(t), p, m)
+	h.Settings.MaxModelRounds = 8
+	d := &Deployment{Config: DeploymentConfig{CompletionChecks: map[string][]FactRequirement{"records": {{Capability: cap.Name, Path: []any{"data", "ok"}, Value: true}}}}}
+	if err := configureDeploymentChecks(h, d); err != nil {
+		t.Fatal(err)
+	}
+	r := createTestHostRun(t, h)
+	r, err := h.Drive(t.Context(), r.RunID, "alice")
+	if err != nil || r.Status != "needs_approval" {
+		t.Fatal(r.Status, err)
+	}
+	s, err := h.restore(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := s.Pending[0]
+	if _, err = h.Approve(t.Context(), r.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, r.Revision, false); err != nil {
+		t.Fatal(err)
+	}
+	r, err = h.Drive(t.Context(), r.RunID, "alice")
+	if err != nil || r.Status != "completed" || p.calls != 0 {
+		t.Fatal("denied run", r.Status, err, p.calls)
+	}
+	s, err = h.restore(r)
+	if err != nil || s.AnswerMarkdown != answer {
+		t.Fatal("truthful final not published", err, s)
+	}
+}
+
 func TestDeclarativeReconciliationChecksOriginalIdentityAndReadPermission(t *testing.T) {
 	for _, mode := range []string{"confirmed", "not_confirmed", "not_granted", "write_verifier", "large_number", "large_number_mismatch"} {
 		t.Run(mode, func(t *testing.T) {

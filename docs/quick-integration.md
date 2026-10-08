@@ -6,7 +6,7 @@
 
 按[部署指南](deployment.md)准备模型网关、持久盘和 `deployment.json`，启动 `agenstra-serve --config deployment.json`。需要接入管理界面时，配置 `management`；需要聊天入口时，配置 `web_integration.chat`。页面动作另行开启 `browser_bridge`。
 
-模型、用户 API key 和业务凭据由部署方配置。当前运行范围是单节点和 SQLite WAL。服务端账户映射可以使用静态用户配置；新增用户目前需要更新配置并重启，宿主票据助手不会自动创建账户。
+模型和业务凭据由部署方配置。当前运行范围是单节点和 SQLite WAL。服务端账户映射可使用静态用户 API key，也可配置 `host_auth` 验证宿主已有登录凭证并取得稳定 owner ID。动态用户通过管理绑定获得授权，无需逐个修改静态用户配置；宿主票据助手负责换票，授权仍由服务端绑定决定。
 
 ## 2. 连接与选择能力
 
@@ -22,6 +22,8 @@
 “检查连接”验证契约和连接配置能够加载；REST 尚未执行实际接口。使用下一步的代表性任务完成业务验收。能力升级时导入新版契约、检查差异并发布新版本；旧任务继续遵守原有版本固定规则。
 
 纯浏览器接入跳过后端能力包创建，准备第 5 步的 frontend profile。在 `web_integration.integrations.<integration>` 只设置 `frontend_profile_path`，省略 `pack_id`，并开启 `browser_bridge`。同一 integration 名下的 `users.<owner>.packs.<integration>` 配置 `allow_model_data`、`granted_capabilities` 和可选 `approval_capabilities`；不需要再填写 `browser_actions`。用户身份、模型数据使用和动作授权仍须明确配置，见[纯浏览器部署示例](web-integration.md#纯浏览器宿主)。
+
+使用动态登录或管理授权时，执行 `agenstra-manage bind <owner> <integration> browser-policy.json` 保存相同的浏览器策略，无需发布占位能力包。组合接入分别绑定后端 pack 与浏览器 integration，两边均设置 `allow_model_data: true`；动作授权按 integration 隔离。完整示例见[浏览器管理绑定](web-integration.md)。
 
 ## 3. 接入宿主登录
 
@@ -41,6 +43,8 @@ export const agentSession = createAgenstraSessionHandler({
 `hostCSRF`、`hostSessions` 和 `hostSecrets` 是原软件已经存在的服务，需绑定为真实实现。`verifyRequest` 必须验证原软件的 CSRF/可信来源，`authenticateRequest` 必须验证登录会话，不能使用请求体自报的用户 ID。助手处理 POST 限制、超时、上游错误、禁止凭据随重定向转发，并只返回 `{token, expires_at}`。
 
 非 JavaScript 宿主使用同样的 HTTP 过程：验证登录与 CSRF → 从可信服务端映射用户 API key → `POST /web/v1/token` → 只向浏览器返回短期票据。Go 嵌入式宿主也可使用 `AuthenticateRequest` 和 `MintSession`。详细说明见[Web 接入指南](web-integration.md)。
+
+启用 `host_auth` 时，`resolveAPIKey` 可返回宿主已验证的用户 bearer 凭证；Agenstra 通过配置的可信 HTTP 身份接口验证每次换票，动态 owner 仍须有对应绑定。该接口的 `owner_path` 默认是 `owner_id`。
 
 ## 4. 装入标准聊天入口
 

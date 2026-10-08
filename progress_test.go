@@ -94,6 +94,22 @@ func TestProgressCountsNewEvidenceAndInputButNotNewFactIDs(t *testing.T) {
 	}
 }
 
+func TestRepeatedUnchangedReadsStillStagnate(t *testing.T) {
+	p := &coreTestProvider{caps: map[string]CapabilityDescription{"records.get": {Name: "records.get", Effect: "read", Replay: "safe"}}}
+	calls := 0
+	m := decisionModelFunc(func(context.Context, ContextPacket, string) (Decision, error) {
+		calls++
+		decision := callDecision("records.get")
+		decision.Calls[0].CallRef = fmt.Sprintf("read-%d", calls)
+		return decision, nil
+	})
+	r := &AgentRuntime{Provider: p, Model: m, Grants: map[string]bool{"records.get": true}, MaxStagnantRounds: 3}
+	result, err := r.Run(t.Context(), "Read until the record changes")
+	if err != nil || result.Status != "failed" || result.ErrorCode == nil || *result.ErrorCode != "agent_stagnated" || p.called <= 2 {
+		t.Fatalf("unchanged reads: calls=%d result=%+v err=%v", p.called, result, err)
+	}
+}
+
 func TestProgressProjectionIsBoundedAndDoesNotMutateState(t *testing.T) {
 	state := &RuntimeState{}
 	for i := 0; i < 40; i++ {

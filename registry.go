@@ -420,6 +420,12 @@ func (r *CapabilityRegistry) Activate(packID, digest string, expectedRevision *i
 
 // PutBinding verifies capability selections and atomically saves an enabled owner binding.
 func (r *CapabilityRegistry) PutBinding(ownerID, packID string, config map[string]any) (resultErr error) {
+	return r.putBinding(ownerID, packID, config, nil)
+}
+
+// Frontend bindings use a catalog compiled from the server's trusted profile.
+// Public pack bindings always resolve their catalog inside this transaction.
+func (r *CapabilityRegistry) putBinding(ownerID, packID string, config map[string]any, names map[string]bool) (resultErr error) {
 	if !registryID.MatchString(packID) {
 		return registryError("invalid_pack_id")
 	}
@@ -436,21 +442,23 @@ func (r *CapabilityRegistry) PutBinding(ownerID, packID string, config map[strin
 			resultErr = errors.Join(resultErr, rollbackErr)
 		}
 	}()
-	var cj string
-	e = tx.QueryRow(`SELECT r.capabilities_json FROM active a JOIN releases r ON r.pack_id=a.pack_id AND r.digest=a.digest WHERE a.pack_id=?`, packID).Scan(&cj)
-	if errors.Is(e, sql.ErrNoRows) {
-		return registryError("release_not_active")
-	}
-	if e != nil {
-		return e
-	}
-	var caps []map[string]string
-	if e = json.Unmarshal([]byte(cj), &caps); e != nil {
-		return fmt.Errorf("decode stored capabilities: %w", e)
-	}
-	names := map[string]bool{}
-	for _, c := range caps {
-		names[c["name"]] = true
+	if names == nil {
+		var cj string
+		e = tx.QueryRow(`SELECT r.capabilities_json FROM active a JOIN releases r ON r.pack_id=a.pack_id AND r.digest=a.digest WHERE a.pack_id=?`, packID).Scan(&cj)
+		if errors.Is(e, sql.ErrNoRows) {
+			return registryError("release_not_active")
+		}
+		if e != nil {
+			return e
+		}
+		var caps []map[string]string
+		if e = json.Unmarshal([]byte(cj), &caps); e != nil {
+			return fmt.Errorf("decode stored capabilities: %w", e)
+		}
+		names = map[string]bool{}
+		for _, c := range caps {
+			names[c["name"]] = true
+		}
 	}
 	for _, k := range []string{"granted_capabilities", "approval_capabilities"} {
 		if arr, ok := config[k].([]any); ok {

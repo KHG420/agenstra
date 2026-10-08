@@ -78,7 +78,7 @@ go run ./cmd/agenstra-manage activate records <digest> --revision 0
 
 ## 4. 绑定连接和授权
 
-用户身份先在部署配置的 `users` 中声明；管理入口负责为已有用户绑定能力包。连接文件只保存环境变量或 `secret:` 引用，不含明文密钥：
+用户身份可在部署配置的 `users` 中声明，也可由 `host_auth` 从宿主登录系统验证并取得动态 owner ID。管理入口为指定 owner 绑定能力包；动态 owner 必须明确绑定，不能继承静态用户授权。连接文件只保存环境变量或 `secret:` 引用，不含明文密钥：
 
 ```json
 {
@@ -105,6 +105,8 @@ go run ./cmd/agenstra-manage audit
 ```sh
 go run ./cmd/agenstra-manage disable operator records
 ```
+
+浏览器 integration 使用相同的 `bind`、`check`、`disable` 命令和管理 API，将 pack 参数替换为 integration ID。其策略只包含 `granted_capabilities`、`approval_capabilities` 和 `allow_model_data`；服务端 frontend profile 提供可信能力目录，无需后端发布版本。组合接入分别管理后端连接与浏览器策略，后端凭据仍放在后端绑定。管理浏览器绑定优先于静态 `browser_actions` 和 Go hook，停用后不会继承它们的授权。详见[Web 接入指南](web-integration.md)。
 
 Web 页面可完成相同流程：发布版本、启用或回滚、选择用户、填写变量映射与授权、检查连接、查看最近变更。页面中的管理员密钥只放在当前标签页的内存里，刷新后需重新输入；请勿在没有 HTTPS 的远程地址打开管理页面。
 

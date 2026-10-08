@@ -34,6 +34,7 @@ export class AgenstraError extends Error { constructor(code: string, status?: nu
 /** Only for a failure whose lack of committed side effects the host can prove. */
 export class AgenstraActionError extends Error { constructor(code: string, message?: string); code: string }
 export class AgenstraClient {
+  /** Preserves the client across BFCache pagehide; a real unload stops local work. */
   constructor(options: ClientOptions);
   options: ClientOptions;
   id(): string;

@@ -107,8 +107,16 @@ func configureDeploymentChecks(h *AgentHost, d *Deployment) error {
 	if h.CompletionValidator == nil && len(checks) > 0 {
 		compiledCompletion = func(ctx context.Context, result CompletionContext) error {
 			used := map[string]bool{}
+			denied := map[string]bool{}
 			latest := map[string]Observation{}
 			for _, observation := range result.Observations {
+				// A denied approval never executed. Allow the answer to report that
+				// outcome without requiring successful business evidence, while still
+				// checking other invocations of the same capability.
+				if observation.ErrorCode != nil && *observation.ErrorCode == "approval_denied" {
+					denied[observation.Capability] = true
+					continue
+				}
 				used[observation.Capability] = true
 				latest[observation.Capability] = observation
 			}
@@ -116,7 +124,7 @@ func configureDeploymentChecks(h *AgentHost, d *Deployment) error {
 				used[fact.SourceCapability] = true
 			}
 			for name := range required[result.OriginPackID] {
-				if !used[name] {
+				if !used[name] && !denied[name] {
 					return CompletionValidationError{"completion_capability_required", "Complete the required business operation before reporting completion."}
 				}
 			}

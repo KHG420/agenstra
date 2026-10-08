@@ -948,12 +948,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			if state.Repeated == nil {
 				state.Repeated = map[string]int{}
 			}
-			// Browser observations and host reads can change after a page/business
-			// write. Let declared read actions fetch current state again; writes
-			// retain duplicate protection and all round/tool budgets still apply.
-			refreshableBrowserRead := call.Capability == "ui.get_context" || call.Capability == "ui.command_status" ||
-				(exists && cap.Effect == "read" && strings.HasPrefix(call.Capability, "ui.") && cap.Operation != nil && cap.Operation.PollCapability == "ui.command_status")
-			if !refreshableBrowserRead && state.Repeated[digest] >= r.MaxRepeatedCall {
+			// Declared reads refresh state that may change between calls. Unchanged
+			// results still count toward stagnation and all round/tool budgets apply.
+			// Compute and write calls retain their duplicate protection.
+			refreshableRead := exists && cap.Effect == "read"
+			if !refreshableRead && state.Repeated[digest] >= r.MaxRepeatedCall {
 				Reject(state, call.CallRef, call.Capability, "repeated_equivalent_call", call.Arguments, "")
 				continue
 			}

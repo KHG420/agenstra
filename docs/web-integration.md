@@ -72,6 +72,26 @@ for (const name of ["authorization", "content-type", "x-agenstra-browser-key"]) 
 
 上述组合接入对应用户增加 `"browser_actions": {"records-web": ["ui.navigate"]}`。用户仍须拥有 `users.<owner>.packs.records` 的有效连接及 `allow_model_data: true`。后端授权沿用现有配置。浏览器注册 handler 仅声明能执行的动作，服务端决定权限。组合接入的 Go 嵌入式服务可设置 `server.Web.ResolveBrowserActions`，实时读取宿主授权；先以 `workerEnabled=false` 构造服务器、设置 hook，再运行自己的 `Web.Tick` / `Host.WakeDue` 调度。不要在运行期间并发修改配置 map 或 hook。
 
+独立服务使用 `host_auth` 动态登录时，通过现有管理 API 或 CLI 按 owner 和 integration ID 绑定浏览器策略，无需在 `users` 中逐个声明用户：
+
+```json
+{
+  "granted_capabilities": ["ui.navigate"],
+  "approval_capabilities": ["ui.navigate"],
+  "allow_model_data": true
+}
+```
+
+```sh
+go run ./cmd/agenstra-manage bind alice records-web browser-policy.json
+go run ./cmd/agenstra-manage check alice records-web
+go run ./cmd/agenstra-manage disable alice records-web
+```
+
+对应接口为 `PUT /admin/api/bindings/alice/records-web`、`POST /admin/api/bindings/alice/records-web/check` 和 `DELETE /admin/api/bindings/alice/records-web`。浏览器策略仅保存授权、审批和模型数据使用许可；环境变量、身份核对和委托配置属于后端业务连接，不能放入浏览器策略。动作名由服务端载入的 frontend profile 校验；内置 `ui.get_context`、`ui.command_status` 自动可用。绑定变化写入原管理审计。
+
+纯浏览器模式直接使用 integration ID 的策略，不需要发布后端能力包。组合模式分别绑定后端 pack 和浏览器 integration：业务授权来自后端绑定，页面动作授权来自 integration 绑定，两边均须允许模型使用数据。浏览器授权按 integration 隔离，同名动作不会授予另一个 integration。已有的静态 `browser_actions` 和 Go hook 在未设置管理绑定时仍可使用；管理绑定存在时优先采用管理策略，停用后不会回退到静态或 hook 授权。撤销会在动作开始前重新检查，已经执行的动作仍保留原结果回执。
+
 仅聊天可配置 `"integrations": {"records": {"pack_id":"records"}}`，无需 profile。包含前端 profile 的 integration 必须使用独立别名，避免改变原包的能力目录。业务包不能使用保留的 `ui.*` 命名空间。
 
 ### 纯浏览器宿主
@@ -108,6 +128,8 @@ for (const name of ["authorization", "content-type", "x-agenstra-browser-key"]) 
 在服务端配置模型变量、`AGENT_ALICE_API_KEY` 和会话密钥，再启动 `agenstra-serve --config deployment.json`。SDK 使用 `integration: "app"`、`browser: true`，按后面的示例注册 handler 和页面观察数据。用户换票据继续沿用可信宿主登录映射。
 
 纯浏览器模式把 integration ID 作为原 `PolicyResolver` 的连接 ID；静态配置的 consent、动作授权和策略要求的审批统一来自 `users.<owner>.packs.app`，不使用 `browser_actions` / `ResolveBrowserActions`。内置页面观察和命令状态可读取，但宿主动作必须明确授权。profile 自己要求的审批同样生效。没有用户授权或 `allow_model_data: true` 仍会拒绝运行。Go 嵌入式宿主可通过原 `PolicyResolver` 返回实时策略。纯浏览器必须开启控制桥并提供 profile；带 profile 的 ID 不能与业务包 ID 冲突。
+
+启用 `management` 后也可用上述管理绑定代替静态 `users.<owner>.packs.app`。例如 `agenstra-manage bind alice app browser-policy.json`；`host_auth` 返回的动态 owner 使用相同入口，无需占位业务包。
 
 ## 前端动作契约
 
@@ -206,6 +228,8 @@ await client.send("查询待处理订单", { clientId: client.id() });
 `hostRouter` 和 `hostChatView` 代表宿主已有的路由和 UI。SDK 不创建任何 DOM 或样式。一个 tab 对同一 endpoint/integration 使用一个 client。React/Vue 中优先由应用或登录会话持有 client，路由组件只订阅和解除订阅；这样切换页面后仍可处理已绑定的任务和回执。
 
 如果 client 由路由组件持有，组件卸载时调用 `client.destroy({ closeSession: false })`，停止本地轮询和订阅，保留服务端绑定及恢复身份。回到页面后创建 client、注册相同 handlers，再调用 `connectBrowser()` 恢复；离开期间任务可能等待浏览器，等待仍受原任务期限约束。默认 `client.destroy()` 尝试永久关闭服务端浏览器会话，仅用于退出登录、切换登录用户或明确结束该绑定。仅当服务端返回 HTTP 200 且 `status` 为 `closed` 时清除持久化绑定；网络失败、错误响应或关闭尚未确认时保留原 key 和恢复请求身份，供同一用户的新 client 恢复。`destroy()` 仍停止本地工作并返回 `Promise<void>`，返回本身不证明服务端已经关闭。把默认关闭用于普通路由卸载，会使原任务留在已关闭的 session 上；新的页面即使显示已连接，也不能执行原任务。
+
+浏览器返回缓存（BFCache）会冻结并恢复同一页面对象。SDK 收到 `pagehide` 且 `persisted: true` 时保留 client、handlers、订阅和待上传回执，返回页面后继续使用原连接；真正卸载时停止本地工作并保留服务端恢复身份。宿主不应在可缓存的 `pagehide` 上主动 `destroy()`。显式销毁的 client 始终保持关闭。冻结期间仍受服务端原有任务、命令和审批期限约束，过期或未知动作不自动重放。
 
 默认 `sessionStorage` 保存所选会话 ID、tab 绑定和执行回执，不保存 Agent 会话上下文；可传 `storage: null`。禁用存储后仍可通过会话列表手动恢复，服务端仍阻止重复认领；上述销毁并重建 client 的自动浏览器恢复需要保留存储。
 

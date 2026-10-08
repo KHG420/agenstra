@@ -1,6 +1,7 @@
 package agenstra
 
 import (
+	"context"
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
@@ -227,11 +228,23 @@ func (s *HTTPServer) adminBinding(w http.ResponseWriter, r *http.Request, path s
 	registry := s.Deployment.Registry
 	switch {
 	case check && r.Method == "POST":
-		provider, e := s.Deployment.ProviderFactory(r.Context(), owner, pack)
+		factory := s.Deployment.ProviderFactory
+		if s.Web != nil && s.Web.profiles[pack] != nil {
+			factory = func(ctx context.Context, owner, pack string) (CapabilityProvider, error) {
+				if _, err := s.Web.Host.policy(ctx, owner, pack, false); err != nil {
+					return nil, err
+				}
+				return s.Web.provider(ctx, owner, pack)
+			}
+		}
+		provider, e := factory(r.Context(), owner, pack)
 		if e != nil {
 			var dep *DeploymentError
+			var host *HostError
 			if errors.As(e, &dep) {
 				apiError(w, 422, dep.Code, true)
+			} else if errors.As(e, &host) {
+				apiError(w, 422, host.Code, true)
 			} else {
 				apiError(w, 422, "connection_check_failed", true)
 			}
@@ -269,6 +282,14 @@ func (s *HTTPServer) adminBinding(w http.ResponseWriter, r *http.Request, path s
 			return
 		}
 		body = normalizeConnection(body)
+		if s.Web != nil && s.Web.profiles[pack] != nil {
+			if err := s.Web.putBrowserBinding(owner, pack, body); err != nil {
+				registryHTTPError(w, err)
+				return
+			}
+			writeJSON(w, 200, map[string]any{"owner_id": owner, "pack_id": pack, "enabled": true})
+			return
+		}
 		if !validConnectionEnvironment(body, s.Deployment.Config.Management) {
 			apiError(w, 422, "invalid_environment_ref", true)
 			return
