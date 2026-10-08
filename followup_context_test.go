@@ -82,11 +82,11 @@ func TestModelFollowupOutcomePreservesFailureAndProjectedEvidence(t *testing.T) 
 		t.Fatal("the recent outcome hid a failure or an incomplete preview", content)
 	}
 	for _, change := range []func(){
-		func() { packet.Followups = nil },
-		func() { packet.Followups = []string{"steering: read again"} },
-		func() { packet.Followups = []string{"label: supplied"}; packet.Observations[0].ArgumentsOmitted = true },
+		func() { packet.Schema = "agenstra.memory-extraction.v1" },
+		func() { packet.Schema = "agenstra.context.v1"; packet.Followups = []string{"steering: read again"} },
+		func() { packet.Followups = []string{"label: supplied"}; packet.Observations[0].CallRef = "" },
 		func() {
-			packet.Observations[0].ArgumentsOmitted = false
+			packet.Observations[0].CallRef = "read-1"
 			packet.Observations[0].Capability = "agent.final"
 		},
 		func() {

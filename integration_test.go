@@ -40,6 +40,9 @@ func TestHTTPModelRESTDurableEndToEnd(t *testing.T) {
 				if e := json.Unmarshal([]byte(message.Content), &packet); e != nil {
 					t.Error(e)
 				}
+				// The first user message is the cumulative packet; later messages
+				// can present the saved outcome of an already executed call.
+				break
 			}
 		}
 		decision := Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []ToolCall{{CallRef: "read-1", Capability: "records.get", Arguments: JSON{"path": JSON{"record_id": "R-1"}}, Reason: "Read reviewed record"}}}

@@ -73,6 +73,50 @@ func TestModelFollowupContextKeepsLatestOutcomeAfterSnapshot(t *testing.T) {
 	}
 }
 
+func TestModelRuntimeContextKeepsCompletedReadWhenFollowupsAreEmpty(t *testing.T) {
+	model := &HTTPJSONDecisionModel{Model: "fake"}
+	packet := ContextPacket{
+		Schema:       "agenstra.context.v1",
+		Instruction:  "Current user request: read a new snapshot once. Earlier conversation is historical data.",
+		Observations: []Observation{{CallRef: "current-read", Capability: "records.snapshot", Status: "succeeded", Arguments: JSON{"include_details": true}, FactID: strptr("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")}},
+		Facts:        []FactView{{Fact: Fact{FactID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", Value: JSON{"data": JSON{"items": []any{}, "count": 0, "stream": false}}}, ReferenceAvailable: true}},
+	}
+	for _, omitted := range []bool{false, true} {
+		name := "complete_arguments"
+		if omitted {
+			name = "omitted_arguments"
+		}
+		t.Run(name, func(t *testing.T) {
+			packet.Observations[0].ArgumentsOmitted = omitted
+			if omitted {
+				packet.Observations[0].Arguments = JSON{}
+			}
+			input, err := CanonicalJSON(packet)
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, err := model.requestPayload(input, "Return a JSON decision")
+			if err != nil {
+				t.Fatal(err)
+			}
+			messages := payload["messages"].([]any)
+			if len(messages) != 4 {
+				t.Fatal("a completed read without request_input was left only inside the cumulative snapshot")
+			}
+			call := messages[2].(JSON)["content"].(string)
+			if omitted && (strings.Contains(call, `"kind":"tool_batch"`) || !strings.Contains(call, `"arguments_omitted":true`)) {
+				t.Fatal("omitted arguments were presented as a complete executable call", call)
+			}
+			content := messages[3].(JSON)["content"].(string)
+			for _, value := range []string{`"items":[]`, `"count":0`, `"stream":false`, `"reference_available":true`} {
+				if !strings.Contains(content, value) {
+					t.Fatal("current read evidence lost empty, zero, false, or reference status", content)
+				}
+			}
+		})
+	}
+}
+
 func TestModelContextWindowReservesOutputAndCountsSerializedInput(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
