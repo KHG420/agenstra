@@ -127,6 +127,6 @@ HTTPJSONDecisionModel 实现可选的 MemoryExtractor。每个未处理来源在
 AGENSTRA_LIVE_EVAL=1 go test -run '^TestLiveMemoryTaskScopeEvaluation$' -count=1 -v
 ```
 
-可用 `AGENSTRA_MEMORY_EVIDENCE_PATH` 指定评测 JSON 保存位置。该文件包含合成输入、候选、结果与请求用量，不含认证头。准确率、归一化效果、延迟和成本仍需在部署方选择的模型上验收。
+用 `AGENSTRA_MEMORY_MAX_OUTPUT_TOKENS` 指定与部署记忆模型配置一致的输出上限，例如 `8192`；未设置时沿用模型服务默认值。推理模型的输出预算可能包含推理 tokens，不能仅按最终 JSON 的长度设置很小的上限。评测不会在输出截断后自动扩大预算或重试。可用 `AGENSTRA_MEMORY_EVIDENCE_PATH` 指定评测 JSON 保存位置。该文件包含合成输入、输出上限、候选、结果与请求用量，不含认证头。准确率、归一化效果、延迟和成本仍需在部署方选择的模型上验收。
 
 跨项目任务可通过可选 `sources` 明确选择目标能力，并按发起项目委派、目标验证权限和任务范围取交集。目标身份、实际凭据、版本固定、项目记忆和各入口的完整接入说明见[跨项目任务、身份与授权](cross-project-tasks.md)。所有读取与轮询也必须明确授权。

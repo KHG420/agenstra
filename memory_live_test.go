@@ -3,6 +3,7 @@ package agenstra
 import (
 	"encoding/json"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -18,7 +19,13 @@ func TestLiveMemoryTaskScopeEvaluation(t *testing.T) {
 		t.Fatal("live evaluation requires AGENT_MODEL, AGENT_MODEL_BASE_URL and AGENT_MODEL_API_KEY")
 	}
 	model.APIType, model.Thinking = os.Getenv("AGENT_MODEL_API_TYPE"), os.Getenv("AGENT_MODEL_THINKING")
-	model.MaxOutputTokens = 512
+	if value := os.Getenv("AGENSTRA_MEMORY_MAX_OUTPUT_TOKENS"); value != "" {
+		limit, err := strconv.Atoi(value)
+		if err != nil || limit <= 0 {
+			t.Fatal("AGENSTRA_MEMORY_MAX_OUTPUT_TOKENS must be a positive integer")
+		}
+		model.MaxOutputTokens = limit
+	}
 	records := []JSON{}
 	t.Cleanup(func() {
 		if path := os.Getenv("AGENSTRA_MEMORY_EVIDENCE_PATH"); path != "" {
@@ -53,7 +60,7 @@ func TestLiveMemoryTaskScopeEvaluation(t *testing.T) {
 					}
 				}
 				pass := err == nil && (lasting > 0) == tc.lasting
-				records = append(records, JSON{"case": tc.name, "attempt": attempt + 1, "text": tc.text, "expected_lasting": tc.lasting, "pass": pass, "proposals": proposals, "model_call": metrics, "error_code": ErrorCode(err)})
+				records = append(records, JSON{"case": tc.name, "attempt": attempt + 1, "text": tc.text, "expected_lasting": tc.lasting, "max_output_tokens": model.MaxOutputTokens, "pass": pass, "proposals": proposals, "model_call": metrics, "error_code": ErrorCode(err)})
 				t.Logf("case=%s pass=%t requests=%d input_tokens=%d output_tokens=%d proposals=%+v", tc.name, pass, metrics.Attempts, metrics.InputTokens, metrics.OutputTokens, proposals)
 				if !pass {
 					t.Errorf("task scope classification: lasting=%d expected=%t error_code=%s", lasting, tc.lasting, ErrorCode(err))
