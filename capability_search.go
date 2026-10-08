@@ -197,11 +197,31 @@ func selectedCapabilityNames(caps map[string]CapabilityDescription, grants map[s
 		}
 		addSingle(name)
 	}
-	for _, name := range filteredSearch {
-		add(name)
+	if len(filteredSearch) > 0 {
+		add(filteredSearch[0])
 	}
 	if state.InspectedCapability != nil {
 		add(*state.InspectedCapability)
+	}
+	// A later subject search must not erase tools already discovered for an
+	// unfinished multi-part request. Reuse the existing decision journal, while
+	// reserving the first result for the newest search and rechecking all grants.
+	for i := len(state.Decisions) - 1; i >= 0 && len(selected) < limit; i-- {
+		decision := state.Decisions[i]
+		kind, _ := decision["kind"].(string)
+		switch kind {
+		case "inspect_capability":
+			name, _ := decision["name"].(string)
+			add(name)
+		case "search_capabilities":
+			query, _ := decision["query"].(string)
+			for _, name := range searchAuthorizedCapabilities(caps, grants, query, 1) {
+				add(name)
+			}
+		}
+	}
+	for _, name := range filteredSearch {
+		add(name)
 	}
 	significant := capabilityQueryTerms(instruction, true)
 	for _, name := range searchAuthorizedCapabilities(caps, grants, strings.Join(significant, " "), limit) {

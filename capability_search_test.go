@@ -111,6 +111,54 @@ func TestCapabilitySearchEmptyStableAndLegacy(t *testing.T) {
 	}
 }
 
+func TestCapabilitySearchRetainsPriorDiscoveriesWithinCatalogBudget(t *testing.T) {
+	caps := searchTestCapabilities()
+	for _, name := range []string{"delta.read", "lambda.read"} {
+		caps[name] = CapabilityDescription{Name: name, InputSchema: JSON{"type": "object"}}
+	}
+	grants := map[string]bool{"alpha.read": true, "beta.read": true, "omega.submit_invoice": true, "delta.read": true, "lambda.read": true}
+	decisions := []Decision{
+		{Kind: "search_capabilities", Query: "omega.submit_invoice"},
+		{Kind: "search_capabilities", Query: "beta.read"},
+		{Kind: "inspect_capability", Name: "lambda.read"},
+		{Kind: "search_capabilities", Query: "delta.read"},
+	}
+	provider := &coreTestProvider{caps: caps}
+	r := &AgentRuntime{Provider: provider, Grants: grants, MaxContextCapabilities: 3, Model: decisionModelFunc(func(context.Context, ContextPacket, string) (Decision, error) {
+		next := decisions[0]
+		decisions = decisions[1:]
+		return next, nil
+	})}
+	state, err := r.NewState("Help me", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := r.Step(t.Context(), state, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	packet := r.Context(state)
+	names := capabilityNames(packet)
+	if len(names) != 3 || !containsString(names, "omega.submit_invoice") || !containsString(names, "beta.read") || !containsString(names, "lambda.read") {
+		t.Fatal("later discovery displaced an earlier needed contract", names)
+	}
+	if provider.called != 0 {
+		t.Fatal("discovery executed a business capability")
+	}
+	grants["omega.submit_invoice"] = false
+	if names := capabilityNames(r.Context(state)); containsString(names, "omega.submit_invoice") || containsString(names, "secret.audit") {
+		t.Fatal("discovery history bypassed current authorization", names)
+	}
+	if err := r.Step(t.Context(), state, nil); err != nil {
+		t.Fatal(err)
+	}
+	names = capabilityNames(r.Context(state))
+	if len(names) > 3 || names[0] != "delta.read" || !containsString(names, "lambda.read") {
+		t.Fatal("retained discoveries hid a new search or exceeded the budget", names)
+	}
+}
+
 func TestCapabilitySearchFindsDeferredUnionOperationsAndNestedParameters(t *testing.T) {
 	cap := CapabilityDescription{Name: "records.write", Description: "Manage records", InputSchema: JSON{"anyOf": []JSON{
 		JSON{"properties": JSON{
