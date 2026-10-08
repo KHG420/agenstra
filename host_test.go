@@ -424,6 +424,49 @@ func TestHostConcurrentDriversAndCancellation(t *testing.T) {
 	}
 }
 
+func TestHostCancellationInterruptsModelBeforeLongLeaseHeartbeat(t *testing.T) {
+	entered := make(chan struct{})
+	model := decisionModelFunc(func(ctx context.Context, _ ContextPacket, _ string) (Decision, error) {
+		close(entered)
+		<-ctx.Done()
+		return Decision{}, ctx.Err()
+	})
+	provider := &hostProvider{}
+	h := testHost(t, testStore(t), provider, &hostModel{})
+	h.Model = model
+	h.Settings.LeaseSeconds = 90
+	run := createTestHostRun(t, h)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	finished := make(chan error, 1)
+	go func() {
+		result, err := h.Drive(ctx, run.RunID, "alice")
+		if err == nil && result.Status != "cancelled" {
+			err = fmt.Errorf("unexpected cancellation status: %s", result.Status)
+		}
+		finished <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("model request did not start")
+	}
+	if _, err := h.Cancel(t.Context(), run.RunID, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatal(err)
+		}
+		if provider.calls != 0 {
+			t.Fatal("cancellation invoked a business provider")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("model cancellation waited for the 30-second lease heartbeat")
+	}
+}
+
 func TestHostStaleDriverCannotAdoptReplacementLease(t *testing.T) {
 	for _, branch := range []string{"cancellation", "state-budget"} {
 		t.Run(branch, func(t *testing.T) {

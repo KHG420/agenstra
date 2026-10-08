@@ -1381,6 +1381,10 @@ func (h *AgentHost) Drive(ctx context.Context, id, owner string) (StoredRun, err
 		defer close(done)
 		ticker := time.NewTicker(time.Duration(h.Settings.LeaseSeconds / 3 * 1e9))
 		defer ticker.Stop()
+		// Cancellation is persisted independently of the lease. Check it
+		// promptly without increasing the frequency of lease-renewal writes.
+		cancelTicker := time.NewTicker(time.Second)
+		defer cancelTicker.Stop()
 		for {
 			select {
 			case <-workCtx.Done():
@@ -1391,6 +1395,7 @@ func (h *AgentHost) Drive(ctx context.Context, id, owner string) (StoredRun, err
 					cancel()
 					return
 				}
+			case <-cancelTicker.C:
 				current, e := h.Store.GetRun(id, owner)
 				if e != nil {
 					heartbeatErr <- e
