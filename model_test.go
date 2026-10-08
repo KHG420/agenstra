@@ -141,12 +141,20 @@ func TestRuntimeJSONRecoveryIsBoundedBeforeExecution(t *testing.T) {
 		{"corrected tools alias", `{"schema":"agenstra.decision.v1","kind":"tool_batch","tools":[{"name":"notice.create","input":{}}]}`, valid, "Decision object field names (these are literal JSON keys):", true},
 		{"corrected decision alias", `{"decision":"tool_batch","calls":[{"name":"notice.create","arguments":{}}]}`, valid, "Decision object field names (these are literal JSON keys):", true},
 		{"repeated tools alias", `{"kind":"tool_batch","tools":[{"name":"notice.create","input":{}}]}`, `{"kind":"tool_batch","tools":[{"name":"notice.create","input":{}}]}`, "Decision object field names (these are literal JSON keys):", false},
+		{"corrected uppercase call ref", strings.Replace(valid, `"publish"`, `"groups-getAll-1"`, 1), valid, "call_ref must match ^[a-z][a-z0-9-]{0,63}$", true},
+		{"repeated uppercase call ref", strings.Replace(valid, `"publish"`, `"groups-getAll-1"`, 1), strings.Replace(valid, `"publish"`, `"groups-getAll-1"`, 1), "call_ref must match ^[a-z][a-z0-9-]{0,63}$", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				n := requests.Add(1)
 				if n == 1 {
+					if strings.Contains(tc.name, "uppercase call ref") {
+						var input struct{ Messages []struct{ Content string } }
+						if err := json.NewDecoder(r.Body).Decode(&input); err != nil || len(input.Messages) != 2 || !strings.Contains(input.Messages[0].Content, tc.correction) {
+							t.Error("first model request omitted the call reference constraint", err)
+						}
+					}
 					memoryModelReply(t, w, tc.first)
 					return
 				}
