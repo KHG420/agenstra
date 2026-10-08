@@ -63,7 +63,7 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 宿主沿用已有业务能力绑定和接线；部署管理员在框架开发者控制台的模型配置中保存输出策略即可。实际业务输入仍按该能力的 `input_schema` 校验，合法的决策输出不能代替业务参数或任务结果验收。
 
-单次能力调用优先通过 `submit_tool_call` 直接提交 `call_ref`、`capability`、`arguments`、`reason`；适配器将对象包装为原有 `tool_batch` 的一项，减少单次调用的数组嵌套。多个独立调用仍使用 `submit_tool_batch` 的原生 `calls` 数组。两者都只提出决策，业务参数、授权、审批和真实回执继续由运行内核校验。字符串形式的对象或数组不会被自动转换；减少包装不能保证模型遵守业务契约。对象输出工具的参考实现见 [Pydantic AI](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_output.py#L1546-L1578)。
+单次能力调用优先通过 `submit_tool_call` 直接提交 `capability`、`arguments`、`reason`；适配器将对象包装为原有 `tool_batch` 的一项，减少单次调用的数组嵌套。多个独立调用仍使用 `submit_tool_batch` 的原生 `calls` 数组。输出工具中的 `call_ref` 可省略，实际本地调用引用由适配器生成；模型提供的可选标签仍检查格式，但不决定运行内核的调用身份。调用被保存后，执行重试、审批和恢复继续沿用同一引用及原有参数摘要，不重新生成身份。业务参数、授权、审批和真实回执继续由运行内核校验。字符串形式的对象或数组不会被自动转换；减少包装不能保证模型遵守业务契约。对象输出工具的参考实现见 [Pydantic AI](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_output.py#L1546-L1578)；它的 [工具回执与重试映射](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/models/openai.py#L1974-L1989) 将调用标识与函数参数分开处理。
 
 网关仍可能在 `parallel_tool_calls=false` 时返回多个输出工具。框架拒绝整个响应，在原有纠正次数与预算内明确反馈每轮只能有一个输出工具，包括检查 Fact 时也须逐轮进行，不选择其中一个执行或自动合并。类型化输出的纠正提示移除旧内容 JSON 示例，保留字段、引用和完成复核约束。明确反馈多个结构化输出的参考实现见 [LangChain](https://github.com/langchain-ai/langchain/blob/007cc15b713cea17df63ba603aca6c7b27086638/libs/langchain_v1/langchain/agents/factory.py#L1287-L1308)。
 
@@ -79,7 +79,7 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 业务运行继续保留原有严格解析与有界纠正，不截取 JSON 前缀或剥除协议片段。`ModelCallMetrics.format_error` 区分 `model_response_invalid`、`model_output_empty`、`model_output_invalid_json`、`model_output_protocol_mismatch`、`model_decision_schema_invalid` 和 `model_memory_schema_invalid`。外层 `model_decision_invalid` 及既有纠正规则保持可用；诊断接口展示具体原因和后续成功纠正的记录。
 
-首次决策说明与格式纠正说明都提供本地 `call_ref` 的现有约束：`^[a-z][a-z0-9-]{0,63}$`。模型可以使用 `read-1`、`read-2` 等新引用；能力名称、操作名称和参数值继续遵守各自契约，包括操作名称里的大写字母。这个引用仅用于本次运行的调用身份，框架仍严格校验，不自动改写模型输出。提供输出约束及有界纠正的取舍参考 [Pydantic AI 的输出契约提示](https://github.com/pydantic/pydantic-ai/blob/721c78d6014f197c595a9c2a83789aa4dbf6d008/pydantic_ai_slim/pydantic_ai/_output.py#L722-L733) 和 [校验错误转为重试反馈](https://github.com/pydantic/pydantic-ai/blob/721c78d6014f197c595a9c2a83789aa4dbf6d008/pydantic_ai_slim/pydantic_ai/_output.py#L124-L126)。Agenstra 沿用自己的安全错误码和恢复预算。
+JSON 内容输出的首次决策说明与格式纠正说明都提供本地 `call_ref` 的现有约束：`^[a-z][a-z0-9-]{0,63}$`。模型可以使用 `read-1`、`read-2` 等新引用；能力名称、操作名称和参数值继续遵守各自契约，包括操作名称里的大写字母。这个引用仅用于本次运行的调用身份，框架仍严格校验。`output_tools` 由适配器分配本地引用，业务参数与事实引用不作类型转换或自动修复。提供输出约束及有界纠正的取舍参考 [Pydantic AI 的输出契约提示](https://github.com/pydantic/pydantic-ai/blob/721c78d6014f197c595a9c2a83789aa4dbf6d008/pydantic_ai_slim/pydantic_ai/_output.py#L722-L733) 和 [校验错误转为重试反馈](https://github.com/pydantic/pydantic-ai/blob/721c78d6014f197c595a9c2a83789aa4dbf6d008/pydantic_ai_slim/pydantic_ai/_output.py#L124-L126)。Agenstra 沿用自己的安全错误码和恢复预算。
 
 输出上限包含供应商计入输出的推理 tokens。`finish_reason=length` 返回 `model_output_truncated`；兼容网关返回空白正文、报告的输出量达到本次实际请求上限时，也归入该错误，而非普通 JSON 格式错误。没有已知请求上限或有效输出量时，不猜测空正文的原因。完整且通过契约校验的正文不会仅因用量达到上限而被拒绝。
 

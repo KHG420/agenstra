@@ -112,6 +112,12 @@ func TestDecisionOutputToolsPreserveSingleAndBatchCalls(t *testing.T) {
 				t.Fatal(err)
 			}
 			decision.ModelCall = nil
+			for i := range decision.Calls {
+				if !callRefPattern.MatchString(decision.Calls[i].CallRef) || decision.Calls[i].CallRef == want.Calls[i].CallRef {
+					t.Fatal("adapter did not assign a fresh local reference", decision.Calls[i].CallRef)
+				}
+				decision.Calls[i].CallRef = want.Calls[i].CallRef
+			}
 			gotJSON, err := CanonicalJSON(decision)
 			if err != nil {
 				t.Fatal(err)
@@ -122,6 +128,44 @@ func TestDecisionOutputToolsPreserveSingleAndBatchCalls(t *testing.T) {
 			}
 			if string(gotJSON) != string(wantJSON) {
 				t.Fatalf("got %s, want %s", gotJSON, wantJSON)
+			}
+		})
+	}
+}
+
+func TestDecisionOutputToolsAssignFreshCallReferences(t *testing.T) {
+	for _, tc := range []struct{ name, tool, arguments string }{
+		{"single without reference", "submit_tool_call", `{"capability":"pack.read","arguments":{"id":2},"reason":"Read"}`},
+		{"batch without references", "submit_tool_batch", `{"calls":[{"capability":"pack.read","arguments":{"id":2},"reason":"Read"},{"capability":"pack.read","arguments":{"id":3},"reason":"Read"}]}`},
+		{"repeated supplied reference", "submit_tool_call", `{"call_ref":"read-1","capability":"pack.read","arguments":{"id":2},"reason":"Read"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if err := json.NewEncoder(w).Encode(JSON{"choices": []any{JSON{
+					"message":       JSON{"tool_calls": []any{JSON{"type": "function", "function": JSON{"name": tc.tool, "arguments": tc.arguments}}}},
+					"finish_reason": "tool_calls",
+				}}}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer upstream.Close()
+			model, err := NewHTTPJSONDecisionModel("compatible-test-model", upstream.URL, "test-key", time.Second, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			model.DecisionOutputMode = "output_tools"
+			seen := map[string]bool{}
+			for range 2 {
+				decision, err := model.Decide(t.Context(), ContextPacket{Schema: "agenstra.context.v1"}, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, call := range decision.Calls {
+					if !callRefPattern.MatchString(call.CallRef) || seen[call.CallRef] || call.CallRef == "read-1" {
+						t.Fatalf("reference must be valid and assigned once by the adapter: %q", call.CallRef)
+					}
+					seen[call.CallRef] = true
+				}
 			}
 		})
 	}
@@ -224,7 +268,7 @@ func TestDecisionOutputToolPromptRetainsRuntimeRules(t *testing.T) {
 func TestDecisionOutputToolsRecoveryKeepsConstraintsWithoutConflictingFormat(t *testing.T) {
 	prompt := "Your previous review was invalid. Return exactly one final agenstra.decision.v1 JSON decision; no tools or other decision kinds are allowed during completion review.\nYour previous decision was invalid: tool_batch.calls has at most 4 items. Return one valid agenstra.decision.v1 JSON decision with no more than 4 calls.\nYour previous response was not a valid agenstra.decision.v1 JSON decision. Return exactly one raw JSON object without Markdown or code fences. Preserve the capability's input structure.\n" + decisionObjectShapePrompt
 	got := decisionOutputToolPrompt(prompt)
-	if strings.Contains(got, "JSON decision") || strings.Contains(got, "Return exactly one raw JSON") || strings.Contains(got, decisionObjectShapePrompt) || !strings.Contains(got, "no more than 4 calls") || !strings.Contains(got, "no capability calls or other decision kinds") || !strings.Contains(got, "Preserve the capability's input structure") || !strings.Contains(got, "new lowercase local reference") {
+	if strings.Contains(got, "JSON decision") || strings.Contains(got, "Return exactly one raw JSON") || strings.Contains(got, decisionObjectShapePrompt) || !strings.Contains(got, "no more than 4 calls") || !strings.Contains(got, "no capability calls or other decision kinds") || !strings.Contains(got, "Preserve the capability's input structure") || !strings.Contains(got, "adapter supplies a fresh local reference") {
 		t.Fatal(got)
 	}
 }
