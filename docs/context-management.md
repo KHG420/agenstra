@@ -30,7 +30,7 @@ utf8.RuneCountInString(systemPrompt) + utf8.RuneCount(CanonicalJSON(packet))
     <= MaxContextCharacters
 ```
 
-`Step()` 在添加修复反馈、重复调用提醒和数组检查提示后再次分配预算；度量与现有 HTTP 模型适配器的两条消息正文一致。它计入 JSON 转义、Fact 来源、遗漏路径和遗漏说明，但不代表模型的 token 容量，也不包含模型输出预算。
+`Step()` 在添加修复反馈、重复调用提醒和数组检查提示后再次分配预算。字符预算计入累计 packet 的 JSON 转义、Fact 来源、遗漏路径和遗漏说明，但不代表模型的 token 容量，也不包含模型输出预算。HTTP 适配器会额外呈现最近一次业务调用回执，并将旧检查历史移到独立的数据消息；`MeasureInput` 对实际发送的序列化请求计算 token 预算，包括这些消息及模型输出预留。
 
 正常情况下，全部有界预览、最近 12 条观察与已加载技能都能放入预算，直接保留。每个 Fact 预览仍以 6,000 字符为上限；过长观察参数仍通过 `arguments_omitted` 标记。
 
@@ -41,6 +41,7 @@ utf8.RuneCountInString(systemPrompt) + utf8.RuneCount(CanonicalJSON(packet))
 | 系统说明、原任务、所有用户补充 | 完整保留。 |
 | Fact 身份与来源 | 保留全部 ID、来源版本、时间、引用作用域、失效时间和 `reference_available`。 |
 | 当前 `inspected_fact` / `inspected_capability` | 完整保留已有检查视图或完整 schema，避免检查内容被立即挤掉。Fact 检查视图本身仍有界。 |
+| 可选 `inspection_history` | 从现有决策记录和完整 Fact 重建，最多保留 12 个不同 Fact/路径的旧检查视图，按检查时间排列；当前检查不重复出现。预算压力下先省略最旧条目，并在 `context_omissions` 中给出数量。 |
 | 最新加载的技能 | 完整保留；重新 `read_skill` 会把该技能移到最新位置。 |
 | 最新观察结果 | 至少保留最后一次状态、Fact ID 或错误码。参数可通过标记省略。 |
 
@@ -49,7 +50,7 @@ utf8.RuneCountInString(systemPrompt) + utf8.RuneCount(CanonicalJSON(packet))
 1. 暂时移出较旧的长技能，记录 `skill: NAME; read_skill to load again`。如果一段短技能比遗漏说明更小，直接保留。
 2. 为最新 Fact 的有界预览预留空间，从最旧观察开始省略参数，保持调用结果与错误码。完整参数仍在原状态与审计记录中。
 3. 若仍不足，按输入 schema 大小将能力目录改为名称、字段名和 `schema_requires_inspection` 标记。所有能力身份、描述、授权与执行元数据继续保留；当前检查出的完整 schema 不参与裁剪。
-4. 从最旧端缩短观察窗口，更新准确的遗漏数量，保留最新一次结果。
+4. 从最旧端省略检查历史条目，记录数量；仍不足时缩短观察窗口，保留最新一次结果。
 5. 若必需视图仍超限，减少可选的数组长度提示；每个 Fact 的 `omitted_paths` 继续保留。
 6. 将剩余空间按 Fact 从新到旧分配预览。每个候选都测量整个包的实际序列化大小，包括遗漏路径的额外开销；候选超限时降低其预览预算。
 7. 使用剩余空间重新放回较旧技能，并撤回已恢复技能的遗漏说明。
@@ -68,6 +69,10 @@ Fact 预览计算对象和数组的结构开销以及标量替代值。整体能
 - `$fact_value` 在执行工具调用前解析完整原始值，因此传参不受模型预览裁剪影响。
 - `inspect_capability(name)` 获取完整契约，`read_skill(name)` 重新加载技能。
 - `reference_available=false` 表示引用不可继续使用；历史证据保留不等于恢复连接内 ID 或过期引用的有效性。
+
+`inspection_history` 的每项沿用当前检查的 `fact_id`、`path`、`preview`、`omitted_paths` 和可用的数组长度元数据；路径相对于原 Fact.value。重建时重新经过 `model_output` 投影，隐藏字段不会进入模型。它不新增数据库字段、重复业务读取或改变原始 Fact；重复检查同一路径只占一项，恢复旧检查点也可从原决策记录重建。HTTP 适配器把这些条目作为历史工具结果数据呈现一次，不作为新的任务或授权。
+
+多次结果保留及预算裁剪的取舍参考 [OpenHands 的累计事件到消息转换](https://github.com/OpenHands/software-agent-sdk/blob/0bb7b525c75f4a9a0606844fc4a2579106b08d32/openhands-sdk/openhands/sdk/agent/utils.py#L581-L633)、[Pydantic AI 的消息历史追加](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_agent_graph.py#L2048-L2088) 和 [OpenCode 的近期工具结果保护](https://github.com/anomalyco/opencode/blob/5d9cd9b259f0456522f318a7435501d03cfbee79/packages/opencode/src/session/compaction.ts#L271-L315)。Agenstra 使用自己的 JSON 决策和现有证据存储；12 条上限是本框架的有界视图选择，没有照搬上游的 token 阈值或引入自动摘要请求。
 
 启用 `max_context_capabilities` 后，运行先选择数量受限的授权能力，优先提供这些能力的完整输入 Schema；整份上下文预算不足时才缩略契约并保留 `schema_requires_inspection` 标记。`search_capabilities(query)` 在当前固定版本及实时授权范围内检索名称、描述和完整输入 Schema 中的字段、`const` / `enum` 字符串及参数说明，包括联合分支和嵌套参数。它只读取目录，不调用业务接口；命中能力进入下一轮目录，仍被缩略的契约通过 `inspect_capability` 展开。宿主应在模块描述中保留可执行操作名和业务词汇，避免大 Schema 延迟展开后只剩“修改”等笼统说明。空搜索结果只表示当前查询没有授权匹配，不能推断宿主不支持该操作或用户没有权限；历史回答也不能覆盖当前目录。未启用目录数量限制时，沿用原有 `ModelView` 的 2,000 字符缩略规则。
 

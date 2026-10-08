@@ -133,6 +133,24 @@ func budgetContext(packet ContextPacket, state *RuntimeState, available int) Con
 			packet.Capabilities[i] = deferred
 		}
 	}
+	// The current inspection stays required. Older inspected results are useful
+	// evidence, but must not make an otherwise valid minimum packet oversized.
+	packet.InspectionHistory = slices.Clone(packet.InspectionHistory)
+	omittedInspections := 0
+	for _, note := range baseOmissions {
+		if strings.HasPrefix(note, "inspection_history:") {
+			if _, err := fmt.Sscanf(note, "inspection_history: %d older entries", &omittedInspections); err != nil {
+				omittedInspections = 0
+			}
+		}
+	}
+	for len(packet.InspectionHistory) > 0 && !fitsRecent(packet) {
+		packet.InspectionHistory = packet.InspectionHistory[1:]
+		omittedInspections++
+		baseOmissions = slices.DeleteFunc(baseOmissions, func(note string) bool { return strings.HasPrefix(note, "inspection_history:") })
+		baseOmissions = append(baseOmissions, fmt.Sprintf("inspection_history: %d older entries; inspect_fact to reload", omittedInspections))
+		packet = withNotes(packet, baseOmissions)
+	}
 	// Keep the last outcome, including failures with no Fact available to inspect.
 	for len(packet.Observations) > 1 && !fitsRecent(packet) {
 		packet.Observations = packet.Observations[1:]

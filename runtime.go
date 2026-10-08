@@ -437,7 +437,11 @@ func (r *AgentRuntime) contextCandidate(state *RuntimeState) ContextPacket {
 	if r.MaxContextCapabilities > 0 {
 		features = append(features, "capability_search")
 	}
-	packet := ContextPacket{OriginPackID: r.OriginPackID, Schema: "agenstra.context.v1", Instruction: state.Instruction, Capabilities: caps, Facts: views, Observations: obs, RoundIndex: state.RoundsUsed, RoundsRemaining: r.MaxModelRounds - state.RoundsUsed, ToolCallsRemaining: r.MaxToolCalls - state.ToolCallsUsed, Skills: skillViews, LoadedSkills: loaded, InspectedCapability: inspected, InspectedFact: state.InspectedFact, Followups: state.Followups, RuntimeFeatures: features, ContextOmissions: omissions, Memories: append([]MemoryView{}, r.Memories...)}
+	history, omittedInspections := inspectionHistory(state)
+	if omittedInspections > 0 {
+		omissions = append(omissions, fmt.Sprintf("inspection_history: %d older entries; inspect_fact to reload", omittedInspections))
+	}
+	packet := ContextPacket{OriginPackID: r.OriginPackID, Schema: "agenstra.context.v1", Instruction: state.Instruction, Capabilities: caps, Facts: views, Observations: obs, RoundIndex: state.RoundsUsed, RoundsRemaining: r.MaxModelRounds - state.RoundsUsed, ToolCallsRemaining: r.MaxToolCalls - state.ToolCallsUsed, Skills: skillViews, LoadedSkills: loaded, InspectedCapability: inspected, InspectedFact: state.InspectedFact, InspectionHistory: history, Followups: state.Followups, RuntimeFeatures: features, ContextOmissions: omissions, Memories: append([]MemoryView{}, r.Memories...)}
 	if r.MaxContextCapabilities > 0 {
 		packet.CapabilityCatalogTotal = catalogTotal
 		packet.CapabilitySearchQuery = state.CapabilitySearchQuery
@@ -778,7 +782,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		state.CapabilitySearchQuery = decision.Query
 		state.CapabilitySearchResults = searchAuthorizedCapabilities(r.Provider.Capabilities(), r.Grants, decision.Query, r.MaxContextCapabilities)
 	case "inspect_fact":
-		selected, err := ResolveArgument(JSON{"$fact_value": JSON{"fact_id": decision.FactID, "path": decision.Path}}, facts, r.ConnectionID, false)
+		view, err := inspectionView(facts, decision.FactID, decision.Path)
 		if err != nil {
 			state.InspectedFact = JSON{"error_code": err.Error()}
 			break
@@ -789,25 +793,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			key = progressKey(fact.Value)
 		}
 		recordInspection(state, JSON{"fact": key, "path": decision.Path})
-		fact.Value = JSON{"value": selected}
-		fact.ModelOutput = nil
-		view := factView(fact, 6000)
-		state.InspectedFact = JSON{"fact_id": decision.FactID, "path": decision.Path, "preview": view.Value, "omitted_paths": view.OmittedPaths}
-		if a, ok := selected.([]any); ok {
-			state.InspectedFact["array_length"] = len(a)
-		}
-		for i := len(decision.Path) - 1; i >= 0; i-- {
-			if index, ok := jsonvalue.Index(decision.Path[i]); ok {
-				parent, e := valueAt(facts[decision.FactID].Value, decision.Path[:i])
-				if e == nil {
-					if a, ok := parent.([]any); ok {
-						state.InspectedFact["parent_array_length"] = len(a)
-						state.InspectedFact["inspected_index"] = index
-					}
-				}
-				break
-			}
-		}
+		state.InspectedFact = view
 	case "inspect_capability":
 		state.InspectedCapability = nil
 		if _, ok := r.Provider.Capabilities()[decision.Name]; !ok || !r.Grants[decision.Name] {

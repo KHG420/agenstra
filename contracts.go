@@ -105,6 +105,7 @@ type ContextPacket struct {
 	LoadedSkills            map[string]string `json:"loaded_skills"`
 	InspectedCapability     JSON              `json:"inspected_capability"`
 	InspectedFact           JSON              `json:"inspected_fact"`
+	InspectionHistory       []JSON            `json:"inspection_history,omitempty"`
 	Followups               []string          `json:"followups"`
 	RuntimeFeatures         []string          `json:"runtime_features"`
 	ContextOmissions        []string          `json:"context_omissions"`
