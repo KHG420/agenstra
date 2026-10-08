@@ -395,7 +395,7 @@
     const report = await userRequest(path + "/diagnostics");
     const result = $("diagnostic-result"); result.replaceChildren();
     const heading = document.createElement("h3"); heading.textContent = `任务 ${report.run_id} · ${report.status}`; result.append(heading);
-    const metrics = document.createElement("p"); metrics.textContent = `耗时 ${(report.elapsed_ms / 1000).toFixed(1)} 秒 · 业务调用 ${report.budget.tool_calls.used} 次 · 模型预算计入 ${report.budget.tokens.charged_tokens} tokens`; result.append(metrics);
+    const metrics = document.createElement("p"); metrics.textContent = `耗时 ${(report.elapsed_ms / 1000).toFixed(1)} 秒 · 工具调用 ${report.budget.tool_calls.used} 次 · 模型预算计入 ${report.budget.tokens.charged_tokens} tokens`; result.append(metrics);
     models.renderUsage(result, report.budget.usage_by_purpose, report.budget.usage);
     for (const finding of report.findings) {
       const item = document.createElement("div"); item.className = "diagnostic-finding";

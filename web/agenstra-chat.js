@@ -225,7 +225,7 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
       }
       if (run?.telemetry?.budget) {
         const detail = document.createElement("span");
-        detail.textContent = (this.getAttribute("lang") === "en" ? "Tool calls: " : "业务调用：") + run.telemetry.budget.tool_calls.used;
+        detail.textContent = (this.getAttribute("lang") === "en" ? "Tool calls: " : "工具调用：") + run.telemetry.budget.tool_calls.used;
         status.append(detail);
       }
       turn.append(status);
@@ -243,7 +243,7 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
           const summary = document.createElement("p"); summary.className = "notice";
           const seconds = (report.elapsed_ms / 1000).toFixed(1);
           const calls = report.budget?.tool_calls?.used ?? 0;
-          summary.textContent = this.getAttribute("lang") === "en" ? `Elapsed: ${seconds}s · Tool calls: ${calls}` : `耗时：${seconds} 秒 · 业务调用：${calls}`;
+          summary.textContent = this.getAttribute("lang") === "en" ? `Elapsed: ${seconds}s · Tool calls: ${calls}` : `耗时：${seconds} 秒 · 工具调用：${calls}`;
           turn.append(summary);
           for (const finding of report.findings || []) {
             const p = document.createElement("p"); p.className = "notice";
