@@ -128,4 +128,6 @@ CLI 使用既有 AGENSTRA_SERVER / AGENSTRA_ADMIN_API_KEY。models.json 包含 M
 
 中文完整指令的初始能力检索使用 Han 短语与原有名称、描述、输入字段评分，仍只读取固定目录和当前授权，不新增模型请求、分词依赖或业务 IO。选择浏览器动作时优先保留已授权的 ui.get_context 前置能力。目录默认上限继续为 0（全部）；可通过既有 max_context_capabilities 启用限量选择。非常小的限制可能先显示前置能力，并需要后续搜索。
 
+带点号的名称同时保留完整匹配和名称分段，例如 `records.getCurrentRecord` 可发现输入契约中声明的 `getCurrentRecord`；英文名称紧贴中文时也保留这项检索。目录上限、当前授权和完整能力名保持不变，不把相似操作重命名为用户指定的操作。分段检索参考 [Pydantic AI 的本地工具关键词检索](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/toolsets/_tool_search.py#L96-L129)，本框架继续保留现有中文短语与输入契约检索。
+
 短语检索不等同语义理解，也不能保证英文描述可以自动理解中文同义词。能力描述仍需表达宿主实际业务。调整目录与推理参数后，应验收实际请求总量、审批与最终业务状态；不能仅以 completed 或首轮 token 下降判断优化成功。

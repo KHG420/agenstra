@@ -199,6 +199,34 @@ func TestCapabilitySearchFindsDeferredUnionOperationsAndNestedParameters(t *test
 	}
 }
 
+func TestCapabilitySearchFindsQualifiedOperationsAdjacentToChinese(t *testing.T) {
+	schema := JSON{"type": "object", "properties": JSON{"operation": JSON{"enum": []string{"getCurrentRecord"}}}}
+	caps := map[string]CapabilityDescription{
+		"ui.get_context":  {Name: "ui.get_context", Description: "Read current browser context"},
+		"ui.records_read": {Name: "ui.records_read", Description: "Read records", InputSchema: schema, Operation: &OperationBinding{PollCapability: "ui.command_status"}},
+		"private.records": {Name: "private.records", Description: "Read records", InputSchema: schema},
+		"alpha.read":      {Name: "alpha.read", Description: "Read unrelated data"},
+	}
+	grants := map[string]bool{"ui.get_context": true, "ui.records_read": true, "alpha.read": true}
+	for _, query := range []string{"records.getCurrentRecord", "RECORDS.GETCURRENTRECORD", "请调用records.getCurrentRecord()，不要用相似接口替代", "module.records.getCurrentRecord"} {
+		if got := searchAuthorizedCapabilities(caps, grants, query, 1); len(got) != 1 || got[0] != "ui.records_read" {
+			t.Fatalf("qualified operation %q not found: %v", query, got)
+		}
+	}
+	runtime := &AgentRuntime{Provider: &coreTestProvider{caps: caps}, Grants: grants, MaxContextCapabilities: 2}
+	state, err := runtime.NewState("请调用records.getCurrentRecord()", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := capabilityNames(runtime.Context(state)); len(names) != 2 || !containsString(names, "ui.records_read") || !containsString(names, "ui.get_context") || containsString(names, "private.records") {
+		t.Fatal("qualified operation lost its authorized prerequisite", names)
+	}
+	grants["ui.records_read"] = false
+	if got := searchAuthorizedCapabilities(caps, grants, "records.getCurrentRecord", 4); len(got) != 0 {
+		t.Fatal("qualified operation exposed a revoked capability", got)
+	}
+}
+
 func TestCapabilitySearchDoesNotLetBroadSchemaFieldsDisplaceNamedSubjects(t *testing.T) {
 	caps := map[string]CapabilityDescription{
 		"alpha.bulk_read": {Name: "alpha.bulk_read", Description: "Manage unrelated records", InputSchema: JSON{"type": "object", "properties": JSON{

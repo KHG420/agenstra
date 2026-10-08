@@ -2,6 +2,7 @@ package agenstra
 
 import (
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -11,6 +12,8 @@ type capabilityMatch struct {
 	name  string
 	score int
 }
+
+var qualifiedCapabilityQueryPattern = regexp.MustCompile(`[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)+`)
 
 // Han text has no space-delimited words. Overlapping short phrases retain
 // natural-language matches without a dictionary, model request or business IO.
@@ -33,6 +36,15 @@ func capabilityQueryTerms(query string, significantOnly bool) []string {
 		}
 		if !significantOnly || hasHan || len(runes) >= 3 {
 			add(part)
+		}
+		// Keep full capability names while also discovering operations named as
+		// module.operation, including identifiers directly beside Han text.
+		for _, qualified := range qualifiedCapabilityQueryPattern.FindAllString(part, -1) {
+			for _, component := range strings.Split(qualified, ".") {
+				if !significantOnly || len(component) >= 3 {
+					add(component)
+				}
+			}
 		}
 		if hasHan {
 			for i := range runes {
