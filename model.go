@@ -156,6 +156,7 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	if err != nil {
 		return nil, ModelDecisionError{"model_decision_invalid"}
 	}
+	outputLimit := int64(m.MaxOutputTokens)
 	if metrics := modelMetrics(ctx); metrics != nil {
 		// UTF-8 bytes plus a framing allowance are a bounded fallback, not a
 		// tokenizer result. Provider usage replaces these estimates when available.
@@ -180,6 +181,7 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 				return nil, ModelDecisionError{"model_token_limit_invalid"}
 			}
 			payload[field] = limit
+			outputLimit = limit
 			raw, err = CanonicalJSON(payload)
 			if err != nil {
 				return nil, ModelDecisionError{"model_decision_invalid"}
@@ -357,7 +359,13 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	if envelope.Choices[0].FinishReason == "length" {
 		return nil, ModelDecisionError{"model_output_truncated"}
 	}
-	if envelope.Choices[0].Message.Content == "" {
+	if strings.TrimSpace(envelope.Choices[0].Message.Content) == "" {
+		// Some compatible gateways report stop even when reasoning consumed the
+		// whole allowance. Only infer exhaustion from a known request limit and
+		// a sane reported output count; an ordinary empty response stays invalid.
+		if usage := envelope.Usage; outputLimit > 0 && usage != nil && usage.Output != nil && *usage.Output >= outputLimit && *usage.Output <= 1000000000 {
+			return nil, ModelDecisionError{"model_output_truncated"}
+		}
 		return nil, invalidModelOutput(ctx, "model_output_empty")
 	}
 	return unwrapModelJSON([]byte(envelope.Choices[0].Message.Content)), nil

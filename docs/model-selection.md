@@ -69,6 +69,12 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 业务运行继续保留原有严格解析与有界纠正，不截取 JSON 前缀或剥除协议片段。`ModelCallMetrics.format_error` 区分 `model_response_invalid`、`model_output_empty`、`model_output_invalid_json`、`model_output_protocol_mismatch`、`model_decision_schema_invalid` 和 `model_memory_schema_invalid`。外层 `model_decision_invalid` 及既有纠正规则保持可用；诊断接口展示具体原因和后续成功纠正的记录。
 
+输出上限包含供应商计入输出的推理 tokens。`finish_reason=length` 返回 `model_output_truncated`；兼容网关返回空白正文、报告的输出量达到本次实际请求上限时，也归入该错误，而非普通 JSON 格式错误。没有已知请求上限或有效输出量时，不猜测空正文的原因。完整且通过契约校验的正文不会仅因用量达到上限而被拒绝。
+
+业务决策遇到输出耗尽时，在现有每个决策或完成复核阶段最多两次模型请求（含首次请求）的范围内，提示模型缩短决策、分步处理并使用已有回执。恢复继续消耗原有轮次、累计 token 和时间预算，不自动提高配置的输出限制，不执行被截断的工具调用；完成复核仍只允许 final。每次失败与恢复请求分别保留用量，输出耗尽恢复不计作 `format_recovery_requests`。记忆抽取和控制台合成检查保留直接返回错误的行为。
+
+依据：[Roo Code 的推理及输出预算](https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/shared/api.ts#L99)、[Cline 的摘要预算调整及有界输出恢复](https://github.com/cline/cline/blob/faf05ef067dd4f5908c9e909dd757581089905ca/sdk/CHANGELOG.md#L72)。这些实现提供预算和恢复策略的参考，具体额度仍须通过部署方选定的模型验证。
+
 ## 指标与费用
 
 每次调用记录配置名称、请求模型、响应模型、API 类型、推理设置、总输入/输出、缓存输入、推理输出和耗时。缓存输入兼容 OpenAI 的 `prompt_tokens_details.cached_tokens` 与 DeepSeek 的 `prompt_cache_hit_tokens`；推理输出读取 `completion_tokens_details.reasoning_tokens`。不保存推理正文。

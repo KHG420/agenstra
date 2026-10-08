@@ -522,6 +522,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		return nil
 	}
 	feedback := ""
+	formatRecovery := false
 	var decision Decision
 	var review *Decision
 	for attempt := 0; attempt < 2; attempt++ {
@@ -683,7 +684,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		if d.ModelCall != nil {
 			metrics = *d.ModelCall
 		}
-		metrics.FormatRecovery = attempt > 0
+		metrics.FormatRecovery = formatRecovery
 		metrics.Round = state.RoundsUsed
 		metrics.Purpose = purpose
 		metrics.Reservation = false
@@ -719,6 +720,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 				recordDecision(state, d)
 				review = &d
 				feedback = ""
+				formatRecovery = false
 				attempt = -1
 				continue
 			}
@@ -726,18 +728,24 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			break
 		}
 		code := modelErrorCode(err)
-		if code != "model_decision_invalid" {
+		if code != "model_decision_invalid" && code != "model_output_truncated" {
 			state.Status = "failed"
 			state.ErrorCode = strptr(code)
 			return nil
 		}
 		if attempt == 1 || state.RoundsUsed >= r.MaxModelRounds {
 			state.Status = "failed"
-			state.ErrorCode = strptr("model_decision_invalid")
+			state.ErrorCode = strptr(code)
 			return nil
 		}
+		formatRecovery = code == "model_decision_invalid"
 		var oversized DecisionTooManyCallsError
-		if review != nil {
+		if code == "model_output_truncated" {
+			feedback = "\nYour previous response reached the output token limit. Return one concise, complete agenstra.decision.v1 JSON decision within the same output budget. Split large work across separate decisions and use retained Facts and action_outcomes. Never repeat a successful write."
+			if review != nil {
+				feedback += " This is completion review: return only a final decision; tools and other decision kinds are not allowed."
+			}
+		} else if review != nil {
 			feedback = "\nYour previous review was invalid. Return exactly one final agenstra.decision.v1 JSON decision; no tools or other decision kinds are allowed during completion review."
 		} else if errors.As(err, &oversized) {
 			feedback = "\nYour previous decision was invalid: tool_batch.calls has at most 4 items. Return one valid agenstra.decision.v1 JSON decision with no more than 4 calls."
