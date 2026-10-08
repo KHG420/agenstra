@@ -228,22 +228,40 @@ func factView(f Fact, budget int) FactView {
 			out := JSON{}
 			remaining := n - 2
 			keys := make([]string, 0, len(t))
-			for k := range t {
+			costs := make(map[string]int, len(t))
+			for k, value := range t {
+				encoded, err := CanonicalJSON(value)
+				if err != nil {
+					omitted = append(omitted, append([]any{}, path...))
+					return nil
+				}
+				key, err := CanonicalJSON(k)
+				if err != nil {
+					omitted = append(omitted, append([]any{}, path...))
+					return nil
+				}
+				costs[k] = utf8.RuneCount(key) + 2 + utf8.RuneCount(encoded)
 				keys = append(keys, k)
 			}
-			sort.Strings(keys)
-			for i, k := range keys {
+			// Small siblings consume their exact space first, leaving their unused
+			// share for large nested values instead of losing it at each envelope.
+			sort.Slice(keys, func(i, j int) bool {
+				if costs[keys[i]] == costs[keys[j]] {
+					return keys[i] < keys[j]
+				}
+				return costs[keys[i]] < costs[keys[j]]
+			})
+			for _, k := range keys {
 				keyJSON, err := CanonicalJSON(k)
 				if err != nil {
 					break
 				}
 				overhead := utf8.RuneCount(keyJSON) + 2
-				slots := len(keys) - i
 				if remaining < overhead+4 {
 					break
 				}
 				p := append(append([]any{}, path...), k)
-				preview := visit(t[k], p, max(4, (remaining-overhead)/slots))
+				preview := visit(t[k], p, remaining-overhead)
 				// Omitted object fields must not look like provider-reported nulls
 				// or empty containers. Keep real null/empty values and array indices.
 				omittedValue := preview == nil && t[k] != nil

@@ -385,3 +385,75 @@ func TestCoreTransientBatchApprovalBlocksAllIO(t *testing.T) {
 		t.Fatalf("approval bypass: status=%s calls=%d", result.Status, provider.called)
 	}
 }
+
+func TestCoreFactPreviewNestedListKeepsSmallFields(t *testing.T) {
+	rows := make([]any, 20)
+	for i := range rows {
+		rows[i] = JSON{
+			"id": i + 10, "user_id": 2, "group_id": 10, "status": "active",
+			"daily_usage_usd": 0, "weekly_usage_usd": 0, "monthly_usage_usd": 0,
+			"daily_window_start": nil, "weekly_window_start": nil, "monthly_window_start": nil,
+			"created_at": "2026-10-09T08:30:00.000000+08:00", "updated_at": "2026-10-09T08:30:00.000000+08:00",
+			"starts_at": "2026-10-09T08:30:00.000000+08:00", "expires_at": "2026-11-09T08:30:00.000000+08:00",
+			"revoked_at": "2026-10-09T08:30:00.000000+08:00",
+		}
+	}
+	value := JSON{"status": "succeeded", "command_id": "command-1", "data": JSON{
+		"command_id": "command-1", "result": JSON{"data": JSON{
+			"total": 20, "page": 1, "page_size": 20, "pages": 1, "items": rows,
+		}},
+	}}
+	before, err := CanonicalJSON(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, budget := range []int{3000, 6000} {
+		t.Run(fmt.Sprint(budget), func(t *testing.T) {
+			view := factView(Fact{Value: value}, budget)
+			encoded, err := CanonicalJSON(view.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if utf8.RuneCount(encoded) > budget {
+				t.Fatalf("preview exceeds budget: %d > %d", utf8.RuneCount(encoded), budget)
+			}
+			preview, err := valueAt(view.Value, []any{"data", "result", "data", "items"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			items, ok := preview.([]any)
+			if !ok || len(items) != len(rows) {
+				t.Fatalf("array indices changed: %v", preview)
+			}
+			for i, item := range items {
+				row, ok := item.(JSON)
+				if !ok {
+					t.Fatalf("row %d is not an object", i)
+				}
+				for _, key := range []string{"id", "user_id", "group_id", "status"} {
+					if got, exists := row[key]; !exists || got != rows[i].(JSON)[key] {
+						t.Errorf("row %d lost %s", i, key)
+					}
+				}
+			}
+			if len(view.OmittedPaths) == 0 {
+				t.Fatal("truncated values have no omission metadata")
+			}
+			after, err := CanonicalJSON(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(before) != string(after) {
+				t.Fatal("preview changed the retained Fact")
+			}
+			second, err := CanonicalJSON(factView(Fact{Value: value}, budget))
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := CanonicalJSON(view)
+			if err != nil || string(first) != string(second) {
+				t.Fatal("preview is not deterministic", err)
+			}
+		})
+	}
+}
