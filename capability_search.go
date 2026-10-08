@@ -135,11 +135,11 @@ func searchAuthorizedCapabilities(caps map[string]CapabilityDescription, grants 
 				score += 8
 			case strings.Contains(nameText, term):
 				score += 5
+			case strings.Contains(description, term):
+				score += 2
 			case strings.Contains(fields, term):
 				// Keep operation and field discovery, without letting a broad
-				// contract's incidental parameters outweigh a named subject.
-				score++
-			case strings.Contains(description, term):
+				// contract's incidental parameters outweigh its stated purpose.
 				score++
 			}
 		}

@@ -212,6 +212,8 @@ func TestCapabilitySearchDoesNotLetBroadSchemaFieldsDisplaceNamedSubjects(t *tes
 	for _, tc := range []struct{ query, want string }{
 		{"today usage statistics batch", "zeta.usage_read"},
 		{"system version host", "zeta.system_read"},
+		{"version", "zeta.system_read"},
+		{"business version", "zeta.system_read"},
 	} {
 		if got := searchAuthorizedCapabilities(caps, grants, tc.query, 1); len(got) != 1 || got[0] != tc.want {
 			t.Fatalf("subject query %q displaced by incidental schema fields: %v", tc.query, got)
