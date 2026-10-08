@@ -7,7 +7,9 @@ for (const lostResponse of ["connection", "JSON"]) {
     const runs = new Map(), bodies = [];
     let fail = true, generated = 0;
     const c = new AgenstraClient({ integration: "app", browser: true, storage: null, getSession: async () => "ticket",
-      fetch: async (_path, options) => {
+      fetch: async (path, options) => {
+        if (path.endsWith("/poll")) return { ok: true, status: 200, json: async () => ({ commands: [] }) };
+        assert.equal(path, "/browser/v1/runs");
         const body = JSON.parse(options.body);bodies.push(body);
         if (!runs.has(body.request_id)) runs.set(body.request_id, { run_id: "run-" + runs.size });
         if (fail) {

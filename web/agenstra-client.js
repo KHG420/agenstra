@@ -227,7 +227,7 @@ export class AgenstraClient {
     this.pageObservationBinding = { sessionId: this.browser.id, generation: this.browser.generation, revision: this.browser.context_revision };
     this.save("browser", this.browser);
   }
-  async pollBrowser() {
+  async pollBrowser({ schedule = true } = {}) {
     if (this.closed) return;
     const epoch = this.browserEpoch;
     try {
@@ -248,9 +248,10 @@ export class AgenstraClient {
       this.browserConnected = false;
       this.emit("error", error);
       this.emit("connection", { status: "disconnected" });
+      if (!schedule) throw error;
       if (["browser_generation_changed", "browser_session_invalid"].includes(error.code)) return;
     }
-    if (!this.closed && epoch === this.browserEpoch && !this.recoveryPromise) this.browserTimer = setTimeout(() => this.pollBrowser(), this.options.pollInterval || 1000);
+    if (schedule && !this.closed && epoch === this.browserEpoch && !this.recoveryPromise) this.browserTimer = setTimeout(() => this.pollBrowser(), this.options.pollInterval || 1000);
   }
   async executeCommand(command) {
     if (this.executing) return;
@@ -413,7 +414,16 @@ export class AgenstraClient {
     try {
       const conversation = await this.getConversation();
       await this.connectBrowser();
-      return await this.request("/chat/v1/conversations/" + conversation.id + "/messages", { method: "POST", browserKey: this.browser?.key, body: { client_id: clientId, text, ...(sources.length ? { sources } : {}), session_id: this.browser?.id || "" } });
+      if (this.options.browser) await this.pollBrowser({ schedule: false });
+      const submit = () => this.request("/chat/v1/conversations/" + conversation.id + "/messages", { method: "POST", browserKey: this.browser?.key, body: { client_id: clientId, text, ...(sources.length ? { sources } : {}), session_id: this.browser?.id || "" } });
+      try { return await submit(); }
+      catch (error) {
+        // The server rejects this contract before publishing the message.
+        // Recovery still refuses active or unverified work on the old session.
+        if (!(error instanceof AgenstraError) || error.status !== 409 || error.code !== "browser_profile_changed") throw error;
+        await this.recoverBrowser();
+        return await submit();
+      }
     }
     catch (error) { error.clientId = clientId; throw error; }
   }
@@ -491,7 +501,15 @@ export class AgenstraClient {
   async run(instruction, { requestId = this.id(), sources = [] } = {}) {
     try {
       await this.connectBrowser();
-      return await this.request("/browser/v1/runs", { method: "POST", browserKey: this.browser.key, body: { integration_id: this.options.integration, session_id: this.browser.id, instruction, ...(sources.length ? { sources } : {}), request_id: requestId } });
+      if (this.options.browser) await this.pollBrowser({ schedule: false });
+      const submit = () => this.request("/browser/v1/runs", { method: "POST", browserKey: this.browser.key, body: { integration_id: this.options.integration, session_id: this.browser.id, instruction, ...(sources.length ? { sources } : {}), request_id: requestId } });
+      try { return await submit(); }
+      catch (error) {
+        // A confirmed profile rejection did not publish this run. Keep its ID.
+        if (!(error instanceof AgenstraError) || error.status !== 409 || error.code !== "browser_profile_changed") throw error;
+        await this.recoverBrowser();
+        return await submit();
+      }
     } catch (error) { error.requestId = requestId; throw error; }
   }
   async destroy({ closeSession = true } = {}) {

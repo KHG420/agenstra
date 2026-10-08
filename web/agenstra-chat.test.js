@@ -162,6 +162,34 @@ test("telemetry clock ticks preserve message controls while visible counters sti
   } finally { globalThis.document = previous; }
 });
 
+test("switching conversation clears only the previous composer's failure and retry identity", () => {
+  const previous = globalThis.document;
+  class Element {
+    constructor() { this.children = []; this.dataset = {}; this.textContent = ""; }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    querySelectorAll() { return []; }
+    removeAttribute() {}
+  }
+  globalThis.document = { createElement: () => new Element() };
+  try {
+    const chat = Object.create(AgenstraChat.prototype);
+    chat.log = Object.assign(new Element(), { scrollHeight: 0, scrollTop: 0, clientHeight: 100 });
+    chat.input = { value: "", removeAttribute() {} }; chat.feedback = new Element();
+    const nodes = new Map();
+    chat.shadowRoot = { querySelector: name => { if (!nodes.has(name)) nodes.set(name, new Element()); return nodes.get(name); } };
+    chat.getAttribute = () => "en";
+    chat.text = { empty: "Start", hint: "Ask", placeholder: "Message", send: "Send" };
+    chat.render({ conversation: { id: "old" }, messages: [] });
+    chat.feedback.textContent = "browser_session_unavailable";
+    chat.pendingSend = { text: "old request", clientId: "old-message" }; chat.input.value = "old request";
+    chat.render({ conversation: { id: "old" }, messages: [] });
+    assert.equal(chat.feedback.textContent, "browser_session_unavailable", "same conversation polling must retain the failure");
+    chat.render({ conversation: { id: "new" }, messages: [] });
+    assert.equal(chat.feedback.textContent, ""); assert.equal(chat.pendingSend, null); assert.equal(chat.input.value, "");
+  } finally { globalThis.document = previous; }
+});
+
 test("diagnostics use owner-bound web routes and encode the run identifier", async () => {
   const client = new AgenstraClient({ integration: "records", getSession: async () => "ticket", storage: null });
   client.request = async path => path;

@@ -57,6 +57,31 @@ func TestInputValidationFeedbackIdentifiesMissingWrapper(t *testing.T) {
 	}
 }
 
+func TestUnknownCapabilityFeedbackKeepsRuntimeDecisionsSeparate(t *testing.T) {
+	cap := CapabilityDescription{Name: "records.list", Effect: "read"}
+	provider := &coreTestProvider{caps: map[string]CapabilityDescription{cap.Name: cap, "private.delete": {Name: "private.delete", Effect: "destructive"}}}
+	r := &AgentRuntime{Provider: provider, Grants: map[string]bool{cap.Name: true}, MaxContextCapabilities: 1}
+	s := &RuntimeState{RunID: "run", Status: "queued", Instruction: "Read the records"}
+	Reject(s, "search-1", "search_capabilities", "capability_unknown", JSON{"query": "records"}, "")
+	r.Model = decisionModelFunc(func(_ context.Context, packet ContextPacket, prompt string) (Decision, error) {
+		if !strings.Contains(prompt, `Your previous call to "search_capabilities" used an unavailable capability name`) || !strings.Contains(prompt, "standalone decision kinds") || !strings.Contains(prompt, "current authorized capability catalog") {
+			t.Fatal("unknown capability did not receive corrective feedback", prompt)
+		}
+		for _, visible := range packet.Capabilities {
+			if visible["name"] == "private.delete" {
+				t.Fatal("feedback exposed an unauthorized capability")
+			}
+		}
+		return Decision{Kind: "search_capabilities", Query: "records"}, nil
+	})
+	if err := r.Step(t.Context(), s, nil); err != nil {
+		t.Fatal(err)
+	}
+	if provider.called != 0 || len(s.Pending) != 0 || len(s.CapabilitySearchResults) != 1 || s.CapabilitySearchResults[0] != cap.Name {
+		t.Fatal("correction dispatched a business call or lost the authorized search", s)
+	}
+}
+
 func TestRuntimeReducesUncodedModelErrorsToSafeCodes(t *testing.T) {
 	for _, tc := range []struct {
 		name string

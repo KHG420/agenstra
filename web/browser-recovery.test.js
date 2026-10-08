@@ -15,6 +15,60 @@ function bridge(t, fetch, store = storage(), version = "1") {
 }
 function observation(path, version = "1") { return response({ session: { ...(path.includes("new-tab") ? { ...replacement, handler_version: version } : old), context_revision: 1 } }); }
 
+for (const mode of ["send", "run"]) test(`new ${mode} refreshes an idle heartbeat and safely replaces a changed profile with the same request identity`, async t => {
+  const submissions = []; let polled = false, recoveries = 0, handlers = 0;
+  const c = bridge(t, async (path, options) => {
+    if (path.endsWith("/poll")) { polled = true; return response({ commands: [] }); }
+    if (path.endsWith("/recover")) { recoveries++; assert.equal(JSON.parse(options.body).acknowledge_unknown, false); return response({ session: replacement, key: "new-key" }); }
+    if (path.endsWith("/observation")) return observation(path);
+    assert.ok(path.endsWith(mode === "send" ? "/messages" : "/runs"));
+    assert.equal(polled, true, "new work was submitted before refreshing the browser heartbeat");
+    const body = JSON.parse(options.body); submissions.push(body);
+    assert.equal(options.headers["X-Agenstra-Browser-Key"], submissions.length === 1 ? old.key : "new-key");
+    return submissions.length === 1 ? response({ code: "browser_profile_changed" }, 409) : response({ run_id: "run" });
+  });
+  c.browser = old; c.browserPromise = Promise.resolve(old); c.browserConnected = true;
+  c.rememberConversation({ id: "history", integration_id: "records-web" });
+  c.actions.set("ui.navigate", () => { handlers++; return {}; });
+  await (mode === "send" ? c.send("Read details", { clientId: "original-message" }) : c.run("Read details", { requestId: "original-run" }));
+  assert.equal(recoveries, 1); assert.equal(submissions.length, 2); assert.equal(handlers, 0);
+  assert.deepEqual(submissions.map(body => body.session_id), [old.id, replacement.id]);
+  assert.deepEqual(submissions.map(body => body[mode === "send" ? "client_id" : "request_id"]), [mode === "send" ? "original-message" : "original-run", mode === "send" ? "original-message" : "original-run"]);
+});
+
+for (const mode of ["send", "run"]) test(`new ${mode} preserves uncertain receipts and refuses profile recovery when the server cannot verify old work`, async t => {
+  let submissions = 0;
+  const c = bridge(t, async path => {
+    if (path.endsWith("/poll")) return response({ commands: [] });
+    if (path.endsWith("/recover")) return response({ code: "browser_outcome_unresolved" }, 409);
+    submissions++; return response({ code: "browser_profile_changed" }, 409);
+  });
+  c.browser = old; c.browserPromise = Promise.resolve(old);
+  c.rememberConversation({ id: "history", integration_id: "records-web" });
+  const receipt = { command: { id: "uncertain", session_id: old.id, generation: 1 }, status: "unknown" };
+  c.receipts.uncertain = receipt;
+  c.flushReceipts = async () => {};
+  await assert.rejects(mode === "send" ? c.send("New work", { clientId: "same-message" }) : c.run("New work", { requestId: "same-run" }), { code: "browser_outcome_unresolved" });
+  assert.equal(submissions, 1); assert.equal(c.browser.id, old.id); assert.deepEqual(c.receipts.uncertain, receipt);
+});
+
+for (const mode of ["send", "run"]) for (const failure of ["lost", "gateway", "changed-again"]) test(`new ${mode} never loops or replaces an uncertain submission after ${failure}`, async t => {
+  let submissions = 0, recoveries = 0;
+  const c = bridge(t, async path => {
+    if (path.endsWith("/poll")) return response({ commands: [] });
+    if (path.endsWith("/observation")) return observation(path);
+    if (path.endsWith("/recover")) { recoveries++; return response({ session: replacement, key: "new-key" }); }
+    submissions++;
+    if (failure === "lost") throw new Error("response lost after commit");
+    return response({ code: "browser_profile_changed" }, failure === "gateway" ? 502 : 409);
+  });
+  c.browser = old; c.browserPromise = Promise.resolve(old);
+  c.rememberConversation({ id: "history", integration_id: "records-web" });
+  await assert.rejects(mode === "send" ? c.send("New work", { clientId: "original" }) : c.run("New work", { requestId: "original" }), error => error[mode === "send" ? "clientId" : "requestId"] === "original");
+  assert.equal(submissions, failure === "changed-again" ? 2 : 1);
+  assert.equal(recoveries, failure === "changed-again" ? 1 : 0);
+});
+
 for (const failure of ["network", "non-2xx", "unconfirmed-200"]) test(`failed browser close preserves the original session after ${failure}`, async t => {
   const store = storage();let closes = 0, resumes = 0;
   const fetch = async (path, options) => {

@@ -28,6 +28,36 @@ func TestBrowserResumeDetectsChangedProfileBeforeMutatingSession(t *testing.T) {
 	}
 }
 
+func TestNewBrowserWorkReportsProfileChangeWithoutFencingExistingWork(t *testing.T) {
+	f := newWebFixture(t, &hostModel{decisions: browserDecisions()}, false)
+	f.run(t)
+	p := frontendTestProfile(false)
+	p.Version = "2"
+	compiled, err := compileFrontend(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.w.profiles["records-web"] = compiled
+	if _, err = f.w.CreateBrowserRun(t.Context(), "alice", "records-web", f.session.ID, "New work", "new-request"); ErrorCode(err) != "browser_profile_changed" {
+		t.Fatalf("new work did not identify its stale contract: %v", err)
+	}
+	conversation, err := f.w.CreateConversation(t.Context(), "alice", "records-web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.w.SubmitMessage(t.Context(), "alice", conversation.ID, "new-message", "New work", f.session.ID); ErrorCode(err) != "browser_profile_changed" {
+		t.Fatalf("new message did not identify its stale contract: %v", err)
+	}
+	messages, err := f.w.Store.messages(f.w.Store.store.DB, "alice", conversation.ID)
+	if err != nil || len(messages) != 0 {
+		t.Fatalf("rejected message was published: %v %v", messages, err)
+	}
+	command := f.dispatch(t)
+	if command.Generation != f.session.Generation || command.Status != "dispatched" {
+		t.Fatal("profile update fenced existing work", command)
+	}
+}
+
 func TestBrowserResumeRetryPreservesCurrentPageAndRunningCommand(t *testing.T) {
 	f := newWebFixture(t, &hostModel{decisions: browserDecisions()}, false)
 	first, err := f.w.resumeBrowserSession("alice", f.session.ID, f.key, 1, "refresh-1")

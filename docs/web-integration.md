@@ -147,6 +147,8 @@ profile 由服务端发布，在线浏览器不能新增模型可用能力。纯
 
 handler 语义变化时更新 `handler_version` 和 profile 版本。注册版本必须匹配当前 profile；旧 run 保留原契约。页面重载不会将未确认的旧动作迁移到新 generation。恢复连接时若当前 profile digest 与旧会话不同，服务端在改变 generation 前返回 `browser_profile_changed`。SDK 发出 `connection: {status: "profile_changed"}`，并尝试按当前 handler 注册替代旧连接；仍有未结束任务或不确定动作时保留旧绑定并返回相应错误。
 
+SDK 的 `send` 和 `run` 在提交前通过原有轮询刷新浏览器心跳，避免后台标签页暂停轮询后复用过期的在线状态。新任务绑定遇到契约变化时，在保存消息或发布任务之前返回 HTTP 409 `browser_profile_changed`；SDK 使用已有安全恢复入口替换空闲连接，再以相同 client ID / request ID 提交一次。恢复不确认未知结果，不迁移或重放旧任务；其他错误及第二次版本冲突直接返回，网络失败和 5xx 不触发替换或自动重提。旧版本任务仍可按原契约轮询。此处理参考 [MCP 2025-11-25 的会话失效与重新初始化规则](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#session-management)，将明确的会话拒绝与结果不确定的传输错误分别处理。
+
 ## 用宿主登录身份换短期票据
 
 浏览器仅接收短期 web ticket，不接收长期 API key 或管理密钥。推荐宿主提供 `/api/agent-session`：验证现有 cookie/session 和宿主 CSRF，映射 Agenstra owner，在服务端用该用户的 API key 调用 `POST /web/v1/token`，仅返回 `{token, expires_at}`。

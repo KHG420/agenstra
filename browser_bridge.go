@@ -661,8 +661,11 @@ func (w *WebIntegration) bindRun(tx *sql.Tx, owner, run, request, integration, s
 	if e := webLoad(tx, "web_sessions", session, owner, &s); e != nil {
 		return e
 	}
-	if s.Closed || s.IntegrationID != integration || s.ProfileDigest != p.digest || w.Store.store.now()-s.LastSeen > 30 {
+	if s.Closed || s.IntegrationID != integration || w.Store.store.now()-s.LastSeen > 30 {
 		return hostError("browser_session_unavailable")
+	}
+	if s.ProfileDigest != p.digest {
+		return hostError("browser_profile_changed")
 	}
 	b := WebRunBinding{RunID: run, IntegrationID: integration, SessionID: session, Generation: s.Generation, ProfileDigest: s.ProfileDigest, RequestID: request, ObservedRevision: -1}
 	raw, e := webJSON(b)

@@ -566,6 +566,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 		}
 		if len(state.ModelObservations) > 0 {
 			last := state.ModelObservations[len(state.ModelObservations)-1]
+			if last.ErrorCode != nil && *last.ErrorCode == "capability_unknown" {
+				prompt += fmt.Sprintf("\nYour previous call to %q used an unavailable capability name and was not executed. Use only literal names from the current authorized capability catalog. read_skill, inspect_capability, inspect_fact and search_capabilities are standalone decision kinds, never business calls inside tool_batch. Use search_capabilities only when runtime_features includes capability_search; inspect a matching contract before constructing its arguments. Do not guess aliases or infer lack of permission from an unknown name.", last.Capability)
+			}
 			if last.ErrorCode != nil && *last.ErrorCode == "capability_input_invalid" {
 				prompt += fmt.Sprintf("\nYour previous call to %q failed its input contract. Inspect its full input_schema and repair the failing structure before retrying. ToolCall.arguments contains the capability input; any nested arguments object declared by that schema must also be preserved. Do not infer a business validation cause from this error.", last.Capability)
 				if cap, ok := r.Provider.Capabilities()[last.Capability]; ok && cap.InputSchema != nil {

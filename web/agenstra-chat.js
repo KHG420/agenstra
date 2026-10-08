@@ -191,6 +191,7 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
     if (signature === this.signature) return;
     if (this.conversationId && this.conversationId !== snapshot.conversation?.id) {
       this.pendingSend = null;this.input.value = "";if (this.choice) this.choice.value = "";if (this.dateInput) this.dateInput.value = "";this.inputRequestKey = null;
+      if (this.feedback) this.feedback.textContent = "";
     }
     this.conversationId = snapshot.conversation?.id;
     this.signature = signature;this.awaitingInput = null;
