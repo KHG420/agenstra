@@ -57,6 +57,12 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 参数留空时不发送，对应默认由服务决定。DeepSeek 开启或默认推理时温度不生效，因此框架拒绝同时配置温度；关闭推理时不能设置推理强度。OpenAI 显式设置非 none 推理强度时也拒绝同时配置温度。具体模型是否接受某个强度必须通过服务验证；通用接口不会静默转发未知推理字段。
 
+输出策略适用于所有使用本适配器的兼容 Chat Completions 模型，由各模型配置及实际网关能力决定，不按模型名分支。相同模型经过不同网关时，支持程度也可能不同。管理员应分别验证连接、决策输出格式、业务输入契约和完整任务；单次合成检查通过或 HTTP 200 不能证明网关严格执行 Schema，也不能证明任务正确完成。
+
+可选 `decision_output_mode` 选择业务决策输出：省略或 `json_object` 保持现有 JSON 内容；`output_tools` 使用每种决策一个类型化输出工具，通过 `tool_calls` 返回该决策的参数。适配器只从已登记的工具名赋予固定 `schema` 与 `kind`，随后使用原有 `agenstra.decision.v1` 校验；模型参数不包含这两个固定字段。此设置不影响记忆提取。仅对已实测支持该协议的网关启用；接受参数不等于网关严格执行 Schema。未知或多个输出工具、错误类型、重复键和不匹配的决策均被拒绝，仍使用原有本地校验、授权与预算。工具定义和输出提示计入实际请求预算。不会从普通文字中提取或修复 JSON，也不会自动改用另一种输出方式掩盖异常。已有任务继续使用创建时冻结的配置。
+
+宿主沿用已有业务能力绑定和接线；部署管理员在框架开发者控制台的模型配置中保存输出策略即可。实际业务输入仍按该能力的 `input_schema` 校验，合法的决策输出不能代替业务参数或任务结果验收。
+
 可选限制包括 `max_output_tokens`、`token_limit_field`、`timeout_seconds`、`max_attempts`、`context_window_tokens`、`max_input_tokens`、`protocol_reserve_tokens`。最大尝试次数包含首次请求，1 表示不做传输重试。配置的超时及 token 上限仍受任务冻结的部署限制、总预算和截止时间约束；选大模型不能扩大原有运行预算。已知上下文窗口应配合明确的输出预留。
 
 依据：[OpenAI Chat Completions API](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)、[DeepSeek 推理模式](https://api-docs.deepseek.com/guides/thinking_mode)。不同模型的实际参数支持可以不同，接口类型本身不保证模型兼容。

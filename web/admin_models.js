@@ -13,6 +13,7 @@
     model_output_empty: "模型返回空内容。",
     model_output_truncated: "输出达到上限并被截断，请检查输出预算。",
     model_decision_schema_invalid: "JSON 未满足框架的决策结构。",
+    model_output_tool_calls_invalid: "模型未返回唯一且匹配的决策输出工具。",
     model_memory_schema_invalid: "JSON 未满足记忆提取结构。",
   };
 
@@ -47,6 +48,7 @@
       $("model-name").value = p.model || ""; $("model-base-url").value = p.base_url || "";
       $("model-url-env").value = p.base_url_env || ""; $("model-key-ref").value = p.api_key_ref || "";
       $("model-token-field").value = p.token_limit_field || "";
+      $("model-decision-output").value = p.decision_output_mode || "";
       $("model-input-price").value = p.prices?.input_per_million ?? "";
       $("model-output-price").value = p.prices?.output_per_million ?? "";
       $("model-cache-price").value = p.prices?.cached_input_per_million ?? "";
@@ -76,6 +78,7 @@
         p.thinking = setting === "disabled" ? "disabled" : "enabled";
         if (!["disabled", "enabled"].includes(setting)) p.reasoning_effort = setting;
       }
+      const outputMode = $("model-decision-output").value; if (outputMode) p.decision_output_mode = outputMode;
       const tokenField = $("model-token-field").value; if (tokenField) p.token_limit_field = tokenField;
       const input = number("model-input-price"), output = number("model-output-price"), cached = number("model-cache-price");
       if (input !== undefined || output !== undefined || cached !== undefined) {

@@ -57,6 +57,9 @@ func modelErrorCode(err error) string {
 // HTTPJSONDecisionModel adapts a compatible JSON chat endpoint to typed decisions.
 // Configure it before concurrent use; supplied HTTP clients remain caller-owned.
 type HTTPJSONDecisionModel struct {
+	// DecisionOutputMode selects JSON content or typed output tools for decisions.
+	// Empty retains JSON content; memory extraction always uses JSON content.
+	DecisionOutputMode         string
 	Profile                    string
 	APIType                    string
 	Thinking                   string
@@ -303,8 +306,9 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		} `json:"usage"`
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
-				Refusal string `json:"refusal"`
+				Content   string                   `json:"content"`
+				ToolCalls []decisionOutputToolCall `json:"tool_calls"`
+				Refusal   string                   `json:"refusal"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
@@ -324,6 +328,9 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 			metrics.FinishReason = "unknown"
 		}
 		metrics.EstimatedOutputTokens = int64(len(envelope.Choices[0].Message.Content))
+		for _, call := range envelope.Choices[0].Message.ToolCalls {
+			metrics.EstimatedOutputTokens += int64(len(call.Function.Arguments))
+		}
 		if usage := envelope.Usage; usage != nil && usage.Input != nil && usage.Output != nil && *usage.Input >= 0 && *usage.Output >= 0 && *usage.Input <= 1000000000 && *usage.Output <= 1000000000 {
 			metrics.UsageAvailable = true
 			metrics.InputTokens, metrics.OutputTokens = *usage.Input, *usage.Output
@@ -358,6 +365,13 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	}
 	if envelope.Choices[0].FinishReason == "length" {
 		return nil, ModelDecisionError{"model_output_truncated"}
+	}
+	if _, usesOutputTools := payload["tools"]; usesOutputTools {
+		raw, detail := decisionOutputToolBody(envelope.Choices[0].Message.ToolCalls)
+		if detail != "" {
+			return nil, invalidModelOutput(ctx, detail)
+		}
+		return raw, nil
 	}
 	if strings.TrimSpace(envelope.Choices[0].Message.Content) == "" {
 		// Some compatible gateways report stop even when reasoning consumed the

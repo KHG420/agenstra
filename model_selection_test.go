@@ -49,7 +49,11 @@ func TestModelSelectionPinsBothPurposesAndSurvivesRestart(t *testing.T) {
 		if strings.HasPrefix(payload["model"].(string), "memory") {
 			content = `{"proposals":[]}`
 		}
-		if callErr3 := json.NewEncoder(w).Encode(JSON{"usage": JSON{"prompt_tokens": 100, "completion_tokens": 10}, "choices": []any{JSON{"message": JSON{"content": content}}}}); callErr3 != nil {
+		message := JSON{"content": content}
+		if payload["tools"] != nil {
+			message = JSON{"tool_calls": []any{JSON{"type": "function", "function": JSON{"name": "submit_final", "arguments": `{"answer_markdown":"ok","fact_ids":[]}`}}}}
+		}
+		if callErr3 := json.NewEncoder(w).Encode(JSON{"usage": JSON{"prompt_tokens": 100, "completion_tokens": 10}, "choices": []any{JSON{"message": message}}}); callErr3 != nil {
 			t.Error(callErr3)
 		}
 	}))
@@ -83,6 +87,9 @@ func TestModelSelectionPinsBothPurposesAndSurvivesRestart(t *testing.T) {
 	config := m.Snapshot().Config
 	for id, profile := range config.Profiles {
 		profile.Model = strings.ReplaceAll(profile.Model, "old", "new")
+		if id == "business" {
+			profile.DecisionOutputMode = "output_tools"
+		}
 		config.Profiles[id] = profile
 	}
 	updated, err := m.Configure(config, 0)
@@ -126,6 +133,9 @@ func TestModelSelectionPinsBothPurposesAndSurvivesRestart(t *testing.T) {
 		if request["model"] != wantModels[i] {
 			t.Fatal("run rerouted", i, request["model"])
 		}
+		if (request["tools"] != nil) != (i == 3) {
+			t.Fatal("decision output not isolated and pinned", i, request)
+		}
 		thinking := request["thinking"].(map[string]any)["type"]
 		if i%2 == 0 {
 			if thinking != "disabled" || request["reasoning_effort"] != nil || request["max_tokens"] != float64(64) {
@@ -142,7 +152,7 @@ func TestModelSelectionPinsBothPurposesAndSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	restarted, err := d.NewModel()
-	if err != nil || restarted.Snapshot().Revision != 1 || restarted.Snapshot().Config.Profiles["business"].Model != "business-new" {
+	if err != nil || restarted.Snapshot().Revision != 1 || restarted.Snapshot().Config.Profiles["business"].Model != "business-new" || restarted.Snapshot().Config.Profiles["business"].DecisionOutputMode != "output_tools" {
 		t.Fatal("configuration not durable", err)
 	}
 	raw, callErr4 := CanonicalJSON(oldRun.State)

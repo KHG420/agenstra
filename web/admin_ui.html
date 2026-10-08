@@ -76,6 +76,7 @@
           <div id="model-services-view" role="tabpanel" aria-labelledby="model-services-tab">
           <form id="model-profile-form" class="form-panel">
             <label for="model-profile-list">编辑配置</label><select id="model-profile-list"><option value="">添加模型配置</option></select>
+            <label for="model-decision-output">业务决策输出</label><select id="model-decision-output"><option value="">JSON 内容（默认）</option><option value="json_object">JSON 内容</option><option value="output_tools">类型化输出工具</option></select><small>输出工具需要模型网关支持 tool_calls；记忆提取继续使用 JSON 内容。请用真实任务验证后启用。</small>
             <div class="form-grid"><div><label for="model-profile-id">配置名称</label><input id="model-profile-id" type="text" required placeholder="business"></div><div><label for="model-api-type">API 接口</label><select id="model-api-type"><option value="compatible_chat">通用 Chat Completions</option><option value="openai_chat">OpenAI Chat Completions</option><option value="deepseek_chat">DeepSeek Chat Completions</option></select></div></div>
             <label for="model-name">模型名称</label><input id="model-name" type="text" required placeholder="服务提供的模型 ID">
             <label for="model-base-url">API 地址</label><input id="model-base-url" type="text" placeholder="https://api.example.com/v1"><small>填写基础地址，框架请求其 /chat/completions。也可以在高级设置中引用地址环境变量。</small>

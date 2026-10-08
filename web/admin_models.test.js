@@ -95,3 +95,18 @@ test("saving from purpose selection reveals invalid profile fields without submi
   assert.equal(get("model-purposes-view").hidden, true);
   assert.equal(requests.some(request => request.options?.method === "PUT"), false);
 });
+
+test("typed decision output survives editing and is optional for older profiles", async () => {
+  const { editor, get, requests } = fixture();
+  await editor.refresh();
+  assert.equal(get("model-decision-output").value, "");
+  get("model-decision-output").value = "output_tools";
+  await get("model-profile-form").emit("input");
+  await get("models-save").emit("click");
+  const save = requests.find(request => request.options?.method === "PUT");
+  assert.equal(save.options.body.config.profiles.business.decision_output_mode, "output_tools");
+  assert.equal(save.options.body.config.profiles.memory.decision_output_mode, undefined);
+  await get("model-profile-form").emit("submit");
+  await get("models-save").emit("click");
+  assert.equal(requests.at(-1).options.body.config.profiles.business.decision_output_mode, "output_tools");
+});

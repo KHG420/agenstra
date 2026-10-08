@@ -26,6 +26,7 @@ type ModelConfiguration struct {
 // ModelProfile configures one model adapter using connection references rather than resolved secrets.
 type ModelProfile struct {
 	APIType               string       `json:"api_type"`
+	DecisionOutputMode    string       `json:"decision_output_mode,omitempty"`
 	Model                 string       `json:"model"`
 	BaseURL               string       `json:"base_url,omitempty"`
 	BaseURLEnv            string       `json:"base_url_env,omitempty"`
@@ -121,6 +122,9 @@ func (c ModelConfiguration) Validate() error {
 		}
 		if err := validateModelParameters(p.APIType, p.Thinking, p.ReasoningEffort, p.Temperature); err != nil {
 			return err
+		}
+		if !validDecisionOutputMode(p.DecisionOutputMode) {
+			return registryError("model_parameters_invalid")
 		}
 		if p.TokenLimitField != "" && p.TokenLimitField != "max_tokens" && p.TokenLimitField != "max_completion_tokens" || p.MaxOutputTokens < 0 || p.MaxOutputTokens > 1000000 || p.ContextWindowTokens < 0 || p.ContextWindowTokens > 100000000 || p.MaxInputTokens < 0 || p.MaxInputTokens > 100000000 || p.ProtocolReserveTokens < 0 || p.ProtocolReserveTokens > 1000000 || p.MaxAttempts < 0 || p.MaxAttempts > 10 || math.IsNaN(p.TimeoutSeconds) || math.IsInf(p.TimeoutSeconds, 0) || p.TimeoutSeconds < 0 || p.TimeoutSeconds > 600 {
 			return registryError("model_parameters_invalid")
@@ -273,6 +277,7 @@ func (m *ModelManager) profile(id string, p ModelProfile) (*HTTPJSONDecisionMode
 		return nil, registryError("model_configuration_invalid")
 	}
 	model.Profile, model.APIType = id, p.APIType
+	model.DecisionOutputMode = p.DecisionOutputMode
 	model.Thinking, model.ReasoningEffort, model.Temperature = p.Thinking, p.ReasoningEffort, p.Temperature
 	model.MaxOutputTokens, model.TokenLimitField = p.MaxOutputTokens, p.TokenLimitField
 	if model.TokenLimitField == "" && p.APIType == "openai_chat" {

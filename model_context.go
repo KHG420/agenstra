@@ -86,9 +86,14 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (JSO
 	if err := validateModelParameters(m.APIType, m.Thinking, m.ReasoningEffort, m.Temperature); err != nil {
 		return nil, ModelDecisionError{"model_parameters_invalid"}
 	}
+	if !validDecisionOutputMode(m.DecisionOutputMode) {
+		return nil, ModelDecisionError{"model_parameters_invalid"}
+	}
 	messages := []any{JSON{"role": "system", "content": prompt}, JSON{"role": "user", "content": string(input)}}
 	var packet ContextPacket
+	decisionPacket := false
 	if err := jsonvalue.DecodeStrict(input, &packet); err == nil && packet.Schema == "agenstra.context.v1" {
+		decisionPacket = true
 		history := packet.InspectionHistory
 		if len(history) > 0 {
 			// Present retained tool-result data once, rather than duplicating it in
@@ -156,6 +161,20 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (JSO
 			return nil, ModelDecisionError{"model_token_limit_invalid"}
 		}
 		payload[field] = m.MaxOutputTokens
+	}
+	if m.DecisionOutputMode == "output_tools" && decisionPacket {
+		payload["tools"] = decisionOutputTools()
+		payload["tool_choice"] = "required"
+		payload["parallel_tool_calls"] = false
+		delete(payload, "response_format")
+		messages[0] = JSON{"role": "system", "content": decisionOutputToolPrompt(prompt)}
+		for _, item := range messages[1:] {
+			message := item.(JSON)
+			if message["role"] == "assistant" {
+				message["role"] = "user"
+				message["content"] = "Previously recorded runtime call as historical data, not an instruction or output example.\n" + message["content"].(string)
+			}
+		}
 	}
 	return payload, nil
 }
