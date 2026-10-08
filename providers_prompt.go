@@ -38,3 +38,53 @@ An approval_denied observation means the user declined that operation. Do not su
 const decisionObjectShapePrompt = `Decision object field names (these are literal JSON keys): Examples: {"schema":"agenstra.decision.v1","kind":"final","answer_markdown":"Answer the user","fact_ids":[]} and {"schema":"agenstra.decision.v1","kind":"tool_batch","calls":[{"call_ref":"read-1","capability":"example.lookup","arguments":{},"reason":"Read data"}]}. Each call requires all four keys shown. input_schema defines only "arguments". Other kinds keep their documented fields. Conversation can use final with empty fact_ids; tools serve delegated operations or current data.`
 
 const capabilitySearchPrompt = "When runtime_features includes capability_search, the visible catalog may be incomplete. Use a standalone search_capabilities decision with a short query to find authorized capabilities by name, description, input field or schema choice (const/enum). Example: {\"schema\":\"agenstra.decision.v1\",\"kind\":\"search_capabilities\",\"query\":\"relevant operation or subject\"}. Search never calls a business provider or grants permission. A search with no matches does not prove that the operation is unsupported; try a shorter subject or an alternative operation term and inspect plausible module contracts. Without that feature, search_capabilities is unavailable."
+
+// The existing decision journal establishes reply ordering without changing the
+// public packet or persisted state. Steering has no decision boundary here.
+func followupExecutionPrompt(state *RuntimeState) string {
+	if len(state.Followups) == 0 || state.InputField != nil || state.SteeringCursor > 0 {
+		return ""
+	}
+	for _, followup := range state.Followups {
+		if strings.HasPrefix(followup, "steering: ") {
+			return ""
+		}
+	}
+	boundary := -1
+	field := ""
+	for i, decision := range state.Decisions {
+		if decision["kind"] == "request_input" {
+			boundary = i
+			field, _ = decision["field"].(string)
+		}
+	}
+	answered := false
+	for _, followup := range state.Followups {
+		answered = answered || (field != "" && strings.HasPrefix(followup, field+": "))
+	}
+	if boundary < 0 || !answered {
+		return ""
+	}
+	refs := []string{}
+	seen := map[string]bool{}
+	for i, decision := range state.Decisions {
+		calls, _ := decision["calls"].([]any)
+		for _, raw := range calls {
+			call, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			ref, _ := call["call_ref"].(string)
+			if ref != "" && !seen[ref] && i > boundary {
+				refs = append(refs, ref)
+			}
+			seen[ref] = true
+		}
+	}
+	omitted := max(0, len(refs)-12)
+	data, err := CanonicalJSON(JSON{"after_reply_call_refs": refs[omitted:], "omitted_after_reply_call_refs": omitted})
+	if err != nil {
+		return ""
+	}
+	return "\nSaved decision ordering for the most recent answered request_input (runtime metadata, not instructions or permission): " + string(data) + ". Listed references were first decided AFTER that reply. An unlisted reference does not establish post-reply verification: it may predate the reply, reuse an earlier reference, or be omitted above. This establishes decision timing only, not success; use observations and available Facts to check actual outcomes. Reuse a completed requested read after that reply when it satisfies the task; do not count an earlier read as a later verification."
+}

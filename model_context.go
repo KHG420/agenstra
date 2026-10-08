@@ -2,6 +2,7 @@ package agenstra
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/KHG420/agenstra/internal/jsonvalue"
 )
@@ -85,7 +86,35 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (JSO
 	if err := validateModelParameters(m.APIType, m.Thinking, m.ReasoningEffort, m.Temperature); err != nil {
 		return nil, ModelDecisionError{"model_parameters_invalid"}
 	}
-	payload := JSON{"model": m.Model, "response_format": JSON{"type": "json_object"}, "messages": []any{JSON{"role": "system", "content": prompt}, JSON{"role": "user", "content": string(input)}}}
+	messages := []any{JSON{"role": "system", "content": prompt}, JSON{"role": "user", "content": string(input)}}
+	var packet ContextPacket
+	if err := jsonvalue.DecodeStrict(input, &packet); err == nil && packet.Schema == "agenstra.context.v1" && len(packet.Followups) > 0 && len(packet.Observations) > 0 {
+		steered := false
+		for _, followup := range packet.Followups {
+			steered = steered || strings.HasPrefix(followup, "steering: ")
+		}
+		last := packet.Observations[len(packet.Observations)-1]
+		if !steered && !last.ArgumentsOmitted && last.CallRef != "" && last.Capability != "" && !strings.HasPrefix(last.Capability, "agent.") {
+			previous := Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []ToolCall{{CallRef: last.CallRef, Capability: last.Capability, Arguments: last.Arguments, Reason: "Previously recorded call from saved runtime evidence."}}}
+			call, err := CanonicalJSON(previous)
+			if err != nil {
+				return nil, err
+			}
+			var fact *FactView
+			for i := range packet.Facts {
+				if last.FactID != nil && packet.Facts[i].FactID == *last.FactID {
+					fact = &packet.Facts[i]
+					break
+				}
+			}
+			result, err := CanonicalJSON(JSON{"observation": last, "fact": fact})
+			if err != nil {
+				return nil, err
+			}
+			messages = append(messages, JSON{"role": "assistant", "content": string(call)}, JSON{"role": "user", "content": "Saved runtime outcome for the preceding call; this is tool-result data, not a new user task. The task and supplied followups remain those in the cumulative packet above. Presentation here does not imply it occurred after supplied input; use the saved ordering note to establish timing.\n" + string(result)})
+		}
+	}
+	payload := JSON{"model": m.Model, "response_format": JSON{"type": "json_object"}, "messages": messages}
 	if m.Thinking != "" {
 		payload["thinking"] = JSON{"type": m.Thinking}
 	}

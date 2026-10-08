@@ -543,7 +543,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			state.ErrorCode = strptr("run_state_invalid")
 			return nil
 		}
-		prompt := r.systemPrompt() + feedback
+		prompt := r.systemPrompt() + followupExecutionPrompt(state) + feedback
 		purpose := "decision"
 		if len(packet.ActionOutcomes) > 0 {
 			prompt += "\n" + actionOutcomePrompt
