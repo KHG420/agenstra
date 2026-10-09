@@ -6,8 +6,8 @@
 
 - 开始修改前阅读 [编码规范](docs/coding-standards.md) 和 [架构边界](docs/architecture.md)。沿用现有模式，做满足需求的最小修改。
 - 通用运行逻辑留在框架，业务流程、业务算法和场景文案留在宿主或能力包。核心代码不得按应用名称、能力名称或用户自然语言写场景分支。
-- Go 根包负责运行、Host、Provider 和持久化；`cmd/` 负责命令接线；`web/` 的无 UI 客户端与可选聊天组件保持分离；`examples/` 仅演示接入。
-- `internal/` 存放无需宿主接线的 JSON 值处理、Schema 校验、Cron 日历计算、发布文件核验、MCP 传输与 OpenAPI 转换；内部包不得导入根包或持有 Host、SQLite、授权状态。公开接入 API 和能力执行语义由根包负责，具体模块映射见架构文档。
+- `internal/runtime/engine/` 负责运行、Host、Provider、HTTP 接线和持久化；公开 Go 接入 API 位于 `sdk/go/`，不得另建运行状态或业务逻辑；`cmd/` 负责命令接线；`sdk/web/` 的无 UI 客户端与可选聊天组件保持分离；`examples/` 仅演示接入。
+- `internal/` 按 `base`、`contract`、`ext`、`frontend`、`platform`、`runtime` 分组。JSON、Schema、Cron、发布文件、MCP 传输与 OpenAPI 这些独立内部模块不得导入执行引擎或 Go SDK，也不得持有 Host、SQLite、授权状态；具体模块映射见架构文档。
 - 不为推测的未来需求增加接口、配置、依赖、兼容层或共享抽象。公共 API、HTTP/JSON、能力清单与持久化语义变更须有本次任务的明确授权。
 
 ## 调查与实现
@@ -25,10 +25,10 @@
 
 ## 验证与交付
 
-- 工具准备：Go 按 `go.mod`，Node.js 使用 22.13+ 的 22 系列或 24+，golangci-lint 固定 `v2.12.2`，执行 `npm ci --prefix web` 安装锁定的开发依赖。
+- 工具准备：Go 按 `go.mod`，Node.js 使用 22.13+ 的 22 系列或 24+，golangci-lint 固定 `v2.12.2`，执行 `npm ci --prefix sdk/web` 安装锁定的开发依赖。
 - 编码中先运行最小相关验证；提交前运行 `make check`，覆盖格式、Go/JS 静态检查、Go 竞态测试、Web 测试和命令构建。格式/文档变更无需编造实现镜像测试。
 - 检查最终 diff。不能把未执行、失败或远端未验证的检查写成通过。
 - 不使用整个文件/仓库级的 lint 禁用，不通过排除测试或只查新增行掩盖失败。局部 `//nolint:<具体规则>` 或 `eslint-disable-next-line <具体规则>` 必须说明原因，并经过人工审查。
 - 直接推送 `main`、创建 PR 和合并均按当前用户授权执行；本文件不新增发布权限。
 
-自动检查配置是 [.golangci.yml](.golangci.yml)、[ESLint 配置](web/eslint.config.mjs)、[Makefile](Makefile) 与 [CI](.github/workflows/go.yml)。静态检查不能替代授权、执行语义和接入成本的人工审查。
+自动检查配置是 [.golangci.yml](.golangci.yml)、[ESLint 配置](sdk/web/eslint.config.mjs)、[Makefile](Makefile) 与 [CI](.github/workflows/go.yml)。静态检查不能替代授权、执行语义和接入成本的人工审查。

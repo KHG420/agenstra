@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	agenstra "github.com/KHG420/agenstra"
+	agenstra "github.com/KHG420/agenstra/sdk/go"
 	"os"
 	"strings"
 )

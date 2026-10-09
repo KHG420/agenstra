@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	agenstra "github.com/KHG420/agenstra"
+	agenstra "github.com/KHG420/agenstra/sdk/go"
 )
 
 func TestDemoConfigurationAndBrowserContract(t *testing.T) {

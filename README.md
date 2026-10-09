@@ -33,7 +33,7 @@ For example, an order application already has an order-query API and a function 
 4. **Connect the task interface.** Start the framework service and submit tasks through the HTTP API. For chat, connect the JS SDK and your UI; for page control, also register frontend actions and handlers. The framework manages conversation context and run checkpoints; the host selects conversations by ID.
 5. **Validate real tasks.** Check capability selection, permissions, approvals, error paths, and result quality against the real model and APIs. Add further business capabilities through the same packs and adapter interfaces.
 
-See the [REST tutorial (Chinese)](docs/tutorial.md) and [Web integration guide (Chinese)](docs/web-integration.md) for complete examples. Export the SDK with `node web/export-client.mjs /path/to/host/vendor/agenstra` to pin JavaScript, TypeScript declarations, and SHA-256 records in the host, with no npm runtime dependency.
+See the [REST tutorial (Chinese)](docs/tutorial.md) and [Web integration guide (Chinese)](docs/web-integration.md) for complete examples. Export the SDK with `node sdk/web/export-client.mjs /path/to/host/vendor/agenstra` to pin JavaScript, TypeScript declarations, and SHA-256 records in the host, with no npm runtime dependency.
 
 ## Try the integration locally
 
@@ -52,6 +52,8 @@ Agenstra can run as an independent service accessed through HTTP APIs; Go applic
 The current durable host targets **one node with persistent local storage and SQLite WAL**. A deployment can serve multiple users with separate connections and capability grants. One project owns one pack; a durable task can explicitly compose authorized capabilities from other projects using verified per-user connections and restricted task scopes. See [cross-project tasks](docs/cross-project-tasks.md). All capabilities, including reads, require explicit grants. Distributed high availability, automatic retention cleanup, model quality, and the correctness of external computations require separate design or validation.
 
 This repository contains the framework, generic tests, deployment templates, guides, and a local demo. Production use requires your own business packs, model connection, and credentials; `deploy/deployment.example.json` is a configuration template.
+
+Go applications import `github.com/KHG420/agenstra/sdk/go` (package `agenstra`). The source tree follows a kernel and SDK layout: execution and persistence live in `internal/runtime/engine`, independent helpers are grouped under `internal/base`, `contract`, `ext`, and `platform`, the developer console assets live in `internal/frontend/admin`, and browser integration lives in `sdk/web`. Commands and examples use the same Go SDK. See the [source module map](docs/architecture.md#源码模块与依赖方向).
 
 ```mermaid
 flowchart LR
@@ -216,7 +218,7 @@ Follow the repository [agent instructions](AGENTS.md) and [coding standards (Chi
 
 ```sh
 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
-npm ci --prefix web
+npm ci --prefix sdk/web
 make check
 ```
 

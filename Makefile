@@ -9,11 +9,11 @@ fmt-check:
 lint:
 	go vet ./...
 	golangci-lint run
-	npm run lint --prefix web
+	npm run lint --prefix sdk/web
 
 test:
 	go test -race ./...
-	npm test --prefix web
+	npm test --prefix sdk/web
 
 build:
 	go build ./cmd/...

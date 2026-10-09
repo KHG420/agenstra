@@ -2,7 +2,7 @@ module github.com/KHG420/agenstra
 
 go 1.26.0
 
-ignore ./web/node_modules
+ignore ./sdk/web/node_modules
 
 require modernc.org/sqlite v1.60.1
 

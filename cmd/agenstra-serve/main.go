@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	agenstra "github.com/KHG420/agenstra"
+	agenstra "github.com/KHG420/agenstra/sdk/go"
 )
 
 func main() {

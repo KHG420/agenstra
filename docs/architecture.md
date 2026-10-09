@@ -29,31 +29,60 @@ flowchart TB
 | 管理注册表（可选） | 校验并保存不可变包版本，原子切换新任务的启用版本，记录连接、授权和审计。 | CLI 与 Web 调用同一管理 API；静态配置部署仍可继续使用。 |
 | 外部系统 | 数据、计算、访问控制、幂等处理和正式产物。 | 保持现有服务，必要时暴露稳定的 API。 |
 
-`providers.go` 定义 `CapabilityProvider`、`CapabilityDescription`、`CapabilityResult`、`InvocationContext` 和 `OperationBinding`。`loader.go` 根据受信任的清单 schema 打开 REST/MCP/旧版 REST 包。用户的自然语言请求不允许携带新清单、端点、命令或凭据。
+`internal/runtime/engine/providers.go` 定义 `CapabilityProvider`、`CapabilityDescription`、`CapabilityResult`、`InvocationContext` 和 `OperationBinding`。`internal/runtime/engine/loader.go` 根据受信任的清单 schema 打开 REST/MCP/旧版 REST 包。用户的自然语言请求不允许携带新清单、端点、命令或凭据。
 
 启用管理注册表时，Host 在创建运行时保存当前发布版本的内容哈希，恢复运行时始终加载该版本；管理员启用新版只影响新任务。授权和连接身份仍在每次执行前重新检查，撤销权限会使已有任务暂停。注册表当前使用单节点 SQLite WAL 和受控的本地发布目录，必须一起备份。参见[能力管理指南](capability-management.md)。
 
 ### 源码模块与依赖方向
 
-仓库使用一个 Go module。宿主继续通过根包 `github.com/KHG420/agenstra` 接入；根包拥有公开契约、Runtime、Host、Provider 接线、授权与持久执行状态。无须宿主接线的协议和 JSON 实现放在 `internal/`，以 Go package 边界约束依赖。
+仓库使用一个 Go module，目录组织参考 reasonix 的 studio 分支：实现放在按职责分组的 `internal/`，公开接入放在 `sdk/`，命令、示例、部署和文档各自独立。宿主通过 `github.com/KHG420/agenstra/sdk/go` 接入；仓库根目录不再存放 Go 运行实现，也不提供旧根包路径的转发入口。
+
+```text
+agenstra/
+├── cmd/                         # 五个命令的接线
+├── internal/
+│   ├── base/
+│   │   ├── cron/                # 日历、时区与 Cron
+│   │   └── jsonvalue/           # JSON 编码、复制与严格解码
+│   ├── contract/schema/         # JSON Schema 校验
+│   ├── ext/
+│   │   ├── openapi/             # OpenAPI 转换
+│   │   └── packfiles/           # 包文件与发布摘要核验
+│   ├── frontend/admin/          # 管理控制台静态资源与 JS 测试
+│   ├── platform/mcptransport/   # MCP 连接、交换与清理
+│   └── runtime/engine/          # 共同拥有执行状态的实现和 Go 测试
+│       └── testdata/            # 执行、恢复与兼容性测试数据
+├── sdk/
+│   ├── go/                     # 公开 Go 类型与构造/接入函数
+│   └── web/                    # 无 UI 客户端、可选聊天组件与会话助手
+├── examples/                    # 宿主接入演示
+├── deploy/                      # Docker 与配置模板
+└── docs/                        # 架构、接入与运维文档
+```
 
 | 位置 | 职责 | 项目内依赖 |
 | --- | --- | --- |
-| 根包 | 公开类型与接入 API、执行与持久化、能力契约和授权、受信任连接配置、协议初始化与工具目录。 | 下列内部模块。 |
-| `internal/jsonvalue/` | 规范 JSON 编码与浮点格式、保留 Go 类型的边界复制、严格 JSON 解码和数值索引。 | 仅标准库。 |
-| `internal/schema/` | 本地 JSON Schema 编译、REST 方言约束、有限 JSON 值的规范化校验。 | `internal/jsonvalue` 与已有 JSON Schema 依赖。 |
-| `internal/cron/` | 五字段数字 Cron 解析、IANA 时区、日历和 DST 下的下一次触发时间计算。 | 仅标准库。 |
-| `internal/packfiles/` | 清单中的技能路径、发布内容摘要、不可变发布目录的文件类型与完整性核验。 | `internal/jsonvalue` 与标准库文件 API。 |
-| `internal/mcptransport/` | stdio 进程及管道、HTTP JSON-RPC 与 SSE、请求串行化与取消、会话清理。 | `internal/jsonvalue`。 |
-| `internal/openapi/` | OpenAPI 本地引用、3.0/3.1 schema 转换、选定 operation 的 REST 清单草稿生成。 | `internal/jsonvalue`。 |
-| `cmd/`、`examples/` | 命令接线与最小接入演示。 | 根包。 |
-| `web/` | 分别导出的无 UI 客户端、可选聊天组件和会话辅助；管理 UI 使用自己的入口。 | 保持现有 ES module 边界。 |
+| `sdk/go/` | 公开类型与接入函数，类型直接使用执行引擎的定义，函数调用同一实现。 | `internal/runtime/engine`。 |
+| `internal/runtime/engine/` | Runtime、Host、Provider、HTTP 接线、能力契约与授权、受信任连接配置、模型适配和持久执行状态。 | 下列独立模块与 `sdk/web` 的嵌入资源；不得导入 `sdk/go`。 |
+| `internal/base/jsonvalue/` | 规范 JSON 编码与浮点格式、保留 Go 类型的边界复制、严格 JSON 解码和数值索引。 | 仅标准库。 |
+| `internal/base/cron/` | 五字段数字 Cron 解析、IANA 时区、日历和 DST 下的下一次触发时间计算。 | 仅标准库。 |
+| `internal/contract/schema/` | 本地 JSON Schema 编译、REST 方言约束、有限 JSON 值的规范化校验。 | `internal/base/jsonvalue` 与已有 JSON Schema 依赖。 |
+| `internal/ext/packfiles/` | 清单中的技能路径、发布内容摘要、不可变发布目录的文件类型与完整性核验。 | `internal/base/jsonvalue` 与标准库文件 API。 |
+| `internal/ext/openapi/` | OpenAPI 本地引用、3.0/3.1 schema 转换、选定 operation 的 REST 清单草稿生成。 | `internal/base/jsonvalue`。 |
+| `internal/platform/mcptransport/` | stdio 进程及管道、HTTP JSON-RPC 与 SSE、请求串行化与取消、会话清理。 | `internal/base/jsonvalue`。 |
+| `internal/frontend/admin/` | 管理页面 HTML、CSS、JS 和静态资源嵌入。 | 仅标准库；管理操作与认证由执行引擎负责。 |
+| `cmd/`、`examples/` | 命令接线与最小接入演示。 | `sdk/go`。 |
+| `sdk/web/` | 分别导出的无 UI 客户端、可选聊天组件和会话辅助，SDK 导出工具及 Go 静态资源嵌入。 | 保持现有 ES module 边界，不依赖执行引擎。 |
 
-内部模块不得导入根包，也不读取 Host、SQLite 或授权状态。根包中的 `CanonicalJSON`、`ImportOpenAPI` 和 `ImportOpenAPIDocument` 保留公开入口，调用对应内部实现；宿主的 import、参数、返回类型和部署配置保持一致。MCP 的清单核验、凭据引用解析、初始化、工具契约固定和能力结果仍由根包负责，传输模块只处理连接与协议交换。
+分组目录本身不是 Go package 边界，边界在实际子包。各包职责写在包文档中。独立的 JSON、Schema、Cron、包文件和传输模块不得导入执行引擎或 Go SDK，也不读取 Host、SQLite 或授权状态。SDK 不持有另一份运行状态。
 
-Schema 校验只处理契约，不判断 grants、审批、原调用身份或业务终态。Cron 模块只计算时间；任务归属、取消、派发与 SQLite 事务仍由根包管理。发布文件模块不读注册表数据库；根包负责版本唯一性、发布事务与启用状态，并把内部文件错误映射为现有管理错误码。发布的中间目录可在失败后经完整内容核验重用，不允许因此覆盖或删除任意已有路径。
+`CanonicalJSON`、`ImportOpenAPI` 和 `ImportOpenAPIDocument` 在 Go SDK 中提供接入入口，执行引擎调用对应内部实现。MCP 的清单核验、凭据引用解析、初始化、工具契约固定和能力结果仍由执行引擎负责，传输模块只处理连接与协议交换。
 
-纯 JSON、Schema、Cron、发布文件和传输测试放在所属内部包；公开入口、Provider、Host 和真实回执语义的集成测试留在根包。`make check` 的 `./...` 检查同时覆盖根包和内部模块。Host、Runtime、Store 共同拥有持久执行状态，后续拆分必须先厘清状态所有权，不能仅按文件名搬入子目录。
+Schema 校验只处理契约，不判断 grants、审批、原调用身份或业务终态。Cron 模块只计算时间；任务归属、取消、派发与 SQLite 事务仍由执行引擎管理。发布文件模块不读注册表数据库；执行引擎负责版本唯一性、发布事务与启用状态，并把内部文件错误映射为现有管理错误码。发布的中间目录可在失败后经完整内容核验重用，不允许因此覆盖或删除任意已有路径。
+
+Host、Runtime、Store 共同拥有持久执行状态，其模型适配、Provider 和 Web 集成与状态迁移也存在私有符号的相互引用，因此本次保持在 `internal/runtime/engine` 同一包中。后续拆分必须先厘清状态所有权和真实依赖，不能仅按文件名搬入模型、状态或前端子包。
+
+纯 JSON、Schema、Cron、发布文件和传输测试留在所属内部包；执行与持久回执的集成测试及 `testdata` 随实现迁入执行引擎；公开 Go 接入测试位于 `sdk/go`。JS SDK 与管理 UI 测试分别随所属源码保存，`npm test --prefix sdk/web` 覆盖两者。`make check` 的 `./...` 检查覆盖全部 Go 包。
 
 ## 2. ReAct 决策循环
 

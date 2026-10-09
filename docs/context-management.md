@@ -1,6 +1,6 @@
 # 上下文管理：预算、投影与恢复
 
-Agenstra 完整保存运行状态，每轮构造有界模型视图，并通过检查决策按需读取细节。上下文预算由 `context.go` 与 `AgentRuntime.Context()` / `Step()` 分配。跨运行记忆由 Host 和 SQLite 管理，并共享上下文预算；学习规则、宿主管理接口、快照失效与保留边界见[记忆设计与宿主管理](memory-management.md)。
+Agenstra 完整保存运行状态，每轮构造有界模型视图，并通过检查决策按需读取细节。上下文预算由 `internal/runtime/engine/context.go` 与 `AgentRuntime.Context()` / `Step()` 分配。跨运行记忆由 Host 和 SQLite 管理，并共享上下文预算；学习规则、宿主管理接口、快照失效与保留边界见[记忆设计与宿主管理](memory-management.md)。
 
 ## 1. 框架中的职责分配
 

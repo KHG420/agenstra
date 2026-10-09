@@ -51,8 +51,8 @@ export const agentSession = createAgenstraSessionHandler({
 可安装本仓库构建的 npm 包，或固定 SDK 到宿主 vendor 目录：
 
 ```sh
-npm pack ./web
-node web/export-client.mjs /path/to/host/vendor/agenstra
+npm pack ./sdk/web
+node sdk/web/export-client.mjs /path/to/host/vendor/agenstra
 ```
 
 包支持 `@agenstra/web/client`、`@agenstra/web/chat` 和宿主服务端专用的 `@agenstra/web/session`。导出目录包含对应 JS、类型声明和 SHA-256 清单。npm 发布由项目维护者另行执行。
@@ -92,8 +92,8 @@ const chat = mountAgenstraChat(document.querySelector("#agent"), {
 只有需要操作页面时才提供 frontend profile 和 handler。同一份 profile 可生成类型和注册模板：
 
 ```sh
-node web/export-client.mjs /path/to/host/vendor/agenstra
-node web/export-actions.mjs frontend-profile.json /path/to/host/vendor/agenstra
+node sdk/web/export-client.mjs /path/to/host/vendor/agenstra
+node sdk/web/export-actions.mjs frontend-profile.json /path/to/host/vendor/agenstra
 ```
 
 生成器先检查版本、动作名称/重复/保留名、影响类型、超时、字段和受支持的 Schema 引用位置，发现接线错误时在写文件前报错。检查通过后生成 `agenstra-actions.d.ts`、版本文件 `agenstra-profile.js` 及配套的 `agenstra-profile.d.ts`；首次运行还会创建 `agenstra-handlers.js`。修改 handlers，把函数绑定到原系统；重复生成会更新类型和版本，保留业务 handler 文件。未绑定的模板明确返回 `handler_not_implemented`。

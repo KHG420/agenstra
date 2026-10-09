@@ -33,7 +33,7 @@ Agenstra 是一个用 Go 实现、面向现有系统接入的 Agent 框架。它
 4. **接入调用入口。** 启动框架服务，通过 HTTP API 提交任务。需要聊天时接入 JS SDK 和宿主 UI；需要控制页面时，再注册前端动作与 handler。会话上下文和运行检查点由框架管理，宿主通过会话 ID 选择会话。
 5. **验证实际场景。** 用真实模型和接口检查能力选择、权限、审批、错误路径与结果质量。后续增加业务能力时，沿用能力包和适配接口扩展。
 
-完整示例见[REST 接入教程](docs/tutorial.md)和[Web 接入指南](docs/web-integration.md)。SDK 可用 `node web/export-client.mjs /path/to/host/vendor/agenstra` 导出 JS、TypeScript 声明和 SHA-256 记录，供宿主固定版本使用，无需新增 npm 运行时依赖。
+完整示例见[REST 接入教程](docs/tutorial.md)和[Web 接入指南](docs/web-integration.md)。SDK 可用 `node sdk/web/export-client.mjs /path/to/host/vendor/agenstra` 导出 JS、TypeScript 声明和 SHA-256 记录，供宿主固定版本使用，无需新增 npm 运行时依赖。
 
 ## 先体验接入效果
 
@@ -52,6 +52,8 @@ Agenstra 可独立部署，通过 HTTP API 为现有系统提供 Agent 服务；
 当前持久宿主支持**单节点、持久本地磁盘和 SQLite WAL**。一个部署可以配置多个用户，每个用户有独立的能力授权和连接。一个项目拥有一个能力包；任务可以显式组合其他项目中已授权的能力，详见[跨项目任务](docs/cross-project-tasks.md)。包括读取在内的所有能力都需要明确授权。分布式高可用、自动保留期清理、真实模型质量和外部计算正确性仍需另行设计或验收。
 
 本仓库发布框架、通用测试、部署模板、教程和本地演示。生产使用时，需要提供自己的业务能力包、模型连接与凭据；`deploy/deployment.example.json` 用于配置接入。
+
+Go 宿主导入 `github.com/KHG420/agenstra/sdk/go`（包名 `agenstra`）。源码采用内核与 SDK 分离的目录：执行与持久化位于 `internal/runtime/engine`；独立工具按 `internal/base`、`contract`、`ext`、`platform` 分组；管理控制台资源位于 `internal/frontend/admin`；浏览器接入位于 `sdk/web`。命令和示例使用同一个 Go SDK，完整目录与依赖方向见[源码模块映射](docs/architecture.md#源码模块与依赖方向)。
 
 ```mermaid
 flowchart LR
@@ -212,7 +214,7 @@ Go 版本保留部署 JSON 格式、能力包清单、HTTP 路由与响应格式
 
 ```sh
 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
-npm ci --prefix web
+npm ci --prefix sdk/web
 make check
 ```
 

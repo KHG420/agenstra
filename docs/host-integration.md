@@ -31,7 +31,7 @@
 | 原系统自己的聊天 UI | 聊天/会话接口、队列、消息历史、运行检查点 |
 | 文件选择、业务幂等与原后端校验 | 稳定 client/command ID、不重跑已认领 handler |
 
-SDK 在 `web/agenstra-client.js`，导出命令和完整配置见 [Web integration guide](web-integration.md)。headless client 不加载 DOM 或样式；宿主也可单独导入标准聊天组件和服务端票据助手。同一个 SDK 可供不同系统使用，实际页面行为仍由宿主绑定。
+SDK 在 `sdk/web/agenstra-client.js`，导出命令和完整配置见 [Web integration guide](web-integration.md)。headless client 不加载 DOM 或样式；宿主也可单独导入标准聊天组件和服务端票据助手。同一个 SDK 可供不同系统使用，实际页面行为仍由宿主绑定。
 
 ## 浏览器 SDK 的接线与恢复
 

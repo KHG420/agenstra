@@ -23,7 +23,7 @@
 
 - 核心不得按业务应用、具体能力名字或请求关键词编排业务流程。业务算法、接口组合规则和业务文案由宿主或能力包提供。
 - `AgentRuntime` 管决策、上下文、引用和预算；`AgentHost` 管授权、运行生命周期、租约、审批和检查点；Provider 管适配、契约和结构化结果。调整前核对现有调用链，避免两层重复执行同一判断或产生两份状态。
-- `cmd/` 只接线和展示；`examples/` 展示最少必要接入工作。修复通用问题时修改框架，不在示例里增加绕过框架缺陷的补丁。
+- `internal/runtime/engine/` 拥有执行与持久状态；`sdk/go/` 只导出宿主接入类型与函数，不复制执行逻辑；`cmd/` 只接线和展示；`examples/` 展示最少必要接入工作。修复通用问题时修改框架，不在示例里增加绕过框架缺陷的补丁。
 - 使用现有依赖与模式。新增生产依赖、公共接口、持久化语义或共享抽象必须有任务授权，并说明宿主实际需要增加的工作。
 - 一次变更聚焦一个目的。不得混入全库格式化、重命名、目录重排和无关清理。
 
@@ -76,17 +76,17 @@
 
 不使用全库排除、只查新增行或禁用整个文件来制造通过。局部 lint 例外应指定规则、写明合法语义及必要性，并接受人工审查；失效的 ESLint disable 会报错，Go `nolint` 必须标明规则和原因。
 
-Go 模块通过标准 [ignore 指令](https://go.dev/ref/mod#go-mod-file-ignore) 仅排除 `web/node_modules` 中 npm 工具附带的第三方 Go 源码；`fmt-check` 检查 Git 管理的和未被忽略的新 Go 文件。项目维护的源码和测试都在检查范围内。
+Go 模块通过标准 [ignore 指令](https://go.dev/ref/mod#go-mod-file-ignore) 仅排除 `sdk/web/node_modules` 中 npm 工具附带的第三方 Go 源码；`fmt-check` 检查 Git 管理的和未被忽略的新 Go 文件。项目维护的源码和测试都在检查范围内。
 
 `nilerr` 未启用：框架允许通过结构化 `ErrorCode` 消费错误后返回 nil error。`sqlclosecheck` 未启用：部分事务需要在后续查询前显式关闭 rows。也不启用 Stylistic/Quickfix 全套检查、任意函数行数、圈复杂度、百分比覆盖率门槛或 TypeScript 迁移。这些取舍不免除相应的人工审查。
 
 ### 本地准备与提交前验证
 
-Go 版本按 `go.mod`。Node.js 使用 22.13+ 的 22 系列或 24+；CI 使用 Node.js 22。golangci-lint 固定 `v2.12.2`，ESLint 与开发依赖锁定在 `web/package-lock.json`，不增加宿主的运行依赖。
+Go 版本按 `go.mod`。Node.js 使用 22.13+ 的 22 系列或 24+；CI 使用 Node.js 22。golangci-lint 固定 `v2.12.2`，ESLint 与开发依赖锁定在 `sdk/web/package-lock.json`，不增加宿主的运行依赖。
 
 ```sh
 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
-npm ci --prefix web
+npm ci --prefix sdk/web
 make check
 ```
 

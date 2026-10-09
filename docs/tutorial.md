@@ -251,7 +251,7 @@ go run ./cmd/agenstra-import-openapi \
 
 ## 7. MCP 或自定义 SDK
 
-已有 MCP 服务时，用 `agenstra.mcp-pack.v1` 清单声明 stdio 或 streamable HTTP 连接，只暴露审查过的工具。对每个工具保存 `contract_sha256`；它覆盖完整工具契约，而不是只覆盖工具名。`mcp.go` 的 `MCPContractDigest` 接受工具契约的 JSON 映射并计算哈希。MCP 连接所需 URL、token 或 stdio 环境变量仍由部署配置绑定，不能写明文到包中。
+已有 MCP 服务时，用 `agenstra.mcp-pack.v1` 清单声明 stdio 或 streamable HTTP 连接，只暴露审查过的工具。对每个工具保存 `contract_sha256`；它覆盖完整工具契约，而不是只覆盖工具名。`sdk/go/providers.go` 的 `MCPContractDigest` 接受工具契约的 JSON 映射并计算哈希。MCP 连接所需 URL、token 或 stdio 环境变量仍由部署配置绑定，不能写明文到包中。
 
 stdio 的 stdout 每行应包含一个完整 JSON-RPC 消息；框架只将当前请求的响应作为业务回执。调用超时或取消时，框架中断 stdin 写入和 stdout 读取，并终止、回收子进程，宿主无需另写进程超时管理。无效回执仍按不确定结果处理。
 
@@ -263,6 +263,6 @@ Streamable HTTP 的 SSE 响应按事件边界组装多行 `data:`，收到当前
 
 stdio、HTTP JSON 和 SSE 的业务回执都须声明 `jsonrpc: "2.0"`，并且只能包含 `result` 或 `error` 中的一项；`result` 与 `error: null` 同时出现也不合法。无效协议消息不能作为已确认的业务结果。
 
-特殊 SDK 可实现 `CapabilityProvider`：提供 `Capabilities()`、`Skills()`、`SystemPrompt()`、`Invoke(ctx, name, arguments, invocationContext)` 和 `Close()`，由调用方应用构造按用户隔离的 `ProviderFactory` 传给 `AgentHost`。Provider 负责对输入和返回做验证，返回结构化 `CapabilityResult` 或安全错误码；不要让原始异常、密钥或不可信响应正文进入模型或审计文本。具体协议类型见 [`providers.go`](../providers.go)，持久 Host 接入见 [`host.go`](../host.go)。
+特殊 SDK 可实现 `CapabilityProvider`：提供 `Capabilities()`、`Skills()`、`SystemPrompt()`、`Invoke(ctx, name, arguments, invocationContext)` 和 `Close()`，由调用方应用构造按用户隔离的 `ProviderFactory` 传给 `AgentHost`。Provider 负责对输入和返回做验证，返回结构化 `CapabilityResult` 或安全错误码；不要让原始异常、密钥或不可信响应正文进入模型或审计文本。具体协议类型见 [Go Provider 接口](../sdk/go/providers.go)，持久 Host 接入见 [Go Host 接口](../sdk/go/host.go)。
 
 完成接入后，用真实 API 和模型验证授权、结果字段、错误情况、数据是否允许送模型、提交幂等、等待恢复与最终回答；自动化测试只能证明框架边界，不能代替具体场景验收。

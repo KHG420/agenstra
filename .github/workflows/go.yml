@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm ci --prefix web
-      - run: npm run lint --prefix web
-      - run: npm test --prefix web
+          cache-dependency-path: sdk/web/package-lock.json
+      - run: npm ci --prefix sdk/web
+      - run: npm run lint --prefix sdk/web
+      - run: npm test --prefix sdk/web

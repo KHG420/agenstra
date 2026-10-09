@@ -12,7 +12,7 @@
 - 连续发送消息可观察 FIFO 排队；可以停止排队或执行中的任务。
 - 新建或选择会话，观察各自的历史与任务状态；切换会话不会取消旧任务。
 
-示例聊天入口复用 `web/agenstra-chat.js`，旧示例文件保留轻量入口。标准组件单独导出并通过 `/web/assets/agenstra-chat.js` 提供。示例只监听回环地址，身份固定为 `demo`，退出时删除临时数据库。生产环境须用宿主已经验证的登录会话解析身份，并使用真实模型、业务数据和持久存储。
+示例聊天入口复用 `sdk/web/agenstra-chat.js`，旧示例文件保留轻量入口。标准组件单独导出并通过 `/web/assets/agenstra-chat.js` 提供。示例只监听回环地址，身份固定为 `demo`，退出时删除临时数据库。生产环境须用宿主已经验证的登录会话解析身份，并使用真实模型、业务数据和持久存储。
 
 ## 选择要复用的模块
 
@@ -181,9 +181,9 @@ Web ticket 只用于扩展路由以及该用户关联的聊天/浏览器 run，�
 
 ## 宿主使用无 UI 的 SDK
 
-SDK 资源嵌入 Go 二进制，无需静态资源构建；也可将 `web/agenstra-client.js` 纳入宿主 bundler。目录附 TypeScript 声明，包可用 `npm pack ./web` 打包安装，导出 `@agenstra/web/client`、`@agenstra/web/chat`、`@agenstra/web/session`；npm 注册表发布另行执行。
+SDK 资源嵌入 Go 二进制，无需静态资源构建；也可将 `sdk/web/agenstra-client.js` 纳入宿主 bundler。目录附 TypeScript 声明，包可用 `npm pack ./sdk/web` 打包安装，导出 `@agenstra/web/client`、`@agenstra/web/chat`、`@agenstra/web/session`；npm 注册表发布另行执行。
 
-宿主希望离线构建或固定 SDK 版本时，在框架仓库执行 `node web/export-client.mjs /path/to/host/vendor/agenstra`。它复制原始 JS 和 TypeScript 声明，并生成包含 SHA-256 的 `agenstra-sdk.json`；宿主可从本地 vendor 目录导入。升级时重新导出并审查差异，不需要新增 npm 依赖，也可按需导入标准聊天组件。
+宿主希望离线构建或固定 SDK 版本时，在框架仓库执行 `node sdk/web/export-client.mjs /path/to/host/vendor/agenstra`。它复制原始 JS 和 TypeScript 声明，并生成包含 SHA-256 的 `agenstra-sdk.json`；宿主可从本地 vendor 目录导入。升级时重新导出并审查差异，不需要新增 npm 依赖，也可按需导入标准聊天组件。
 
 ```js
 import { createAgenstraClient } from "/agent/web/assets/agenstra-client.js";

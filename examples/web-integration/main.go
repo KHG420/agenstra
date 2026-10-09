@@ -21,7 +21,7 @@ import (
 	"syscall"
 	"time"
 
-	agenstra "github.com/KHG420/agenstra"
+	agenstra "github.com/KHG420/agenstra/sdk/go"
 )
 
 //go:embed index.html host.js demo-chat.js frontend.json pack.json deployment.json
