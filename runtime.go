@@ -845,10 +845,20 @@ func (r *AgentRuntime) Step(ctx context.Context, state *RuntimeState, beforeMode
 			}
 		}
 		refs, refsErr := resolveResultRefs(decision.ResultRefs, decision.FactIDs, facts, r.ConnectionID)
+		exposesInternalID := false
+		answerFold := strings.ToLower(decision.AnswerMarkdown)
+		for id := range facts {
+			if id != "" && strings.Contains(answerFold, strings.ToLower(id)) {
+				exposesInternalID = true
+				break
+			}
+		}
 		if !valid {
 			Reject(state, "final", "agent.final", "final_fact_citations_invalid", JSON{"feedback": "Cite at least one observed Fact when Facts exist. Every fact_ids entry must be an existing Fact ID from this run; use inspect_fact to read evidence before correcting the answer."}, "")
 		} else if refsErr != nil {
 			Reject(state, "final", "agent.final", "final_result_refs_invalid", JSON{"feedback": "Each result_refs entry must name an available Fact included in fact_ids and a path to a nonempty scalar business ID (string or integer). Inspect the Fact and use its actual path, including data and, for browser receipts, result. Omit result_refs when the answer needs no object reference; never invent an ID."}, "")
+		} else if exposesInternalID {
+			Reject(state, "final", "agent.final", "final_internal_fact_id_exposed", JSON{"feedback": "Remove internal Fact identifiers from answer_markdown. Keep genuine citations in fact_ids and object references in result_refs. Answer the requested business values using existing successful evidence; do not repeat business operations."}, "")
 		} else if r.CompletionValidator != nil {
 			err := r.CompletionValidator(ctx, CompletionContext{RunID: state.RunID, OriginPackID: r.OriginPackID, Instruction: state.Instruction, AnswerMarkdown: decision.AnswerMarkdown, FactIDs: decision.FactIDs, Facts: state.Facts, Observations: state.Observations, Followups: state.Followups})
 			if ctx.Err() != nil {
