@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	_ "time/tzdata" // Keep IANA zones available in the standalone server/container.
+	_ "time/tzdata"
 )
 
 // Rule implements numeric, five-field cron: minute hour day month weekday.

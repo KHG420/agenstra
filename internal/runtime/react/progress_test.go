@@ -1,0 +1,135 @@
+package react
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"testing"
+
+	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
+)
+
+func TestProgressRetainsEarlierOutcomesAndPendingIsUnfinished(t *testing.T) {
+	state := &agentcontract.RuntimeState{}
+	for i := 0; i < 20; i++ {
+		capability := "recent.read"
+		if i == 0 {
+			capability = "earlier.compute"
+		}
+		obs := agentcontract.Observation{CallRef: fmt.Sprintf("read-%d", i), Capability: capability, Status: "succeeded", FactID: agentcontract.Strptr(agentcontract.NewID())}
+		state.Observations = append(state.Observations, obs)
+		state.ModelObservations = append(state.ModelObservations, obs)
+	}
+	state.Pending = []agentcontract.Invocation{{Call: agentcontract.ToolCall{CallRef: "job", Capability: "job.submit"}, Status: "waiting"}}
+	state.Observations = append(state.Observations, agentcontract.Observation{CallRef: "job", Capability: "job.submit", Status: "succeeded"})
+	Reject(state, "blocked", "missing.read", "capability_not_granted", nil, "")
+	r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{}}}
+	packet := r.Context(state)
+	if packet.Progress.CompletedCount != 20 || len(packet.Progress.Completed) != 2 || packet.Progress.Completed[0].Capability != "earlier.compute" || len(packet.Progress.Pending) != 1 || packet.Progress.BlockedCount != 1 {
+		t.Fatalf("%+v", packet.Progress)
+	}
+	if packet.Observations[0].Capability == "earlier.compute" {
+		t.Fatal("fixture did not exceed observation window")
+	}
+}
+
+func TestStagnationDetectsInspectionCyclesAndSurvivesRestore(t *testing.T) {
+	calls, warned := 0, false
+	m := decisionModelFunc(func(_ context.Context, packet agentcontract.ContextPacket, _ string) (agentcontract.Decision, error) {
+		calls++
+		warned = warned || (packet.Progress != nil && packet.Progress.StagnationWarning)
+		name := "a.read"
+		if calls%2 == 0 {
+			name = "b.read"
+		}
+		return agentcontract.Decision{Kind: "inspect_capability", Name: name}, nil
+	})
+	p := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{"a.read": {Name: "a.read"}, "b.read": {Name: "b.read"}}}
+	r := &AgentRuntime{Provider: p, Model: m, Grants: map[string]bool{"a.read": true, "b.read": true}, MaxStagnantRounds: 3}
+	state, callErr := r.NewState("inspect", "")
+	if callErr != nil {
+		t.Error(callErr)
+	}
+	for i := 0; i < 5; i++ {
+		if err := r.Step(t.Context(), state, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, callErr2 := agentcontract.CanonicalJSON(state)
+	if callErr2 != nil {
+		t.Error(callErr2)
+	}
+	var restored agentcontract.RuntimeState
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Step(t.Context(), &restored, nil); err != nil || restored.Status != "failed" || *restored.ErrorCode != "agent_stagnated" || calls != 5 || !warned {
+		t.Fatalf("state=%+v calls=%d warning=%v err=%v", restored, calls, warned, err)
+	}
+}
+
+func TestProgressCountsNewEvidenceAndInputButNotNewFactIDs(t *testing.T) {
+	state := &agentcontract.RuntimeState{}
+	if updateProgress(state, 3, nil) {
+		t.Fatal("initial stagnation")
+	}
+	f := agentcontract.Fact{FactID: agentcontract.NewID(), SourceCapability: "records.read", Value: agentcontract.JSON{"count": 1}}
+	state.Facts = append(state.Facts, f)
+	updateProgress(state, 3, nil)
+	f.FactID = agentcontract.NewID()
+	state.Facts = append(state.Facts, f)
+	updateProgress(state, 3, nil)
+	if state.Progress.NoProgressRounds != 1 {
+		t.Fatal("duplicate content counted as progress")
+	}
+	f.Value = agentcontract.JSON{"count": 2}
+	state.Facts = append(state.Facts, f)
+	updateProgress(state, 3, nil)
+	if state.Progress.NoProgressRounds != 0 {
+		t.Fatal("new data did not reset stagnation")
+	}
+	updateProgress(state, 3, nil)
+	state.Followups = append(state.Followups, "Use the second result")
+	updateProgress(state, 3, nil)
+	if state.Progress.NoProgressRounds != 0 {
+		t.Fatal("new user input did not reset stagnation")
+	}
+}
+
+func TestRepeatedUnchangedReadsStillStagnate(t *testing.T) {
+	p := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{"records.get": {Name: "records.get", Effect: "read", Replay: "safe"}}}
+	calls := 0
+	m := decisionModelFunc(func(context.Context, agentcontract.ContextPacket, string) (agentcontract.Decision, error) {
+		calls++
+		decision := callDecision("records.get")
+		decision.Calls[0].CallRef = fmt.Sprintf("read-%d", calls)
+		return decision, nil
+	})
+	r := &AgentRuntime{Provider: p, Model: m, Grants: map[string]bool{"records.get": true}, MaxStagnantRounds: 3}
+	result, err := r.Run(t.Context(), "Read until the record changes")
+	if err != nil || result.Status != "failed" || result.ErrorCode == nil || *result.ErrorCode != "agent_stagnated" || p.called <= 2 {
+		t.Fatalf("unchanged reads: calls=%d result=%+v err=%v", p.called, result, err)
+	}
+}
+
+func TestProgressProjectionIsBoundedAndDoesNotMutateState(t *testing.T) {
+	state := &agentcontract.RuntimeState{}
+	for i := 0; i < 40; i++ {
+		state.Observations = append(state.Observations, agentcontract.Observation{CallRef: fmt.Sprintf("ref-%d", i), Capability: fmt.Sprintf("tool.%02d", i), Status: "succeeded"})
+	}
+	before, callErr3 := agentcontract.CanonicalJSON(state)
+	if callErr3 != nil {
+		t.Error(callErr3)
+	}
+	view := RunProgress(state, 8)
+	if len(view.Completed) != 8 || view.CompletedCount != 40 || view.OmittedItems != 32 {
+		t.Fatalf("%+v", view)
+	}
+	after, callErr4 := agentcontract.CanonicalJSON(state)
+	if callErr4 != nil {
+		t.Error(callErr4)
+	}
+	if string(before) != string(after) {
+		t.Fatal("projection mutated audit state")
+	}
+}

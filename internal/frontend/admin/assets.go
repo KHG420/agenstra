@@ -1,5 +1,5 @@
 // Package admin owns the developer console's embedded static assets.
-// Authentication and management operations remain in the execution engine.
+// Authentication and management routing belong to the frontend service.
 package admin
 
 import "embed"

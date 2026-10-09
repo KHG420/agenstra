@@ -53,7 +53,7 @@ The current durable host targets **one node with persistent local storage and SQ
 
 This repository contains the framework, generic tests, deployment templates, guides, and a local demo. Production use requires your own business packs, model connection, and credentials; `deploy/deployment.example.json` is a configuration template.
 
-Go applications import `github.com/KHG420/agenstra/sdk/go` (package `agenstra`). The source tree follows a kernel and SDK layout: execution and persistence live in `internal/runtime/engine`, independent helpers are grouped under `internal/base`, `contract`, `ext`, and `platform`, the developer console assets live in `internal/frontend/admin`, and browser integration lives in `sdk/web`. Commands and examples use the same Go SDK. See the [source module map](docs/architecture.md#源码模块与依赖方向).
+Go applications import `github.com/KHG420/agenstra/sdk/go` (package `agenstra`). The source tree follows a kernel and SDK layout: ReAct and durable execution live in `internal/runtime/react` and `internal/runtime/host`, SQLite stores live under `internal/state`, shared contracts, capability adapters, model protocols, and deployment wiring live under `internal/contract`, `ext`, `platform`, and `assembly`, and HTTP/Web services live in `internal/frontend/service`, the developer console assets live in `internal/frontend/admin`, and browser integration lives in `sdk/web`. Commands and examples use the same Go SDK. See the [source module map](docs/architecture.md#源码模块与依赖方向).
 
 ```mermaid
 flowchart LR

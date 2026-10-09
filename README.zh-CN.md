@@ -53,7 +53,7 @@ Agenstra 可独立部署，通过 HTTP API 为现有系统提供 Agent 服务；
 
 本仓库发布框架、通用测试、部署模板、教程和本地演示。生产使用时，需要提供自己的业务能力包、模型连接与凭据；`deploy/deployment.example.json` 用于配置接入。
 
-Go 宿主导入 `github.com/KHG420/agenstra/sdk/go`（包名 `agenstra`）。源码采用内核与 SDK 分离的目录：执行与持久化位于 `internal/runtime/engine`；独立工具按 `internal/base`、`contract`、`ext`、`platform` 分组；管理控制台资源位于 `internal/frontend/admin`；浏览器接入位于 `sdk/web`。命令和示例使用同一个 Go SDK，完整目录与依赖方向见[源码模块映射](docs/architecture.md#源码模块与依赖方向)。
+Go 宿主导入 `github.com/KHG420/agenstra/sdk/go`（包名 `agenstra`）。源码采用内核与 SDK 分离的目录：决策与持久运行分别位于 `internal/runtime/react` 和 `internal/runtime/host`，SQLite 位于 `internal/state`；共享契约、能力适配、模型协议和部署装配分别位于 `internal/contract`、`ext`、`platform` 和 `assembly`；HTTP/Web 服务位于 `internal/frontend/service`；管理控制台资源位于 `internal/frontend/admin`；浏览器接入位于 `sdk/web`。命令和示例使用同一个 Go SDK，完整目录与依赖方向见[源码模块映射](docs/architecture.md#源码模块与依赖方向)。
 
 ```mermaid
 flowchart LR

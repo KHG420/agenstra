@@ -6,8 +6,8 @@
 
 - 开始修改前阅读 [编码规范](docs/coding-standards.md) 和 [架构边界](docs/architecture.md)。沿用现有模式，做满足需求的最小修改。
 - 通用运行逻辑留在框架，业务流程、业务算法和场景文案留在宿主或能力包。核心代码不得按应用名称、能力名称或用户自然语言写场景分支。
-- `internal/runtime/engine/` 负责运行、Host、Provider、HTTP 接线和持久化；公开 Go 接入 API 位于 `sdk/go/`，不得另建运行状态或业务逻辑；`cmd/` 负责命令接线；`sdk/web/` 的无 UI 客户端与可选聊天组件保持分离；`examples/` 仅演示接入。
-- `internal/` 按 `base`、`contract`、`ext`、`frontend`、`platform`、`runtime` 分组。JSON、Schema、Cron、发布文件、MCP 传输与 OpenAPI 这些独立内部模块不得导入执行引擎或 Go SDK，也不得持有 Host、SQLite、授权状态；具体模块映射见架构文档。
+- `internal/runtime/react/` 负责决策、上下文、引用与调用证据，`internal/runtime/host/` 负责授权、审批、租约、检查点和恢复，`internal/state/` 负责 SQLite 事务；Host 不得导入部署、模型适配器或 HTTP/Web。公开 Go 接入位于 `sdk/go/`，不得另建运行状态或业务逻辑；`cmd/` 负责命令接线；`sdk/web/` 的无 UI 客户端与可选聊天组件保持分离；`examples/` 仅演示接入。
+- `internal/` 按 `assembly`、`base`、`contract`、`ext`、`frontend`、`platform`、`runtime`、`state` 分组。契约与基础模块不持有 Host、数据库或凭据；REST/MCP 与模型适配器不读取 Host 或 SQLite；部署装配和前端调用实际所有者。具体依赖与状态归属见架构文档。
 - 不为推测的未来需求增加接口、配置、依赖、兼容层或共享抽象。公共 API、HTTP/JSON、能力清单与持久化语义变更须有本次任务的明确授权。
 
 ## 调查与实现
