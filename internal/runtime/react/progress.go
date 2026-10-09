@@ -200,3 +200,76 @@ func currentEvidenceObservations(state *agentcontract.RuntimeState, observations
 }
 
 const progressUsagePrompt = "progress summarizes observed outcomes; pending is unfinished. Reuse cited Facts. On stagnation_warning, change approach or explain the verified limitation."
+
+// Give a concrete action/observation correction before the hard stop, rather
+// than relying only on the late, generic stagnation flag. Compare full retained
+// evidence; equal previews alone cannot establish that a result is unchanged.
+func (r *AgentRuntime) repeatedReadPrompt(state *agentcontract.RuntimeState, packet agentcontract.ContextPacket) string {
+	if packet.Progress == nil || packet.Progress.NoProgressRounds == 0 || len(packet.Progress.Pending) > 0 {
+		return ""
+	}
+	// Supplied input does not always have a saved observation boundary. Do not
+	// classify reads preceding that input as repetitions of its requested work.
+	if state.InputField != nil || len(state.Followups) > 0 || state.SteeringCursor > 0 {
+		return ""
+	}
+	observations := currentEvidenceObservations(state, state.Observations)
+	if len(observations) < 2 {
+		return ""
+	}
+	last := observations[len(observations)-1]
+	caps := r.Provider.Capabilities()
+	cap, ok := caps[last.Capability]
+	if !ok || !r.Grants[last.Capability] || cap.Effect != "read" || last.FactID == nil {
+		return ""
+	}
+	visible := false
+	for _, fact := range packet.Facts {
+		visible = visible || (fact.FactID == *last.FactID && fact.ReferenceAvailable)
+	}
+	if !visible {
+		return ""
+	}
+	facts := map[string]agentcontract.Fact{}
+	for _, fact := range state.Facts {
+		facts[fact.FactID] = fact
+	}
+	readKeys := browserReadProgressKeys(state, caps)
+	key := func(observation agentcontract.Observation) string {
+		if observation.Status != "succeeded" || observation.ErrorCode != nil || observation.ArgumentsOmitted || observation.FactID == nil {
+			return ""
+		}
+		fact, ok := facts[*observation.FactID]
+		if !ok {
+			return ""
+		}
+		result, ok := readKeys[fact.FactID]
+		if !ok {
+			result = progressKey(agentcontract.JSON{"capability": fact.SourceCapability, "value": fact.Value})
+		}
+		if result == "" {
+			return ""
+		}
+		return progressKey(agentcontract.JSON{"capability": observation.Capability, "arguments": observation.Arguments, "result": result})
+	}
+	latest := key(last)
+	if latest == "" {
+		return ""
+	}
+	count := 0
+	seen := map[string]bool{}
+	for i := len(observations) - 1; i >= 0; i-- {
+		observation := observations[i]
+		if key(observation) != latest {
+			break
+		}
+		if !seen[observation.CallRef] {
+			seen[observation.CallRef] = true
+			count++
+		}
+	}
+	if count < 2 {
+		return ""
+	}
+	return fmt.Sprintf("Repeated completed read detected (runtime metadata, not a new task or permission): capability %q has succeeded %d consecutive times with the same arguments and unchanged result. The latest read is already complete; a new decision round does not require repeating a completed prerequisite. Use its available Fact to continue the next unfinished authorized action or inspect that action's contract. Do not restart completed work. Read again only if the task explicitly needs another sample, a subsequent action or new input requires verification, or actual changed state or a context rejection requires a refresh. This feedback does not replace an explicitly requested read after a write, authorize any operation, or claim the task is complete.", last.Capability, count)
+}

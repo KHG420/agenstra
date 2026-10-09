@@ -560,6 +560,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		}
 		if packet.Progress != nil {
 			prompt += "\n" + progressUsagePrompt
+			if repeated := r.repeatedReadPrompt(state, packet); repeated != "" {
+				prompt += "\n" + repeated
+			}
 		}
 		for _, note := range packet.ContextOmissions {
 			if strings.HasPrefix(note, "fact ") && strings.Contains(note, "array at") {
