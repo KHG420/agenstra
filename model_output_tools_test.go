@@ -46,7 +46,7 @@ func TestDecisionOutputToolsRejectMalformedOutput(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 					t.Error(err)
 				}
-				if payload["response_format"] != nil || payload["tool_choice"] != "required" || len(payload["tools"].([]any)) != 8 {
+				if payload["response_format"] != nil || payload["tool_choice"] != "required" || len(payload["tools"].([]any)) != 7 {
 					t.Error("incorrect output tool request")
 				}
 				calls := []any{}
@@ -216,6 +216,40 @@ func TestDecisionOutputToolsMeasurementAndMemoryIsolation(t *testing.T) {
 	m.DecisionOutputMode = "invalid"
 	if _, err = m.requestPayload(raw, ""); ErrorCode(err) != "model_parameters_invalid" {
 		t.Fatal("invalid mode accepted", err)
+	}
+}
+
+func TestDecisionOutputToolsOmitUnavailableSkill(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		skills []JSON
+	}{
+		{name: "no declared skills"},
+		{name: "declared skill", skills: []JSON{{"name": "pack.guide", "description": "Usage instructions"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := &HTTPJSONDecisionModel{Model: "test", APIType: "compatible_chat", DecisionOutputMode: "output_tools"}
+			packet := ContextPacket{Schema: "agenstra.context.v1", Skills: tc.skills}
+			raw, err := CanonicalJSON(packet)
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, err := model.requestPayload(raw, "Choose one JSON decision at a time.")
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, tool := range payload["tools"].([]any) {
+				if tool.(JSON)["function"].(JSON)["name"] == "submit_read_skill" {
+					found = true
+				}
+			}
+			want := len(tc.skills) > 0
+			prompt := payload["messages"].([]any)[0].(JSON)["content"].(string)
+			if found != want || strings.Contains(prompt, "submit_read_skill: required") != want {
+				t.Fatalf("skill selection must match declared availability: tool=%v, want=%v", found, want)
+			}
+		})
 	}
 }
 

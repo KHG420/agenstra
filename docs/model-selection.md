@@ -61,6 +61,8 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 可选 `decision_output_mode` 选择业务决策输出：省略或 `json_object` 保持现有 JSON 内容；`output_tools` 使用每种决策一个类型化输出工具，通过 `tool_calls` 返回该决策的参数。适配器只从已登记的工具名赋予固定 `schema` 与 `kind`，随后使用原有 `agenstra.decision.v1` 校验；模型参数不包含这两个固定字段。此设置不影响记忆提取。仅对已实测支持该协议的网关启用；接受参数不等于网关严格执行 Schema。未知或多个输出工具、错误类型、重复键和不匹配的决策均被拒绝，仍使用原有本地校验、授权与预算。工具定义和输出提示计入实际请求预算。不会从普通文字中提取或修复 JSON，也不会自动改用另一种输出方式掩盖异常。已有任务继续使用创建时冻结的配置。
 
+授权技能目录为空时，`output_tools` 不向模型提供 `submit_read_skill` 或其字段提示；有已声明技能时保留该选项。这个选择依据当前上下文，不依据模型名称；运行时继续核对技能是否存在及是否获准。按运行上下文过滤可用工具的取舍参考 [Pydantic AI 的工具过滤](https://ai.pydantic.dev/toolsets/#filtering-tools)，Agenstra 沿用现有请求生成和校验路径。
+
 宿主沿用已有业务能力绑定和接线；部署管理员在框架开发者控制台的模型配置中保存输出策略即可。实际业务输入仍按该能力的 `input_schema` 校验，合法的决策输出不能代替业务参数或任务结果验收。
 
 单次能力调用优先通过 `submit_tool_call` 直接提交 `capability`、`arguments`、`reason`；适配器将对象包装为原有 `tool_batch` 的一项，减少单次调用的数组嵌套。多个独立调用仍使用 `submit_tool_batch` 的原生 `calls` 数组。输出工具中的 `call_ref` 可省略，实际本地调用引用由适配器生成；模型提供的可选标签仍检查格式，但不决定运行内核的调用身份。调用被保存后，执行重试、审批和恢复继续沿用同一引用及原有参数摘要，不重新生成身份。业务参数、授权、审批和真实回执继续由运行内核校验。字符串形式的对象或数组不会被自动转换；减少包装不能保证模型遵守业务契约。对象输出工具的参考实现见 [Pydantic AI](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_output.py#L1546-L1578)；它的 [工具回执与重试映射](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/models/openai.py#L1974-L1989) 将调用标识与函数参数分开处理。

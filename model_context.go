@@ -163,11 +163,31 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (JSO
 		payload[field] = m.MaxOutputTokens
 	}
 	if m.DecisionOutputMode == "output_tools" && decisionPacket {
-		payload["tools"] = decisionOutputTools()
+		tools := decisionOutputTools()
+		toolPrompt := decisionOutputToolPrompt(prompt)
+		// The authorized skill catalog is complete even when capabilities are
+		// deferred. Without a declared skill there is nothing to load.
+		if len(packet.Skills) == 0 {
+			for i, tool := range tools {
+				if tool.(JSON)["function"].(JSON)["name"] == "submit_read_skill" {
+					tools = append(tools[:i], tools[i+1:]...)
+					break
+				}
+			}
+			lines := strings.Split(toolPrompt, "\n")
+			retained := lines[:0]
+			for _, line := range lines {
+				if !strings.HasPrefix(line, "submit_read_skill:") {
+					retained = append(retained, line)
+				}
+			}
+			toolPrompt = strings.Join(retained, "\n")
+		}
+		payload["tools"] = tools
 		payload["tool_choice"] = "required"
 		payload["parallel_tool_calls"] = false
 		delete(payload, "response_format")
-		messages[0] = JSON{"role": "system", "content": decisionOutputToolPrompt(prompt)}
+		messages[0] = JSON{"role": "system", "content": toolPrompt}
 		for _, item := range messages[1:] {
 			message := item.(JSON)
 			if message["role"] == "assistant" {
