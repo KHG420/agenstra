@@ -296,3 +296,36 @@ func TestChineseNaturalInstructionsSelectActionsWithPrerequisite(t *testing.T) {
 		t.Fatal("prerequisite bypassed authorization", names)
 	}
 }
+
+func TestCapabilitySearchPrioritizesExactQualifiedOperation(t *testing.T) {
+	caps := map[string]CapabilityDescription{}
+	grants := map[string]bool{}
+	for _, module := range []string{"accounts", "billing", "events", "ledger", "members", "projects", "records", "reports", "teams", "tenants"} {
+		name := "ui.admin_" + module + "_read"
+		caps[name] = CapabilityDescription{Name: name, Description: "Read " + module, InputSchema: JSON{
+			"type": "object", "properties": JSON{"operation": JSON{"enum": []string{"getStats", "list"}}},
+		}}
+		grants[name] = true
+	}
+	const target = "portal.manual"
+	grants[target] = true
+	for _, schema := range []JSON{
+		{"type": "object", "properties": JSON{"operation": JSON{"enum": []string{"ledger.getStats"}}}},
+		{"anyOf": []JSON{{"type": "object", "properties": JSON{"operation": JSON{"const": "ledger.getStats"}}}}},
+	} {
+		caps[target] = CapabilityDescription{Name: target, Description: "Operations unavailable in the host", InputSchema: schema}
+		for _, query := range []string{"ledger.getStats", "Ledger.GetStats"} {
+			got := searchAuthorizedCapabilities(caps, grants, query, 8)
+			if len(got) == 0 || got[0] != target {
+				t.Fatalf("qualified operation %q displaced by partial matches: %v", query, got)
+			}
+		}
+		if got := searchAuthorizedCapabilities(caps, grants, "ledger.get", 1); len(got) == 1 && got[0] == target {
+			t.Fatal("operation prefix incorrectly treated as an exact identifier", got)
+		}
+	}
+	grants[target] = false
+	if got := searchAuthorizedCapabilities(caps, grants, "ledger.getStats", 8); containsString(got, target) {
+		t.Fatal("exact operation match exposed a revoked capability", got)
+	}
+}

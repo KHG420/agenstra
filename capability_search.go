@@ -11,6 +11,7 @@ import (
 type capabilityMatch struct {
 	name  string
 	score int
+	exact bool
 }
 
 var qualifiedCapabilityQueryPattern = regexp.MustCompile(`[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)+`)
@@ -69,8 +70,15 @@ func capabilityQueryTerms(query string, significantOnly bool) []string {
 	return terms
 }
 
-func capabilitySearchText(cap CapabilityDescription) (string, string, string) {
+func capabilitySearchText(cap CapabilityDescription) (string, string, string, []string) {
 	fields := []string{}
+	qualifiedOperations := []string{}
+	addOperation := func(value string) {
+		value = strings.ToLower(value)
+		if qualifiedCapabilityQueryPattern.FindString(value) == value {
+			qualifiedOperations = append(qualifiedOperations, value)
+		}
+	}
 	// Search the complete input contract even when ModelView defers its schema.
 	// Union discriminators and nested parameter guidance carry operation intent.
 	var collect func(map[string]any)
@@ -80,11 +88,13 @@ func capabilitySearchText(cap CapabilityDescription) (string, string, string) {
 		}
 		if value, ok := schema["const"].(string); ok {
 			fields = append(fields, value)
+			addOperation(value)
 		}
 		if values, ok := schema["enum"].([]any); ok {
 			for _, value := range values {
 				if text, ok := value.(string); ok {
 					fields = append(fields, text)
+					addOperation(text)
 				}
 			}
 		}
@@ -121,7 +131,7 @@ func capabilitySearchText(cap CapabilityDescription) (string, string, string) {
 		collect(schema)
 	}
 	sort.Strings(fields)
-	return strings.ToLower(cap.Name), strings.ToLower(cap.Description), strings.ToLower(strings.Join(fields, " "))
+	return strings.ToLower(cap.Name), strings.ToLower(cap.Description), strings.ToLower(strings.Join(fields, " ")), qualifiedOperations
 }
 
 // The search reads only the pinned capability catalog and live grants. It
@@ -139,9 +149,11 @@ func searchAuthorizedCapabilities(caps map[string]CapabilityDescription, grants 
 		if !grants[cap.Name] {
 			continue
 		}
-		nameText, description, fields := capabilitySearchText(cap)
+		nameText, description, fields, qualifiedOperations := capabilitySearchText(cap)
 		score := 0
+		exact := false
 		for _, term := range terms {
+			exact = exact || nameText == term || containsString(qualifiedOperations, term)
 			switch {
 			case nameText == term:
 				score += 8
@@ -156,10 +168,15 @@ func searchAuthorizedCapabilities(caps map[string]CapabilityDescription, grants 
 			}
 		}
 		if score > 0 {
-			matches = append(matches, capabilityMatch{name: name, score: score})
+			matches = append(matches, capabilityMatch{name: name, score: score, exact: exact})
 		}
 	}
 	sort.Slice(matches, func(i, j int) bool {
+		// A fully qualified operation in the pinned contract identifies its
+		// capability more precisely than shared module names or field words.
+		if matches[i].exact != matches[j].exact {
+			return matches[i].exact
+		}
 		if matches[i].score != matches[j].score {
 			return matches[i].score > matches[j].score
 		}
