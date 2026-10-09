@@ -73,6 +73,7 @@ func budgetContext(packet ContextPacket, state *RuntimeState, available int) Con
 		return contextCharacters(candidate) <= available-recentSize
 	}
 	// Repeated input payloads can be recovered from the audit trail. Keep outcomes.
+	originalObservations := packet.Observations
 	packet.Observations = append([]Observation{}, packet.Observations...)
 	for i := range packet.Observations {
 		if fitsRecent(packet) {
@@ -205,6 +206,27 @@ func budgetContext(packet ContextPacket, state *RuntimeState, available int) Con
 	}
 	if contextCharacters(packet) > available {
 		return packet
+	}
+	// Schema deferral may have freed enough space to recover recorded call identity.
+	// Restore only arguments present in the original model projection, keeping the
+	// latest result's preview reserve and never recovering already omitted inputs.
+	for i := len(packet.Observations) - 1; i >= 0; i-- {
+		if !packet.Observations[i].ArgumentsOmitted {
+			continue
+		}
+		for _, original := range originalObservations {
+			if original.CallRef != packet.Observations[i].CallRef || original.ArgumentsOmitted || len(original.Arguments) == 0 {
+				continue
+			}
+			candidate := packet
+			candidate.Observations = slices.Clone(packet.Observations)
+			candidate.Observations[i].Arguments = original.Arguments
+			candidate.Observations[i].ArgumentsOmitted = false
+			if fitsRecent(candidate) {
+				packet = candidate
+			}
+			break
+		}
 	}
 	// Allocate remaining space to recent evidence first, counting provenance and
 	// omission metadata as part of each complete candidate packet.

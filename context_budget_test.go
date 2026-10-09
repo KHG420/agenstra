@@ -88,6 +88,94 @@ func assertContextBudget(t *testing.T, packet ContextPacket, prompt string, budg
 	return size
 }
 
+func TestContextBudgetRestoresRecordedCallArgumentsAfterSchemaDeferral(t *testing.T) {
+	runtime, state, provider := contextBudgetRuntime(t, 6500)
+	runtime.MaxContextCapabilities = 1
+	cap := CapabilityDescription{Name: "record.read", InputSchema: JSON{
+		"type": "object", "properties": JSON{
+			"method": JSON{"type": "string", "enum": []string{"summary", "snapshot", "trend"}},
+			"query":  JSON{"type": "object", "description": strings.Repeat("x", 12000)},
+		},
+	}}
+	provider.caps[cap.Name] = cap
+	runtime.Grants[cap.Name] = true
+	for i, method := range []string{"summary", "snapshot"} {
+		fact := contextBudgetFact(JSON{"data": JSON{"body": strings.Repeat("y", 1800)}})
+		state.Facts = append(state.Facts, fact)
+		state.ModelObservations = append(state.ModelObservations, Observation{
+			CallRef: fmt.Sprintf("read-%d", i), Capability: cap.Name, Status: "succeeded", FactID: &fact.FactID,
+			Arguments: JSON{"method": method, "query": JSON{"start": "2026-10-06", "end": "2026-10-07"}},
+		})
+	}
+	latest := contextBudgetFact(JSON{"data": JSON{"revision": 3}})
+	state.Facts = append(state.Facts, latest)
+	state.ModelObservations = append(state.ModelObservations, Observation{
+		CallRef: "context-1", Capability: "context.read", Status: "succeeded", FactID: &latest.FactID, Arguments: JSON{},
+	})
+	before, err := CanonicalJSON(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet := runtime.Context(state)
+	assertContextBudget(t, packet, runtime.systemPrompt(), runtime.MaxContextCharacters)
+	if packet.Capabilities[0]["schema_requires_inspection"] != true {
+		t.Fatal("large catalog schema did not exercise budget projection")
+	}
+	for i := range 2 {
+		if packet.Observations[i].ArgumentsOmitted || !reflect.DeepEqual(packet.Observations[i].Arguments, state.ModelObservations[i].Arguments) {
+			t.Fatalf("completed calls in the same capability lost their method and window: %+v", packet.Observations[i])
+		}
+	}
+	value, err := valueAt(packet.Facts[len(packet.Facts)-1].Value, []any{"data", "revision"})
+	if err != nil || value != 3 {
+		t.Fatal("restoring arguments displaced the latest result", value, err)
+	}
+	after, err := CanonicalJSON(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("projection changed durable run state")
+	}
+}
+
+func TestContextBudgetDoesNotRecoverInitiallyOmittedArguments(t *testing.T) {
+	packet := ContextPacket{
+		Schema: "agenstra.context.v1", Instruction: "Read the remaining records",
+		Capabilities: []JSON{{"name": "record.read", "input_schema": JSON{
+			"type": "object", "properties": JSON{"query": JSON{"type": "string", "description": strings.Repeat("x", 12000)}},
+		}}},
+		Observations: []Observation{
+			{CallRef: "hidden-1", Capability: "record.read", Status: "succeeded", Arguments: JSON{}, ArgumentsOmitted: true},
+			{CallRef: "read-2", Capability: "record.read", Status: "succeeded", Arguments: JSON{"query": "visible"}},
+		},
+	}
+	state := &RuntimeState{ModelObservations: []Observation{
+		{CallRef: "hidden-1", Capability: "record.read", Status: "succeeded", Arguments: JSON{"query": "not-in-model-projection"}},
+	}}
+	before, err := CanonicalJSON(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected := budgetContext(packet, state, 2000)
+	if contextCharacters(projected) > 2000 {
+		t.Fatal("restoring arguments exceeded the input budget")
+	}
+	if !projected.Observations[0].ArgumentsOmitted || len(projected.Observations[0].Arguments) != 0 {
+		t.Fatal("projection recovered initially omitted arguments", projected.Observations[0])
+	}
+	if projected.Observations[1].ArgumentsOmitted || projected.Observations[1].Arguments["query"] != "visible" {
+		t.Fatal("schema deferral did not restore the fitting visible input", projected.Observations[1])
+	}
+	after, err := CanonicalJSON(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("budget projection mutated the caller's packet")
+	}
+}
+
 func TestContextBudgetHistoryKeepsRecentEvidenceAndCompleteState(t *testing.T) {
 	runtime, state, _ := contextBudgetRuntime(t, 9000)
 	for i := 0; i < 12; i++ {
