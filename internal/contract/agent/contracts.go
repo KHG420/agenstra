@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 )
@@ -160,6 +161,7 @@ func (DecisionTooManyCallsError) Error() string {
 func (DecisionTooManyCallsError) Code() string { return "model_decision_invalid" }
 
 // Validate checks the decision kind, field bounds and JSON serializability.
+// Human-readable text limits count Unicode code points, as JSON Schema does.
 func (d Decision) Validate() error {
 	if d.Schema != "" && d.Schema != "agenstra.decision.v1" {
 		return errors.New("model_decision_invalid")
@@ -173,12 +175,12 @@ func (d Decision) Validate() error {
 			return errors.New("model_decision_invalid")
 		}
 		for _, c := range d.Calls {
-			if !CallRefPattern.MatchString(c.CallRef) || len(c.Capability) < 1 || len(c.Capability) > 330 || len(c.Reason) < 1 || len(c.Reason) > 500 || c.Arguments == nil {
+			if !CallRefPattern.MatchString(c.CallRef) || len(c.Capability) < 1 || len(c.Capability) > 330 || len(c.Reason) < 1 || utf8.RuneCountInString(c.Reason) > 500 || c.Arguments == nil {
 				return errors.New("model_decision_invalid")
 			}
 		}
 	case "final":
-		if len(d.AnswerMarkdown) < 1 || len(d.AnswerMarkdown) > 30000 || len(d.FactIDs) > 50 || len(d.ResultRefs) > 20 {
+		if len(d.AnswerMarkdown) < 1 || utf8.RuneCountInString(d.AnswerMarkdown) > 30000 || len(d.FactIDs) > 50 || len(d.ResultRefs) > 20 {
 			return errors.New("model_decision_invalid")
 		}
 		for _, id := range d.FactIDs {
@@ -192,7 +194,7 @@ func (d Decision) Validate() error {
 			}
 		}
 	case "request_input":
-		if !FieldPattern.MatchString(d.Field) || len(d.Prompt) < 1 || len(d.Prompt) > 1000 {
+		if !FieldPattern.MatchString(d.Field) || len(d.Prompt) < 1 || utf8.RuneCountInString(d.Prompt) > 1000 {
 			return errors.New("model_decision_invalid")
 		}
 		if d.InputSchema != nil && d.InputSchema.Validate() != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 )
@@ -223,7 +224,7 @@ type ResultObjectRef struct {
 
 // ValidResultRefRequest checks a model result-reference request before resolving it against evidence.
 func ValidResultRefRequest(ref ResultRefRequest) bool {
-	if !ValidUUID(ref.FactID) || len(ref.Path) < 1 || len(ref.Path) > 16 || len(ref.Label) > 100 || (ref.EntityType != "" && !FieldPattern.MatchString(ref.EntityType)) {
+	if !ValidUUID(ref.FactID) || len(ref.Path) < 1 || len(ref.Path) > 16 || utf8.RuneCountInString(ref.Label) > 100 || (ref.EntityType != "" && !FieldPattern.MatchString(ref.EntityType)) {
 		return false
 	}
 	for _, part := range ref.Path {
