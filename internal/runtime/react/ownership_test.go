@@ -105,6 +105,34 @@ func TestExecuteCallValidatesCustomProviderInput(t *testing.T) {
 	}
 }
 
+func TestExecuteCallRetainsDeclaredOutputContractDuringInvocation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data any
+		code string
+	}{
+		{"invalid original result", "1", "upstream_response_invalid"},
+		{"valid original result", 1, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			countSchema := agentcontract.JSON{"type": "integer"}
+			cap := agentcontract.CapabilityDescription{Name: "records.get", Version: "1", Effect: "read",
+				OutputSchema: agentcontract.JSON{"type": "object", "properties": agentcontract.JSON{"count": countSchema}, "required": []string{"count"}}}
+			p := &ownershipProvider{coreTestProvider: coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap}}, invoke: func(agentcontract.JSON) agentcontract.CapabilityResult {
+				countSchema["type"] = "string"
+				return agentcontract.CapabilityResult{Data: agentcontract.JSON{"count": tc.data}}
+			}}
+			outcome, err := ExecuteCall(t.Context(), p, map[string]bool{cap.Name: true}, agentcontract.ToolCall{Capability: cap.Name, Arguments: agentcontract.JSON{}}, nil)
+			if err != nil || outcome.ErrorCode != tc.code || (outcome.Fact == nil) != (tc.code != "") || p.called != 1 {
+				t.Fatalf("provider mutation changed the selected output contract: outcome=%+v error=%v calls=%d", outcome, err, p.called)
+			}
+			if outcome.Fact != nil && outcome.Fact.Value["data"].(agentcontract.JSON)["count"] != tc.data {
+				t.Fatal("valid result changed while retaining its original contract")
+			}
+		})
+	}
+}
+
 func TestExecuteCallRejectsNonJSONBoundaries(t *testing.T) {
 	cap := agentcontract.CapabilityDescription{Name: "records.get", Version: "1", Effect: "read"}
 	p := &ownershipProvider{coreTestProvider: coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap}}, invoke: func(agentcontract.JSON) agentcontract.CapabilityResult {

@@ -94,6 +94,11 @@ func ExecuteCall(ctx context.Context, provider agentcontract.CapabilityProvider,
 	if err != nil {
 		return agentcontract.CallOutcome{ErrorCode: "model_output_config_invalid"}, nil
 	}
+	// Retain the selected contract even if provider code reuses mutable schemas.
+	outputSchema, err := jsonvalue.Clone(cap.OutputSchema)
+	if err != nil {
+		return agentcontract.CallOutcome{ErrorCode: "upstream_response_invalid"}, nil
+	}
 	result, err := provider.Invoke(ctx, call.Capability, arguments, providerInvocation)
 	if err != nil {
 		return agentcontract.CallOutcome{ErrorCode: "provider_outcome_unknown"}, nil
@@ -108,8 +113,8 @@ func ExecuteCall(ctx context.Context, provider agentcontract.CapabilityProvider,
 	if err != nil {
 		return agentcontract.CallOutcome{ErrorCode: "upstream_response_invalid"}, nil
 	}
-	if cap.OutputSchema != nil {
-		schema, err := agentcontract.ValidateLocalSchema(cap.OutputSchema, false)
+	if outputSchema != nil {
+		schema, err := agentcontract.ValidateLocalSchema(outputSchema, false)
 		if err != nil || agentcontract.ValidateSchema(schema, data) != nil {
 			// A provider may have committed a write before returning invalid data.
 			// Keep the existing uncertain-outcome code instead of claiming failure.
