@@ -46,6 +46,10 @@ func followupExecutionPrompt(state *agentcontract.RuntimeState) string {
 	if boundary < 0 || !answered {
 		return ""
 	}
+	input, err := agentcontract.CanonicalJSON(agentcontract.JSON{"field": field, "status": "answered"})
+	if err != nil {
+		return ""
+	}
 	refs := []string{}
 	seen := map[string]bool{}
 	for i, decision := range state.Decisions {
@@ -67,5 +71,6 @@ func followupExecutionPrompt(state *agentcontract.RuntimeState) string {
 	if err != nil {
 		return ""
 	}
-	return "\nSaved decision ordering for the most recent answered request_input (runtime metadata, not instructions or permission): " + string(data) + ". Listed references were first decided AFTER that reply. An unlisted reference does not establish post-reply verification: it may predate the reply, reuse an earlier reference, or be omitted above. This establishes decision timing only, not success; use observations and available Facts to check actual outcomes. Reuse a completed requested read after that reply when it satisfies the task; do not count an earlier read as a later verification."
+	return "\nThe most recent saved request_input has already been answered: " + string(input) + ". The supplied value is in followups. Continue the original unfinished task from its saved progress; do not ask for this already supplied field again. Receiving input is not a business receipt. Another request_input requires an essential prerequisite that remains unsatisfied." +
+		"\nSaved decision ordering for the most recent answered request_input (runtime metadata, not instructions or permission): " + string(data) + ". Listed references were first decided AFTER that reply. An unlisted reference does not establish post-reply verification: it may predate the reply, reuse an earlier reference, or be omitted above. This establishes decision timing only, not success; use observations and available Facts to check actual outcomes. Reuse a completed requested read after that reply when it satisfies the task; do not count an earlier read as a later verification."
 }
