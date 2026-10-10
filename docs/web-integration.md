@@ -163,7 +163,7 @@ go run ./cmd/agenstra-manage disable alice records-web
 }
 ```
 
-动作使用 `ui.*` 名称，每份 profile 最多 200 个动作，输入输出须为 object Schema；effect 为 `read`、`write` 或 `destructive`，超时 1–300 秒，默认 60。审批由 profile 或实时 policy 的 `ApprovalCapabilities` 要求。把多个业务操作合并为一个动作时，应按审批要求分别声明普通更新和破坏性操作，避免删除操作的审批要求扩散到普通更新。`ui.get_context`、`ui.command_status` 保留给框架。页面观察数据最多 16 KiB，结果最多 64 KiB。profile 的 `context_schema`、浏览器对象的 `context` / `context_revision` 及模型能力 `ui.get_context` 保留现有契约名称，仅指当前页面观察数据，不是 Agent 会话上下文。
+动作使用 `ui.*` 名称，每份 profile 最多 200 个动作，输入输出须为 object Schema；effect 为 `read`、`write` 或 `destructive`，超时 1–300 秒，默认 60。审批由 profile 或实时 policy 的 `ApprovalCapabilities` 要求。把多个业务操作合并为一个动作时，应按审批要求分别声明普通更新和破坏性操作，避免删除操作的审批要求扩散到普通更新。`ui.get_context`、`ui.command_status` 保留给框架。页面观察数据最多 16 KiB；结果的规范化 JSON 最多 1 MiB，在现有 HTTP 请求体 2 MiB 上限内保留封装余量。完整结果按原有路径保存为回执和 Fact，模型只收到既有上下文预算内的有界预览，必要时通过 `inspect_fact` 读取指定部分。profile 的 `context_schema`、浏览器对象的 `context` / `context_revision` 及模型能力 `ui.get_context` 保留现有契约名称，仅指当前页面观察数据，不是 Agent 会话上下文。
 
 profile 由服务端发布，在线浏览器不能新增模型可用能力。纯浏览器 release 固定前端 profile；组合 release 还固定后端 fingerprint。托管后端恢复不可变 release；静态后端契约或绑定发生变更时，旧组合 run 在执行前以 `web_base_contract_changed` 拒绝，不能静默接受新契约。新任务使用新版本。别名不能改绑到其他业务包，也不能在组合与纯浏览器之间切换；改变接入模式时使用新别名。
 

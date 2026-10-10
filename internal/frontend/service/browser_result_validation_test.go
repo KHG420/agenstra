@@ -1,11 +1,112 @@
 package service
 
 import (
+	"bytes"
+	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
+
+func TestBrowserReceiptRetainsLargeDeclaredResults(t *testing.T) {
+	for _, status := range []string{"succeeded", "failed", "unknown"} {
+		for _, size := range []int{65536, 70 << 10, 1 << 20} {
+			t.Run(status+"/"+strconv.Itoa(size), func(t *testing.T) {
+				f := newWebFixture(t, &hostModel{decisions: browserDecisions()}, false)
+				f.run(t)
+				command := f.dispatch(t)
+				if accepted, _, err := f.w.BeginBrowserCommand(t.Context(), "alice", command.ID, f.key, 1); err != nil || !accepted {
+					t.Fatal(accepted, err)
+				}
+				empty, err := agentcontract.CanonicalJSON(agentcontract.JSON{"page": ""})
+				if err != nil {
+					t.Fatal(err)
+				}
+				result := agentcontract.JSON{"page": strings.Repeat("x", size-len(empty))}
+				raw, err := agentcontract.CanonicalJSON(result)
+				if err != nil || len(raw) != size {
+					t.Fatal("incorrect boundary fixture", len(raw), err)
+				}
+				code := ""
+				if status != "succeeded" {
+					code = "host_action_rejected"
+				}
+				for range 2 {
+					if _, err := f.w.CompleteBrowserCommand("alice", command.ID, f.key, 1, status, result, code); err != nil {
+						t.Fatal("valid receipt could not be retained", err)
+					}
+				}
+				saved, err := f.w.command("alice", command.ID)
+				if err != nil || saved.Status != status || saved.ErrorCode != code {
+					t.Fatal("large receipt changed outcome", saved.Status, saved.ErrorCode, err)
+				}
+				stored, err := agentcontract.CanonicalJSON(saved.Result)
+				if err != nil || !bytes.Equal(stored, raw) {
+					t.Fatal("large receipt lost persisted evidence", len(stored), err)
+				}
+				if accepted, _, err := f.w.BeginBrowserCommand(t.Context(), "alice", command.ID, f.key, 1); err != nil || accepted {
+					t.Fatal("retained outcome authorized a repeated action", accepted, err)
+				}
+			})
+		}
+	}
+}
+
+func TestBrowserLargeReceiptKeepsCompleteFactAndBoundedModelView(t *testing.T) {
+	page := strings.Repeat("x", 70<<10)
+	previewed := false
+	model := &hostModel{decisions: browserDecisions(), hook: func(packet agentcontract.ContextPacket) {
+		for _, fact := range packet.Facts {
+			if fact.SourceCapability != "ui.command_status" {
+				continue
+			}
+			raw, err := agentcontract.CanonicalJSON(fact)
+			if err != nil || len(raw) >= 65536 || bytes.Contains(raw, []byte(page)) {
+				t.Error("large evidence escaped its bounded model view", len(raw), err)
+			}
+			previewed = true
+		}
+	}}
+	f := newWebFixture(t, model, false)
+	run := f.run(t)
+	command := f.dispatch(t)
+	if accepted, _, err := f.w.BeginBrowserCommand(t.Context(), "alice", command.ID, f.key, 1); err != nil || !accepted {
+		t.Fatal(accepted, err)
+	}
+	if _, err := f.w.CompleteBrowserCommand("alice", command.ID, f.key, 1, "succeeded", agentcontract.JSON{"page": page}, ""); err != nil {
+		t.Fatal(err)
+	}
+	f.now += 2
+	run, err := f.h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "completed" || !previewed {
+		t.Fatal("large result did not complete through bounded model context", run.Status, previewed, err)
+	}
+	encoded, err := json.Marshal(run.State["artifact_ids"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	if err := json.Unmarshal(encoded, &ids); err != nil {
+		t.Fatal(err)
+	}
+	retained := false
+	for _, id := range ids {
+		artifact, err := f.h.Store.GetArtifact(run.RunID, id, "alice")
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := agentcontract.CanonicalJSON(artifact)
+		if err != nil {
+			t.Fatal(err)
+		}
+		retained = retained || bytes.Contains(raw, []byte(page))
+	}
+	if !retained {
+		t.Fatal("bounded model projection replaced the complete persistent fact")
+	}
+}
 
 func TestBrowserReceiptRejectsInvalidDataWithoutChangingCommand(t *testing.T) {
 	for _, status := range []string{"succeeded", "failed", "unknown"} {
@@ -15,7 +116,7 @@ func TestBrowserReceiptRejectsInvalidDataWithoutChangingCommand(t *testing.T) {
 		}{
 			{"undeclared_field", agentcontract.JSON{"page": "orders", "private_token": "synthetic-private-marker"}},
 			{"wrong_type", agentcontract.JSON{"page": 42}},
-			{"oversized", agentcontract.JSON{"page": strings.Repeat("x", 65536)}},
+			{"oversized", agentcontract.JSON{"page": strings.Repeat("x", 1<<20)}},
 		} {
 			t.Run(status+"/"+payload.name, func(t *testing.T) {
 				f := newWebFixture(t, &hostModel{decisions: browserDecisions()}, false)

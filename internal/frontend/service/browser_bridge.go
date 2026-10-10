@@ -548,7 +548,7 @@ func (w *WebIntegration) CompleteBrowserCommand(owner, id, key string, generatio
 			return c, e
 		}
 		raw, e := agentcontract.CanonicalJSON(result)
-		if e != nil || len(raw) > 65536 || agentcontract.ValidateSchema(p.outputs[c.Action], result) != nil {
+		if e != nil || len(raw) > 1<<20 || agentcontract.ValidateSchema(p.outputs[c.Action], result) != nil {
 			return c, agentcontract.NewHostError("browser_result_invalid")
 		}
 	}
