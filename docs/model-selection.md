@@ -67,6 +67,8 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 单次或多个独立能力调用均使用 `{"kind":"tool_batch","calls":[...]}`，单次调用的 `calls` 数组只有一项。完成复核阶段，决策联合和字段提示只保留 `final`。保存的能力调用及其真实结果也使用统一输出函数成对表达，保留历史证据的身份、状态和数据边界。输出工具中的 `call_ref` 可省略，实际本地调用引用由适配器生成；模型提供的可选标签仍检查格式，但不决定运行内核的调用身份。调用被保存后，执行重试、审批和恢复继续沿用同一引用及原有参数摘要，不重新生成身份。业务参数、授权、审批和真实回执继续由运行内核校验。字符串形式的对象或数组不会被自动转换。类型化输出工具及校验处理的参考实现见 [Pydantic AI](https://github.com/pydantic/pydantic-ai/blob/721c78d6014f197c595a9c2a83789aa4dbf6d008/pydantic_ai_slim/pydantic_ai/_output.py)；单函数内的带种类决策联合是 Agenstra 为本身决策协议作出的选择，仍需逐网关验证。
 
+`answer_markdown` 面向用户，证据引用保留在 `fact_ids` 和 `result_refs`。运行提示在首次决策前区分这两个边界，不禁止用户需要的业务记录标识。最终回答仍由已有校验拒绝本轮内部 Fact ID；提示不能保证模型遵守，失败继续按原决策预算纠正，不删除真实引用或放宽校验。
+
 网关仍可能在 `parallel_tool_calls=false` 时返回多个输出工具。框架拒绝整个响应，在原有纠正次数与预算内明确反馈每轮只能有一个输出工具，包括检查 Fact 时也须逐轮进行，不选择其中一个执行或自动合并。类型化输出的纠正提示移除旧内容 JSON 示例，保留字段、引用和完成复核约束。明确反馈多个结构化输出的参考实现见 [LangChain](https://github.com/langchain-ai/langchain/blob/007cc15b713cea17df63ba603aca6c7b27086638/libs/langchain_v1/langchain/agents/factory.py#L1287-L1308)。
 
 可选限制包括 `max_output_tokens`、`token_limit_field`、`timeout_seconds`、`max_attempts`、`context_window_tokens`、`max_input_tokens`、`protocol_reserve_tokens`。最大尝试次数包含首次请求，1 表示不做传输重试。配置的超时及 token 上限仍受任务冻结的部署限制、总预算和截止时间约束；选大模型不能扩大原有运行预算。已知上下文窗口应配合明确的输出预留。

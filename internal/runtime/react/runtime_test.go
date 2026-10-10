@@ -311,6 +311,11 @@ func TestRuntimeProtocolPromptDoesNotChangeProviderPrompt(t *testing.T) {
 			t.Fatalf("runtime prompt omits %s", field)
 		}
 	}
+	for _, rule := range []string{"answer_markdown is user-facing", "omit internal Fact IDs", "Requested business record IDs may be shown"} {
+		if !strings.Contains(prompt, rule) {
+			t.Fatalf("runtime prompt omits the visible-answer boundary: %s", rule)
+		}
+	}
 	if strings.Contains(prompt, "search_capabilities") {
 		t.Fatal("disabled capability search advertised")
 	}

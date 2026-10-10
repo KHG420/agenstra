@@ -303,3 +303,23 @@ func TestDecisionOutputToolsRecoveryKeepsConstraintsWithoutConflictingFormat(t *
 		t.Fatal(got)
 	}
 }
+
+func TestDecisionOutputModesRetainUserVisibleAnswerGuidance(t *testing.T) {
+	provider := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{}}
+	runtime := &reactcore.AgentRuntime{Provider: provider}
+	for _, mode := range []string{"json_object", "output_tools"} {
+		t.Run(mode, func(t *testing.T) {
+			model := &HTTPJSONDecisionModel{Model: "compatible-model", DecisionOutputMode: mode}
+			payload, err := model.requestPayload([]byte(`{"schema":"agenstra.context.v1"}`), runtime.SystemPrompt())
+			if err != nil {
+				t.Fatal(err)
+			}
+			prompt := payload["messages"].([]any)[0].(agentcontract.JSON)["content"].(string)
+			for _, rule := range []string{"answer_markdown is user-facing", "omit internal Fact IDs", "Requested business record IDs may be shown"} {
+				if !strings.Contains(prompt, rule) {
+					t.Fatalf("%s dropped the visible-answer boundary: %s", mode, rule)
+				}
+			}
+		})
+	}
+}
