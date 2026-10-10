@@ -386,6 +386,9 @@ func (w *WebIntegration) enqueue(owner string, b agentcontract.WebRunBinding, id
 				return agentcontract.NewHostError("browser_outcome_unresolved")
 			}
 		}
+		if b.ObservedRevision != s.ContextRevision {
+			return agentcontract.NewHostError("browser_context_changed")
+		}
 		var timeout int
 		for _, a := range p.profile.Actions {
 			if a.Name == action {

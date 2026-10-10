@@ -49,8 +49,83 @@ func TestBrowserContextReferenceSurvivesAnUnchangedLivePage(t *testing.T) {
 	}
 }
 
+func TestBrowserEnqueueRechecksRevisionAfterInvocationValidation(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		name := "new command"
+		if cached {
+			name = "original receipt"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newWebFixture(t, &hostModel{}, false)
+			run, err := f.w.CreateBrowserRun(t.Context(), "alice", "records-web", f.session.ID, "Open orders", "enqueue-revision")
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider, err := f.h.ProviderFactory(t.Context(), "alice", "records-web")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := provider.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			inv := &agentcontract.InvocationContext{OwnerID: "alice", RunID: run.RunID, InvocationID: agentcontract.NewID()}
+			contextResult, err := provider.Invoke(t.Context(), "ui.get_context", agentcontract.JSON{}, inv)
+			if err != nil || contextResult.ErrorCode != "" {
+				t.Fatal(contextResult, err)
+			}
+			if err := provider.(agentcontract.InvocationValidator).ValidateInvocation(t.Context(), "ui.navigate", *inv); err != nil {
+				t.Fatal(err)
+			}
+			args := agentcontract.JSON{"page": "orders"}
+			var original agentcontract.CapabilityResult
+			if cached {
+				original, err = provider.Invoke(t.Context(), "ui.navigate", args, inv)
+				if err != nil || original.ErrorCode != "" {
+					t.Fatal(original, err)
+				}
+			}
+			// The page can change after prepare-time validation but before enqueue.
+			f.session, err = f.w.UpdatePageObservation("alice", f.session.ID, f.key, 1, f.session.ContextRevision, agentcontract.JSON{"page": "edited"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := provider.Invoke(t.Context(), "ui.navigate", args, inv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var commands int
+			if err := f.w.Store.store.DB.QueryRow("SELECT count(*) FROM web_commands").Scan(&commands); err != nil {
+				t.Fatal(err)
+			}
+			if cached {
+				if result.ErrorCode != "" || agentcontract.WebHash(result.Data) != agentcontract.WebHash(original.Data) || commands != 1 {
+					t.Fatal("page change replaced the original invocation receipt", result, commands)
+				}
+				return
+			}
+			if result.ErrorCode != "browser_context_changed" || commands != 0 {
+				t.Fatal("stale observation queued a new command", result, commands)
+			}
+			contextResult, err = provider.Invoke(t.Context(), "ui.get_context", agentcontract.JSON{}, inv)
+			if err != nil || contextResult.ErrorCode != "" {
+				t.Fatal(contextResult, err)
+			}
+			result, err = provider.Invoke(t.Context(), "ui.navigate", args, inv)
+			if err != nil || result.ErrorCode != "" {
+				t.Fatal("fresh observation could not enqueue the original identity", result, err)
+			}
+			command, err := f.w.command("alice", inv.InvocationID)
+			if err != nil || command.ContextRevision != f.session.ContextRevision || command.Status != "queued" {
+				t.Fatal(command, err)
+			}
+		})
+	}
+}
+
 func TestBrowserApprovalDelayStillChecksPageRevisionAndLiveness(t *testing.T) {
-	for _, change := range []string{"unchanged", "edited", "offline"} {
+	for _, change := range []string{"unchanged", "edited", "edited_after_enqueue", "offline"} {
 		t.Run(change, func(t *testing.T) {
 			f := newWebFixture(t, &hostModel{decisions: browserDecisions()}, true)
 			run := f.run(t)
@@ -88,9 +163,33 @@ func TestBrowserApprovalDelayStillChecksPageRevisionAndLiveness(t *testing.T) {
 				}
 				return
 			}
-			command := f.dispatch(t)
-			accepted, command, err := f.w.BeginBrowserCommand(t.Context(), "alice", command.ID, f.key, 1)
 			if change == "edited" {
+				var commands int
+				if err = f.w.Store.store.DB.QueryRow("SELECT count(*) FROM web_commands").Scan(&commands); err != nil || commands != 0 {
+					t.Fatal("changed page was queued after approval", commands, err)
+				}
+				state, err := f.h.Restore(run)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rejected := false
+				for _, observation := range state.Observations {
+					rejected = rejected || (observation.Capability == "ui.navigate" && observation.Status == "failed" && observation.ErrorCode != nil && *observation.ErrorCode == "browser_context_changed")
+				}
+				if !rejected {
+					t.Fatal("approval did not retain the stale-page rejection", state.Observations)
+				}
+				return
+			}
+			command := f.dispatch(t)
+			if change == "edited_after_enqueue" {
+				f.session, err = f.w.UpdatePageObservation("alice", f.session.ID, f.key, 1, f.session.ContextRevision, agentcontract.JSON{"page": "changed"})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			accepted, command, err := f.w.BeginBrowserCommand(t.Context(), "alice", command.ID, f.key, 1)
+			if change == "edited_after_enqueue" {
 				if err != nil || accepted || command.ErrorCode != "browser_context_changed" {
 					t.Fatal(accepted, command, err)
 				}
