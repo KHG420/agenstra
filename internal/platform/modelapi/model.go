@@ -332,7 +332,17 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	if envelope.Choices[0].FinishReason == "length" {
 		return nil, agentcontract.ModelDecisionError{Kind: "model_output_truncated"}
 	}
-	if _, usesOutputTools := payload["tools"]; usesOutputTools {
+	_, usesOutputTools := payload["tools"]
+	if strings.TrimSpace(envelope.Choices[0].Message.Content) == "" && (!usesOutputTools || len(envelope.Choices[0].Message.ToolCalls) == 0) {
+		// Some compatible gateways report stop even when reasoning consumed the
+		// whole allowance. Infer exhaustion only when there is no usable output,
+		// a known request limit and a sane reported count. A complete output tool
+		// at the limit remains valid; an ordinary empty response stays invalid.
+		if usage := envelope.Usage; outputLimit > 0 && usage != nil && usage.Output != nil && *usage.Output >= outputLimit && *usage.Output <= 1000000000 {
+			return nil, agentcontract.ModelDecisionError{Kind: "model_output_truncated"}
+		}
+	}
+	if usesOutputTools {
 		raw, detail := decisionOutputToolBody(envelope.Choices[0].Message.ToolCalls)
 		if detail != "" {
 			return nil, invalidModelOutput(ctx, detail)
@@ -340,13 +350,6 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		return raw, nil
 	}
 	if strings.TrimSpace(envelope.Choices[0].Message.Content) == "" {
-
-		// Some compatible gateways report stop even when reasoning consumed the
-		// whole allowance. Only infer exhaustion from a known request limit and
-		// a sane reported output count; an ordinary empty response stays invalid.
-		if usage := envelope.Usage; outputLimit > 0 && usage != nil && usage.Output != nil && *usage.Output >= outputLimit && *usage.Output <= 1000000000 {
-			return nil, agentcontract.ModelDecisionError{Kind: "model_output_truncated"}
-		}
 		return nil, invalidModelOutput(ctx, "model_output_empty")
 	}
 	return unwrapModelJSON([]byte(envelope.Choices[0].Message.Content)), nil

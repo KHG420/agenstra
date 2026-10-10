@@ -92,3 +92,71 @@ func TestMemoryOutputExhaustionRetainsUsageWithoutRecovery(t *testing.T) {
 		t.Fatalf("memory exhaustion: error=%v proposals=%v requests=%d metrics=%+v", err, proposals, requests, metrics)
 	}
 }
+
+func TestOutputToolsEmptyOutputAtEffectiveTokenLimit(t *testing.T) {
+	for _, field := range []string{"max_tokens", "max_completion_tokens"} {
+		for _, tc := range []struct {
+			name, content, arguments, want string
+			configured, packetLimit        int
+			remaining, output              int64
+			omitUsage, outputTool          bool
+		}{
+			{name: "reasoning consumed limit", configured: 4096, output: 4096, want: "model_output_truncated"},
+			{name: "whitespace at limit", configured: 4096, output: 4096, content: " \n\t", want: "model_output_truncated"},
+			{name: "packet limit", configured: 4096, packetLimit: 256, output: 256, want: "model_output_truncated"},
+			{name: "remaining run budget", configured: 4096, remaining: 100, output: 90, want: "model_output_truncated"},
+			{name: "empty below limit", configured: 4096, output: 4095, want: "model_decision_invalid"},
+			{name: "unknown limit", output: 4096, want: "model_decision_invalid"},
+			{name: "missing usage", configured: 4096, omitUsage: true, want: "model_decision_invalid"},
+			{name: "invalid usage", configured: 4096, output: 1000000001, want: "model_decision_invalid"},
+			{name: "complete tool at limit", configured: 4096, output: 4096, outputTool: true, arguments: `{"answer_markdown":"done","fact_ids":[]}`},
+			{name: "plain text at limit", configured: 4096, output: 4096, content: "done", want: "model_decision_invalid"},
+			{name: "malformed tool at limit", configured: 4096, output: 4096, outputTool: true, arguments: `{"answer_markdown":`, want: "model_decision_invalid"},
+		} {
+			t.Run(field+"/"+tc.name, func(t *testing.T) {
+				requests := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					requests++
+					var request agentcontract.JSON
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+						t.Error(err)
+					}
+					if request["tools"] == nil || request["tool_choice"] != "required" {
+						t.Error("missing typed output request")
+					}
+					if tc.remaining > 0 && request[field] != float64(tc.remaining-10) {
+						t.Errorf("remaining budget not applied: %v", request[field])
+					}
+					message := agentcontract.JSON{"content": tc.content}
+					if tc.outputTool {
+						message["tool_calls"] = []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_final", "arguments": tc.arguments}}}
+					}
+					reply := agentcontract.JSON{"choices": []any{agentcontract.JSON{"finish_reason": "stop", "message": message}}}
+					if !tc.omitUsage {
+						reply["usage"] = agentcontract.JSON{"prompt_tokens": 10, "completion_tokens": tc.output, "completion_tokens_details": agentcontract.JSON{"reasoning_tokens": tc.output}}
+					}
+					if err := json.NewEncoder(w).Encode(reply); err != nil {
+						t.Error(err)
+					}
+				}))
+				defer server.Close()
+				model, err := NewHTTPJSONDecisionModel("compatible-test-model", server.URL, "test-key", time.Second, server.Client())
+				if err != nil {
+					t.Fatal(err)
+				}
+				model.DecisionOutputMode, model.TokenLimitField, model.MaxOutputTokens = "output_tools", field, tc.configured
+				model.CountInputTokens = func(string, []byte) (int64, error) { return 10, nil }
+				decision, err := model.Decide(t.Context(), agentcontract.ContextPacket{Schema: "agenstra.context.v1", MaxModelOutputTokens: tc.packetLimit, ModelTokensRemaining: tc.remaining}, "system")
+				if agentcontract.ErrorCode(err) != tc.want || requests != 1 {
+					t.Fatalf("error=%v, requests=%d, want=%s", err, requests, tc.want)
+				}
+				if tc.want == "model_output_truncated" && (decision.ModelCall.FormatError != "" || decision.ModelCall.FinishReason != "stop" || decision.ModelCall.OutputTokens != tc.output) {
+					t.Fatalf("output exhaustion lost usage or became format failure: %+v", decision.ModelCall)
+				}
+				if tc.want == "" && decision.AnswerMarkdown != "done" {
+					t.Fatal("complete output tool at its limit was changed", decision)
+				}
+			})
+		}
+	}
+}

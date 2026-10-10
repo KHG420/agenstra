@@ -82,6 +82,7 @@ func decisionOutputToolPrompt(prompt string) string {
 		line = strings.ReplaceAll(line, "Choose one JSON decision at a time:", "Choose one typed decision at a time:")
 		line = strings.ReplaceAll(line, "Each call_ref must be new.", "The adapter assigns fresh local call references.")
 		line = strings.ReplaceAll(line, "no tools or other decision kinds", "no capability calls or other decision kinds")
+		line = strings.ReplaceAll(line, "tools and other decision kinds are not allowed", "capability calls and other decision kinds are not allowed")
 		line = strings.ReplaceAll(line, "propose any tool call", "propose any capability call")
 		retained = append(retained, line)
 	}
