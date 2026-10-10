@@ -69,6 +69,8 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 `answer_markdown` 面向用户，证据引用保留在 `fact_ids` 和 `result_refs`。运行提示在首次决策前区分这两个边界，不禁止用户需要的业务记录标识。最终回答仍由已有校验拒绝本轮内部 Fact ID；提示不能保证模型遵守，失败继续按原决策预算纠正，不删除真实引用或放宽校验。
 
+`output_tools` 的提示同时区分用户要求的展示格式与决策协议：用户需要的 JSON、代码块、表格或普通文字放在 `final.answer_markdown` 字符串中，普通决策和完成复核仍通过 `submit_decision` 输出。缺少输出工具的普通消息继续被拒绝，不把其中的 JSON 或文字自动转成决策；提示本身不能保证网关或模型遵守协议。
+
 网关仍可能在 `parallel_tool_calls=false` 时返回多个输出工具。框架拒绝整个响应，在原有纠正次数与预算内明确反馈每轮只能有一个输出工具，包括检查 Fact 时也须逐轮进行，不选择其中一个执行或自动合并。类型化输出的纠正提示移除旧内容 JSON 示例，保留字段、引用和完成复核约束。明确反馈多个结构化输出的参考实现见 [LangChain](https://github.com/langchain-ai/langchain/blob/007cc15b713cea17df63ba603aca6c7b27086638/libs/langchain_v1/langchain/agents/factory.py#L1287-L1308)。
 
 可选限制包括 `max_output_tokens`、`token_limit_field`、`timeout_seconds`、`max_attempts`、`context_window_tokens`、`max_input_tokens`、`protocol_reserve_tokens`。最大尝试次数包含首次请求，1 表示不做传输重试。配置的超时及 token 上限仍受任务冻结的部署限制、总预算和截止时间约束；选大模型不能扩大原有运行预算。已知上下文窗口应配合明确的输出预留。

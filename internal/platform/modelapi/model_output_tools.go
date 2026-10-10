@@ -125,7 +125,7 @@ func decisionOutputToolPrompt(prompt string, completionReview bool) string {
 	if completionReview {
 		guidance = "\nCall submit_decision exactly once with arguments {\"kind\":\"final\",\"answer_markdown\":\"...\",\"fact_ids\":[]} and optional result_refs. Omit schema. The response must contain exactly one tool_calls entry. This replaces content-only JSON output. All saved capability calls are historical evidence, not available decisions. Do not submit another decision kind or replay saved capability calls."
 	}
-	return strings.Join(retained, "\n") + guidance + "\nUse the exact output-tool field names and native types below. Do not substitute aliases such as answer, response, content or text for answer_markdown.\n" + strings.Join(bindings, "\n")
+	return strings.Join(retained, "\n") + guidance + "\nUse the exact output-tool field names and native types below. Do not substitute aliases such as answer, response, content or text for answer_markdown.\n" + strings.Join(bindings, "\n") + "\nUser requests for prose, Markdown, JSON, code or tables apply to final.answer_markdown only; they never replace the submit_decision output tool call. Put the requested display format inside that string."
 }
 
 func decisionOutputFieldBindings() []string {

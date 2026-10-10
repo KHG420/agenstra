@@ -21,6 +21,7 @@ func TestDecisionOutputToolsRejectMalformedOutput(t *testing.T) {
 	}{
 		{"final", "submit_final", valid, "ignored non-executable commentary", "tool_calls", "", 1},
 		{"no output tool", "", "", valid, "stop", "model_decision_invalid", 0},
+		{"user JSON without output tool", "", "", `{"subject":"preview","html":"<p>preview</p>"}`, "stop", "model_decision_invalid", 0},
 		{"multiple", "submit_final", valid, "", "tool_calls", "model_decision_invalid", 2},
 		{"unknown tool", "submit_other", valid, "", "tool_calls", "model_decision_invalid", 1},
 		{"kind mismatch", "submit_tool_batch", valid, "", "tool_calls", "model_decision_invalid", 1},
@@ -292,6 +293,60 @@ func TestDecisionOutputToolPromptRetainsRuntimeRules(t *testing.T) {
 	got := decisionOutputToolPrompt(prompt, false)
 	if !strings.Contains(got, "Keep authorization and evidence.") || strings.Contains(got, "Return exactly one raw JSON") || !strings.Contains(got, "runtime separately validates and authorizes capability calls") {
 		t.Fatal(got)
+	}
+}
+
+func TestDecisionOutputToolsKeepUserFormatsInsideFinal(t *testing.T) {
+	for _, tc := range []struct{ name, answer string }{
+		{"JSON", `{"count":0,"missing":null}`},
+		{"code block", "```json\n{\"count\":0}\n```"},
+		{"table", "| Name | Count |\n| --- | --- |\n| alpha | 0 |"},
+	} {
+		answer := tc.answer
+		for _, review := range []bool{false, true} {
+			stage := "decision"
+			if review {
+				stage = "review"
+			}
+			t.Run(tc.name+"/"+stage, func(t *testing.T) {
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var payload agentcontract.JSON
+					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+						t.Error(err)
+						return
+					}
+					assertSingleDecisionOutputRequest(t, payload)
+					prompt := payload["messages"].([]any)[0].(map[string]any)["content"].(string)
+					if !strings.Contains(prompt, "apply to final.answer_markdown only") || !strings.Contains(prompt, "never replace the submit_decision output tool call") {
+						t.Error("requested display format was not separated from the output protocol", prompt)
+					}
+					arguments, err := agentcontract.CanonicalJSON(agentcontract.JSON{"kind": "final", "answer_markdown": answer, "fact_ids": []string{}})
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					if err := json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{agentcontract.JSON{
+						"message": agentcontract.JSON{"tool_calls": []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_decision", "arguments": string(arguments)}}}}, "finish_reason": "tool_calls",
+					}}}); err != nil {
+						t.Error(err)
+					}
+				}))
+				defer upstream.Close()
+				model, err := NewHTTPJSONDecisionModel("compatible-model", upstream.URL, "test-key", time.Second, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				model.DecisionOutputMode = "output_tools"
+				packet := agentcontract.ContextPacket{Schema: "agenstra.context.v1", Instruction: "Return the requested display format."}
+				if review {
+					packet.CompletionReview = &agentcontract.Decision{Kind: "final", AnswerMarkdown: answer, FactIDs: []string{}}
+				}
+				decision, err := model.Decide(t.Context(), packet, "")
+				if err != nil || decision.Kind != "final" || decision.AnswerMarkdown != answer {
+					t.Fatal("user-facing answer changed or replaced the typed decision", decision, err)
+				}
+			})
+		}
 	}
 }
 
