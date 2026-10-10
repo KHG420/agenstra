@@ -154,7 +154,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 	}
 	if m.DecisionOutputMode == "output_tools" && decisionPacket {
 		tools := decisionOutputTools()
-		toolPrompt := decisionOutputToolPrompt(prompt)
+		toolPrompt := decisionOutputToolPrompt(prompt, packet.CompletionReview != nil)
 
 		// Skill availability is complete even with deferred capabilities. Search
 		// availability comes from the runtime, not the visible catalog length.
@@ -184,9 +184,6 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 			}
 		}
 		toolPrompt = strings.Join(retained, "\n")
-		if packet.CompletionReview != nil {
-			toolPrompt += "\nCompletion review permits only submit_final. All saved capability calls are historical evidence, not available decisions. Do not submit another decision kind."
-		}
 		payload["tools"] = tools
 		payload["tool_choice"] = "required"
 		payload["parallel_tool_calls"] = false

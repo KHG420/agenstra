@@ -70,6 +70,9 @@ func TestCompletionReviewOffersOnlyFinalOutput(t *testing.T) {
 	}
 	messages := payload["messages"].([]any)
 	prompt := messages[0].(agentcontract.JSON)["content"].(string)
+	if strings.Contains(prompt, "For exactly one capability call, prefer submit_tool_call") || strings.Contains(prompt, "choose one inspection and wait") {
+		t.Fatal("completion review still instructs the model to choose unavailable decisions")
+	}
 	for _, tool := range decisionOutputTools() {
 		name := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)["name"].(string)
 		if strings.Contains(prompt, name+": required") != (name == "submit_final") {

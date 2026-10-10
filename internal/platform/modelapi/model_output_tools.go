@@ -68,7 +68,7 @@ func decisionOutputTools() []any {
 	return tools
 }
 
-func decisionOutputToolPrompt(prompt string) string {
+func decisionOutputToolPrompt(prompt string, completionReview bool) string {
 	lines := strings.Split(prompt, "\n")
 	retained := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -87,7 +87,11 @@ func decisionOutputToolPrompt(prompt string) string {
 		retained = append(retained, line)
 	}
 	bindings := decisionOutputFieldBindings()
-	return strings.Join(retained, "\n") + "\nSubmit exactly one typed decision by calling the matching submit_<kind> output tool. The response must contain exactly one tool_calls entry, including for read_skill, inspect_capability and inspect_fact; choose one inspection and wait for its result before the next decision. The selected tool name identifies the decision kind. Arguments contain only the fields declared by that tool, with native JSON arrays and objects; omit schema and kind. The adapter supplies the fixed schema and kind from the registered tool name. This replaces content-only JSON output. Output tools do not execute business operations; tool_batch is a proposed decision that the runtime will separately validate and authorize.\nFor exactly one capability call, prefer submit_tool_call with capability, arguments and reason directly as native fields. Do not wrap these fields in calls. The adapter constructs the one-item tool_batch. Use submit_tool_batch for multiple independent calls; calls must remain a native JSON array. In either tool, arguments must match the selected capability's input_schema, preserving all required nested objects. Omit call_ref: the adapter supplies a fresh local reference for every proposed call. Preserve exact capability and operation names in their own fields.\nUse the exact output-tool field names and native types below. Do not substitute aliases such as answer, response, content or text for answer_markdown.\n" + strings.Join(bindings, "\n")
+	guidance := "\nSubmit exactly one typed decision by calling the matching submit_<kind> output tool. The response must contain exactly one tool_calls entry, including for read_skill, inspect_capability and inspect_fact; choose one inspection and wait for its result before the next decision. The selected tool name identifies the decision kind. Arguments contain only the fields declared by that tool, with native JSON arrays and objects; omit schema and kind. The adapter supplies the fixed schema and kind from the registered tool name. This replaces content-only JSON output. Output tools do not execute business operations; tool_batch is a proposed decision that the runtime will separately validate and authorize.\nFor exactly one capability call, prefer submit_tool_call with capability, arguments and reason directly as native fields. Do not wrap these fields in calls. The adapter constructs the one-item tool_batch. Use submit_tool_batch for multiple independent calls; calls must remain a native JSON array. In either tool, arguments must match the selected capability's input_schema, preserving all required nested objects. Omit call_ref: the adapter supplies a fresh local reference for every proposed call. Preserve exact capability and operation names in their own fields."
+	if completionReview {
+		guidance = "\nSubmit exactly one typed final decision by calling submit_final, with exactly one tool_calls entry. Arguments contain only the declared native fields; omit schema and kind. The adapter supplies the fixed schema and final kind. This replaces content-only JSON output. All saved capability calls are historical evidence, not available decisions. Do not submit another decision kind."
+	}
+	return strings.Join(retained, "\n") + guidance + "\nUse the exact output-tool field names and native types below. Do not substitute aliases such as answer, response, content or text for answer_markdown.\n" + strings.Join(bindings, "\n")
 }
 
 func decisionOutputFieldBindings() []string {
