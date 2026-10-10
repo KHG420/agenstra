@@ -1035,7 +1035,8 @@ func (r *AgentRuntime) Run(ctx context.Context, instruction string) (agentcontra
 				outcomes := InvokeParallel(ctx, r.Provider, tasks, r.MaxConcurrentTools, 0)
 				for i, outcome := range outcomes {
 					Observe(state, &state.Pending[i], outcome)
-					if outcome.ErrorCode == "provider_outcome_unknown" {
+					cap, ok := r.Provider.Capabilities()[tasks[i].Call.Capability]
+					if outcome.ErrorCode == "provider_outcome_unknown" || ((outcome.ErrorCode == "upstream_response_invalid" || outcome.ErrorCode == "upstream_unavailable") && ok && cap.Effect != "read") {
 						state.Status = "needs_reconciliation"
 						state.ErrorCode = agentcontract.Strptr("provider_outcome_unknown")
 					}

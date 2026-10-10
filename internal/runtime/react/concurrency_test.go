@@ -114,6 +114,53 @@ func TestTransientParallelCancellationRetainsReturnedOutcomes(t *testing.T) {
 	}
 }
 
+func TestTransientParallelComputeKeepsUncertainResultSemantics(t *testing.T) {
+	for _, tc := range []struct {
+		effect string
+		code   string
+		status string
+	}{
+		{"compute", "upstream_response_invalid", "needs_reconciliation"},
+		{"compute", "upstream_unavailable", "needs_reconciliation"},
+		{"compute", "business_failed", "completed"},
+		{"read", "upstream_response_invalid", "completed"},
+		{"read", "upstream_unavailable", "completed"},
+	} {
+		t.Run(tc.effect+"/"+tc.code, func(t *testing.T) {
+			cap := agentcontract.CapabilityDescription{Name: "records.get", Effect: tc.effect, Replay: "idempotent", InputSchema: agentcontract.JSON{"type": "object"},
+				OutputSchema: agentcontract.JSON{"type": "object", "properties": agentcontract.JSON{"count": agentcontract.JSON{"type": "integer"}}, "required": []string{"count"}}}
+			p := &parallelTestProvider{&hostProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap}, hook: func(_ context.Context, _ string, args agentcontract.JSON, _ *agentcontract.InvocationContext) (agentcontract.CapabilityResult, error) {
+				if args["id"] == "A" {
+					if tc.code == "upstream_response_invalid" {
+						return agentcontract.CapabilityResult{Data: agentcontract.JSON{"count": "1"}}, nil
+					}
+					return agentcontract.CapabilityResult{ErrorCode: tc.code}, nil
+				}
+				return agentcontract.CapabilityResult{Data: agentcontract.JSON{"count": 2}}, nil
+			}}}
+			for _, limit := range []int{1, 2} {
+				p.calls = 0
+				model := &hostModel{decisions: []agentcontract.Decision{{Kind: "tool_batch", Calls: []agentcontract.ToolCall{
+					{CallRef: "read-a", Capability: cap.Name, Arguments: agentcontract.JSON{"id": "A"}, Reason: "Independent operation A"},
+					{CallRef: "read-b", Capability: cap.Name, Arguments: agentcontract.JSON{"id": "B"}, Reason: "Independent operation B"},
+				}}}}
+				r := &AgentRuntime{Provider: p, Model: model, Grants: map[string]bool{cap.Name: true}, MaxConcurrentTools: limit}
+				result, err := r.Run(t.Context(), "Execute both independent operations")
+				wantModelCalls := 2
+				if tc.status == "needs_reconciliation" {
+					wantModelCalls = 1
+				}
+				if err != nil || result.Status != tc.status || p.calls != 2 || model.calls != wantModelCalls || len(result.Facts) != 1 || len(result.Observations) != 2 {
+					t.Fatalf("concurrency changed uncertain result semantics: limit=%d status=%s provider=%d model=%d facts=%d observations=%d error=%v", limit, result.Status, p.calls, model.calls, len(result.Facts), len(result.Observations), err)
+				}
+				if result.Observations[0].ErrorCode == nil || *result.Observations[0].ErrorCode != tc.code || result.Observations[1].Status != "succeeded" {
+					t.Fatal("partial known and uncertain results were replaced")
+				}
+			}
+		})
+	}
+}
+
 func TestConcurrencyExcludesWritesApprovalsJobsAndUnsafeReplay(t *testing.T) {
 	policy := agentcontract.ExecutionPolicy{GrantedCapabilities: map[string]bool{"records.get": true}}
 	for _, variant := range []string{"write", "approval", "job", "replay", "provider", "limit"} {
