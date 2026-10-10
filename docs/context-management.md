@@ -80,6 +80,8 @@ Fact 预览计算对象和数组的结构开销以及标量替代值。整体能
 
 多主题任务按已有决策记录保留近期查看过的能力和历史搜索的首个匹配，避免后一主题的搜索立即覆盖前一主题的工具。最新搜索的首个结果优先进入目录；其余位置先给当前检查和近期发现，再按最新搜索及原任务补充，全部遵守 `max_context_capabilities` 和实时授权。框架从固定发布版本重新解析这些契约，不保存第二份工具目录；字符和 token 预算仍可缩略非当前检查的 Schema。这个取舍对应成熟系统保留已发现工具引用的做法，使用现有决策状态，无需新增模型请求或宿主接线。
 
+HTTP 模型适配器将已有的 `capability_search_query` 和 `capability_search_results` 明确呈现为本轮已完成的搜索结果，包括空结果，提示模型使用已发现能力、仅为其他缺失能力再次搜索。该消息是运行结果数据，不是新任务或授权；收到 `steering:` 用户补充时不追加旧搜索消息。JSON 内容与 `output_tools` 使用同一路径，追加内容计入实际请求的输入测量和预算，不影响记忆提取请求，也不阻止运行内核按原契约处理后续搜索。此取舍参考 [Pydantic AI 的搜索结果与已发现工具反馈](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/toolsets/tool_search.py#L517-L534)，沿用 Agenstra 已有上下文字段，不要求宿主增加接线。明确反馈有助于减少已复现的重复搜索，不能保证模型不再重复决策或自动消除其他格式错误。
+
 上一条模型观察为 `capability_unknown` 时，下一轮提示会明确该调用未执行，要求按当前授权目录的确切名称选择能力，并区分 `tool_batch` 中的业务调用与独立的框架决策。能力搜索仍受 `runtime_features` 约束，不猜测别名、不增加授权，也不把错误调用自动转换成执行。此反馈参考 [Pydantic AI 的未知工具纠正机制](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/docs/retries.md#tool-retries)；Agenstra 沿用已有模型轮次、工具调用与停滞预算。
 
 全部 Fact 身份、能力目录和技能目录都必须保留；最小元数据本身超限时，运行明确失败。字符预算不代表供应商的 token 容量，模型质量、延迟和费用需要在部署方选择的模型上评估。
