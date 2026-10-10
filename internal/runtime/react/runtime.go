@@ -1033,9 +1033,6 @@ func (r *AgentRuntime) Run(ctx context.Context, instruction string) (agentcontra
 					tasks[i] = ParallelInvocation{Call: item.Call, Grants: r.Grants, Inv: agentcontract.InvocationContext{RunID: state.RunID, InvocationID: item.InvocationID, IdempotencyKey: item.InvocationID, OwnerID: "transient", ConnectionID: r.ConnectionID}}
 				}
 				outcomes := InvokeParallel(ctx, r.Provider, tasks, r.MaxConcurrentTools, 0)
-				if ctx.Err() != nil {
-					return r.Result(state), ctx.Err()
-				}
 				for i, outcome := range outcomes {
 					Observe(state, &state.Pending[i], outcome)
 					if outcome.ErrorCode == "provider_outcome_unknown" {
@@ -1044,6 +1041,9 @@ func (r *AgentRuntime) Run(ctx context.Context, instruction string) (agentcontra
 					}
 				}
 				state.Pending = []agentcontract.Invocation{}
+				if ctx.Err() != nil {
+					return r.Result(state), ctx.Err()
+				}
 				continue
 			}
 			for i := range state.Pending {
