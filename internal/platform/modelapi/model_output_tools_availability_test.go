@@ -28,22 +28,17 @@ func TestDecisionOutputToolsSearchMatchesRuntimeFeature(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			names := map[string]bool{}
-			for _, tool := range payload["tools"].([]any) {
-				names[tool.(agentcontract.JSON)["function"].(agentcontract.JSON)["name"].(string)] = true
-			}
+			schemas := outputDecisionSchemas(t, payload)
 			prompt := payload["messages"].([]any)[0].(agentcontract.JSON)["content"].(string)
-			if names["submit_search_capabilities"] != tc.want || strings.Contains(prompt, "submit_search_capabilities: required") != tc.want {
-				t.Fatalf("search tool and guidance do not match runtime availability: tools=%v, want=%v", names, tc.want)
+			if (schemas["search_capabilities"] != nil) != tc.want || strings.Contains(prompt, "search_capabilities: required") != tc.want {
+				t.Fatalf("search tool and guidance do not match runtime availability: kinds=%v, want=%v", schemas, tc.want)
 			}
-			for _, name := range []string{"submit_tool_call", "submit_tool_batch", "submit_final", "submit_request_input", "submit_inspect_capability", "submit_inspect_fact"} {
-				if !names[name] {
+			for _, name := range []string{"tool_batch", "final", "request_input", "inspect_capability", "inspect_fact"} {
+				if schemas[name] == nil {
 					t.Fatalf("unrelated output decision was removed: %s", name)
 				}
 			}
-			if payload["tool_choice"] != "required" || payload["parallel_tool_calls"] != false {
-				t.Fatal("single-decision output constraints changed")
-			}
+			assertSingleDecisionOutputRequest(t, payload)
 		})
 	}
 }
@@ -64,27 +59,26 @@ func TestCompletionReviewOffersOnlyFinalOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tools := payload["tools"].([]any)
-	if len(tools) != 1 || tools[0].(agentcontract.JSON)["function"].(agentcontract.JSON)["name"] != "submit_final" {
+	schemas := outputDecisionSchemas(t, payload)
+	if len(schemas) != 1 || schemas["final"] == nil {
 		t.Fatal("completion review offered decisions that runtime cannot accept")
 	}
 	messages := payload["messages"].([]any)
 	prompt := messages[0].(agentcontract.JSON)["content"].(string)
-	if strings.Contains(prompt, "For exactly one capability call, prefer submit_tool_call") || strings.Contains(prompt, "choose one inspection and wait") {
+	if strings.Contains(prompt, "choose kind tool_batch") || strings.Contains(prompt, "choose one inspection and wait") {
 		t.Fatal("completion review still instructs the model to choose unavailable decisions")
 	}
 	for _, tool := range decisionOutputTools() {
 		name := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)["name"].(string)
-		if strings.Contains(prompt, name+": required") != (name == "submit_final") {
+		kind := strings.TrimPrefix(name, "submit_")
+		if strings.Contains(prompt, kind+": required") != (kind == "final") {
 			t.Fatalf("output field guidance offers unavailable review decision %s", name)
 		}
 	}
 	if len(messages) != 4 || messages[2].(agentcontract.JSON)["role"] != "assistant" || messages[3].(agentcontract.JSON)["role"] != "tool" {
 		t.Fatal("completion restriction changed saved call evidence")
 	}
-	if payload["tool_choice"] != "required" || payload["parallel_tool_calls"] != false {
-		t.Fatal("completion restriction changed single-decision transport")
-	}
+	assertSingleDecisionOutputRequest(t, payload)
 	raw, err := agentcontract.CanonicalJSON(payload)
 	if err != nil {
 		t.Fatal(err)

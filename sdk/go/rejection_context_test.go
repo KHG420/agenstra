@@ -70,16 +70,16 @@ func TestRejectedCallPresentationPreservesArgumentAvailability(t *testing.T) {
 						var calls []agenstra.ToolCall
 						if mode == "output_tools" {
 							recorded, result := request.Messages[2], request.Messages[3]
-							if recorded.Role != "assistant" || len(recorded.ToolCalls) != 1 || result.Role != "tool" || result.ToolCallID != recorded.ToolCalls[0].ID || recorded.ToolCalls[0].Function.Name != "submit_tool_call" {
+							if recorded.Role != "assistant" || len(recorded.ToolCalls) != 1 || result.Role != "tool" || result.ToolCallID != recorded.ToolCalls[0].ID || recorded.ToolCalls[0].Function.Name != "submit_decision" {
 								t.Error("known rejected call lost its tool result pairing")
 								return
 							}
-							var call agenstra.ToolCall
-							if err := json.Unmarshal([]byte(recorded.ToolCalls[0].Function.Arguments), &call); err != nil {
+							var output agenstra.Decision
+							if err := json.Unmarshal([]byte(recorded.ToolCalls[0].Function.Arguments), &output); err != nil || output.Kind != "tool_batch" || len(output.Calls) != 1 {
 								t.Error(err)
 								return
 							}
-							calls = []agenstra.ToolCall{call}
+							calls = output.Calls
 						} else {
 							if err := json.Unmarshal(prior["calls"], &calls); err != nil || len(calls) != 1 {
 								t.Error("known rejected input lost", content, err)
@@ -100,7 +100,7 @@ func TestRejectedCallPresentationPreservesArgumentAvailability(t *testing.T) {
 					}
 					message := agenstra.JSON{"content": `{"kind":"request_input","field":"choice","prompt":"Choose"}`}
 					if mode == "output_tools" {
-						message = agenstra.JSON{"tool_calls": []any{agenstra.JSON{"type": "function", "function": agenstra.JSON{"name": "submit_request_input", "arguments": `{"field":"choice","prompt":"Choose"}`}}}}
+						message = agenstra.JSON{"tool_calls": []any{agenstra.JSON{"type": "function", "function": agenstra.JSON{"name": "submit_decision", "arguments": `{"kind":"request_input","field":"choice","prompt":"Choose"}`}}}}
 					}
 					if err := json.NewEncoder(w).Encode(agenstra.JSON{"choices": []any{agenstra.JSON{"message": message}}}); err != nil {
 						t.Error(err)

@@ -110,7 +110,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 			// which runtime observations do not retain. Keep their data-only
 			// history unless thinking is explicitly disabled; never invent it.
 			if m.DecisionOutputMode == "output_tools" && !last.ArgumentsOmitted && last.Arguments != nil && (m.APIType != "deepseek_chat" || m.Thinking == "disabled") {
-				arguments, err := agentcontract.CanonicalJSON(agentcontract.JSON{"capability": last.Capability, "arguments": last.Arguments, "reason": "Previously recorded call from saved runtime evidence."})
+				arguments, err := agentcontract.CanonicalJSON(agentcontract.JSON{"kind": "tool_batch", "calls": []any{agentcontract.JSON{"capability": last.Capability, "arguments": last.Arguments, "reason": "Previously recorded call from saved runtime evidence."}}})
 				if err != nil {
 					return nil, err
 				}
@@ -118,7 +118,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 				// new runtime invocation or permission to execute the recorded call.
 				const savedCallID = "call_saved_runtime"
 				messages = append(messages,
-					agentcontract.JSON{"role": "assistant", "content": nil, "tool_calls": []any{agentcontract.JSON{"id": savedCallID, "type": "function", "function": agentcontract.JSON{"name": "submit_tool_call", "arguments": string(arguments)}}}},
+					agentcontract.JSON{"role": "assistant", "content": nil, "tool_calls": []any{agentcontract.JSON{"id": savedCallID, "type": "function", "function": agentcontract.JSON{"name": "submit_decision", "arguments": string(arguments)}}}},
 					agentcontract.JSON{"role": "tool", "tool_call_id": savedCallID, "content": outcome})
 			} else {
 				messages = append(messages, agentcontract.JSON{"role": "assistant", "content": string(call)}, agentcontract.JSON{"role": "user", "content": outcome})
@@ -179,13 +179,13 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		retained := lines[:0]
 		for _, line := range lines {
 			name, _, _ := strings.Cut(line, ":")
-			if !unavailable[name] {
+			if !unavailable["submit_"+name] {
 				retained = append(retained, line)
 			}
 		}
 		toolPrompt = strings.Join(retained, "\n")
-		payload["tools"] = tools
-		payload["tool_choice"] = "required"
+		payload["tools"] = []any{singleDecisionOutputTool(tools)}
+		payload["tool_choice"] = agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_decision"}}
 		payload["parallel_tool_calls"] = false
 		delete(payload, "response_format")
 		messages[0] = agentcontract.JSON{"role": "system", "content": toolPrompt}

@@ -121,9 +121,7 @@ func TestOutputToolsEmptyOutputAtEffectiveTokenLimit(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 						t.Error(err)
 					}
-					if request["tools"] == nil || request["tool_choice"] != "required" {
-						t.Error("missing typed output request")
-					}
+					assertSingleDecisionOutputRequest(t, request)
 					if tc.remaining > 0 && request[field] != float64(tc.remaining-10) {
 						t.Errorf("remaining budget not applied: %v", request[field])
 					}

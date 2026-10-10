@@ -52,14 +52,20 @@ func TestOutputToolsPairSavedCallWithItsActualOutcome(t *testing.T) {
 				t.Fatal("saved outcome is not paired with its call")
 			}
 			function := tc["function"].(agentcontract.JSON)
-			if function["name"] != "submit_tool_call" {
+			if function["name"] != "submit_decision" {
 				t.Fatal("historical call is not expressed in the active output protocol")
 			}
 			var arguments agentcontract.JSON
 			if err := json.Unmarshal([]byte(function["arguments"].(string)), &arguments); err != nil {
 				t.Fatal(err)
 			}
-			if arguments["capability"] != last.Capability || arguments["arguments"].(map[string]any)["id"] != float64(23) {
+			decision := arguments
+			calls := decision["calls"].([]any)
+			if decision["kind"] != "tool_batch" || len(calls) != 1 {
+				t.Fatal("saved call is not one batch decision", decision)
+			}
+			proposed := calls[0].(map[string]any)
+			if proposed["capability"] != last.Capability || proposed["arguments"].(map[string]any)["id"] != float64(23) {
 				t.Fatal("saved call identity or arguments changed", arguments)
 			}
 			content := result["content"].(string)

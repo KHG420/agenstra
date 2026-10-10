@@ -49,9 +49,7 @@ func TestDecisionOutputToolsRejectMalformedOutput(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 					t.Error(err)
 				}
-				if payload["response_format"] != nil || payload["tool_choice"] != "required" || len(payload["tools"].([]any)) != 6 {
-					t.Error("incorrect output tool request")
-				}
+				assertSingleDecisionOutputRequest(t, payload)
 				calls := []any{}
 				for range tc.count {
 					calls = append(calls, agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": tc.tool, "arguments": tc.arguments}})
@@ -241,15 +239,10 @@ func TestDecisionOutputToolsOmitUnavailableSkill(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			found := false
-			for _, tool := range payload["tools"].([]any) {
-				if tool.(agentcontract.JSON)["function"].(agentcontract.JSON)["name"] == "submit_read_skill" {
-					found = true
-				}
-			}
+			found := outputDecisionSchemas(t, payload)["read_skill"] != nil
 			want := len(tc.skills) > 0
 			prompt := payload["messages"].([]any)[0].(agentcontract.JSON)["content"].(string)
-			if found != want || strings.Contains(prompt, "submit_read_skill: required") != want {
+			if found != want || strings.Contains(prompt, "read_skill: required") != want {
 				t.Fatalf("skill selection must match declared availability: tool=%v, want=%v", found, want)
 			}
 		})
@@ -297,7 +290,7 @@ func TestDecisionOutputToolsRecoveryRejectsMultipleInspectionsBeforeExecution(t 
 func TestDecisionOutputToolPromptRetainsRuntimeRules(t *testing.T) {
 	prompt := "Keep authorization and evidence.\nReturn one JSON object with schema agenstra.decision.v1. Tool example: {}.\nSkill: {}\nReturn exactly one raw JSON object. Do not wrap it in Markdown."
 	got := decisionOutputToolPrompt(prompt, false)
-	if !strings.Contains(got, "Keep authorization and evidence.") || strings.Contains(got, "Return exactly one raw JSON") || !strings.Contains(got, "runtime will separately validate and authorize") {
+	if !strings.Contains(got, "Keep authorization and evidence.") || strings.Contains(got, "Return exactly one raw JSON") || !strings.Contains(got, "runtime separately validates and authorizes capability calls") {
 		t.Fatal(got)
 	}
 }

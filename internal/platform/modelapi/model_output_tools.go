@@ -68,6 +68,40 @@ func decisionOutputTools() []any {
 	return tools
 }
 
+// singleDecisionOutputTool offers the available decisions as one tagged object.
+// Multiple business calls remain a single tool_batch decision, not output calls.
+func singleDecisionOutputTool(tools []any) agentcontract.JSON {
+	variants := []any{}
+	rootProperties := agentcontract.JSON{}
+	kinds := []string{}
+	for _, tool := range tools {
+		function := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)
+		name := function["name"].(string)
+		if name == "submit_tool_call" {
+			continue
+		}
+		parameters := function["parameters"].(agentcontract.JSON)
+		kind := strings.TrimPrefix(name, "submit_")
+		kinds = append(kinds, kind)
+		properties := agentcontract.JSON{"kind": agentcontract.JSON{"type": "string", "const": kind}}
+		for field, schema := range parameters["properties"].(agentcontract.JSON) {
+			properties[field] = schema
+			rootProperties[field] = schema
+		}
+		required := append([]string{"kind"}, parameters["required"].([]string)...)
+		variants = append(variants, agentcontract.JSON{"type": "object", "properties": properties, "required": required, "additionalProperties": false})
+	}
+	// Declare native property types at the root as well as the per-kind union.
+	// Some compatible gateways stringify fields absent from root properties.
+	rootProperties["kind"] = agentcontract.JSON{"type": "string", "enum": kinds}
+	return agentcontract.JSON{"type": "function", "function": agentcontract.JSON{
+		"name":        "submit_decision",
+		"description": "Submit exactly one typed decision. Structured output only; the runtime separately validates and authorizes capability calls. Choose one decision kind and wait for its result before deciding again.",
+		"parameters": agentcontract.JSON{"type": "object", "properties": rootProperties,
+			"required": []string{"kind"}, "anyOf": variants, "additionalProperties": false},
+	}}
+}
+
 func decisionOutputToolPrompt(prompt string, completionReview bool) string {
 	lines := strings.Split(prompt, "\n")
 	retained := make([]string, 0, len(lines))
@@ -87,9 +121,9 @@ func decisionOutputToolPrompt(prompt string, completionReview bool) string {
 		retained = append(retained, line)
 	}
 	bindings := decisionOutputFieldBindings()
-	guidance := "\nSubmit exactly one typed decision by calling the matching submit_<kind> output tool. The response must contain exactly one tool_calls entry, including for read_skill, inspect_capability and inspect_fact; choose one inspection and wait for its result before the next decision. The selected tool name identifies the decision kind. Arguments contain only the fields declared by that tool, with native JSON arrays and objects; omit schema and kind. The adapter supplies the fixed schema and kind from the registered tool name. This replaces content-only JSON output. Output tools do not execute business operations; tool_batch is a proposed decision that the runtime will separately validate and authorize.\nFor exactly one capability call, prefer submit_tool_call with capability, arguments and reason directly as native fields. Do not wrap these fields in calls. The adapter constructs the one-item tool_batch. Use submit_tool_batch for multiple independent calls; calls must remain a native JSON array. In either tool, arguments must match the selected capability's input_schema, preserving all required nested objects. Omit call_ref: the adapter supplies a fresh local reference for every proposed call. Preserve exact capability and operation names in their own fields."
+	guidance := "\nCall submit_decision exactly once. Arguments are one native object {\"kind\":\"<one declared kind>\",...}; omit schema. Do not wrap the object in a decision property or stringify it. The response must contain exactly one tool_calls entry, including for read_skill, inspect_capability and inspect_fact. Choose one decision and wait for its result before the next decision. Use only the declared native fields, arrays and objects for that kind. Saved calls are historical evidence; do not replay them merely because they appear in history. This replaces content-only JSON output. Output tools do not execute business operations; the runtime separately validates and authorizes capability calls.\nFor one or more independent capability calls, choose kind tool_batch with calls as a native array. Each call contains capability, arguments and reason. Arguments must match the selected capability's input_schema, preserving all required nested objects. Omit call_ref: the adapter supplies a fresh local reference for every proposed call. Preserve exact capability and operation names in their own fields."
 	if completionReview {
-		guidance = "\nSubmit exactly one typed final decision by calling submit_final, with exactly one tool_calls entry. Arguments contain only the declared native fields; omit schema and kind. The adapter supplies the fixed schema and final kind. This replaces content-only JSON output. All saved capability calls are historical evidence, not available decisions. Do not submit another decision kind."
+		guidance = "\nCall submit_decision exactly once with arguments {\"kind\":\"final\",\"answer_markdown\":\"...\",\"fact_ids\":[]} and optional result_refs. Omit schema. The response must contain exactly one tool_calls entry. This replaces content-only JSON output. All saved capability calls are historical evidence, not available decisions. Do not submit another decision kind or replay saved capability calls."
 	}
 	return strings.Join(retained, "\n") + guidance + "\nUse the exact output-tool field names and native types below. Do not substitute aliases such as answer, response, content or text for answer_markdown.\n" + strings.Join(bindings, "\n")
 }
@@ -98,6 +132,9 @@ func decisionOutputFieldBindings() []string {
 	bindings := []string{}
 	for _, tool := range decisionOutputTools() {
 		function := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)
+		if function["name"] == "submit_tool_call" {
+			continue
+		}
 		parameters := function["parameters"].(agentcontract.JSON)
 		properties := parameters["properties"].(agentcontract.JSON)
 		required := []string{}
@@ -113,7 +150,7 @@ func decisionOutputFieldBindings() []string {
 			allowed = append(allowed, field)
 		}
 		sort.Strings(allowed)
-		bindings = append(bindings, function["name"].(string)+": required "+strings.Join(required, ", ")+"; allowed field names "+strings.Join(allowed, ", "))
+		bindings = append(bindings, strings.TrimPrefix(function["name"].(string), "submit_")+": required kind (string), "+strings.Join(required, ", ")+"; allowed field names kind, "+strings.Join(allowed, ", "))
 	}
 	return bindings
 }
@@ -127,6 +164,7 @@ func decisionOutputToolBody(calls []decisionOutputToolCall) ([]byte, string) {
 	}
 	kind := strings.TrimPrefix(calls[0].Function.Name, "submit_")
 	switch calls[0].Function.Name {
+	case "submit_decision":
 	case "submit_tool_call":
 		kind = "tool_batch"
 	case "submit_tool_batch", "submit_final", "submit_request_input", "submit_search_capabilities", "submit_read_skill", "submit_inspect_capability", "submit_inspect_fact":
@@ -138,7 +176,21 @@ func decisionOutputToolBody(calls []decisionOutputToolCall) ([]byte, string) {
 		return nil, detail
 	}
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil || fields["kind"] != nil || fields["schema"] != nil {
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return nil, "model_decision_schema_invalid"
+	}
+	if calls[0].Function.Name == "submit_decision" {
+		if err := json.Unmarshal(fields["kind"], &kind); err != nil {
+			return nil, "model_decision_schema_invalid"
+		}
+		switch kind {
+		case "tool_batch", "final", "request_input", "search_capabilities", "read_skill", "inspect_capability", "inspect_fact":
+		default:
+			return nil, "model_decision_schema_invalid"
+		}
+		delete(fields, "kind")
+	}
+	if fields["kind"] != nil || fields["schema"] != nil {
 		return nil, "model_decision_schema_invalid"
 	}
 	if calls[0].Function.Name == "submit_tool_call" {
