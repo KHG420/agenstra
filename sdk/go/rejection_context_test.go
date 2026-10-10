@@ -25,7 +25,14 @@ func TestRejectedCallPresentationPreservesArgumentAvailability(t *testing.T) {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					var request struct {
-						Messages []struct{ Role, Content string }
+						Messages []struct {
+							Role, Content string
+							ToolCallID    string `json:"tool_call_id"`
+							ToolCalls     []struct {
+								ID       string
+								Function struct{ Name, Arguments string }
+							} `json:"tool_calls"`
+						}
 					}
 					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 						t.Error(err)
@@ -41,9 +48,11 @@ func TestRejectedCallPresentationPreservesArgumentAvailability(t *testing.T) {
 						_, content, _ = strings.Cut(content, "\n")
 					}
 					var prior map[string]json.RawMessage
-					if err := json.Unmarshal([]byte(content), &prior); err != nil {
-						t.Error(err)
-						return
+					if mode != "output_tools" || tc.omitted {
+						if err := json.Unmarshal([]byte(content), &prior); err != nil {
+							t.Error(err)
+							return
+						}
 					}
 					if tc.omitted {
 						if prior["recorded_runtime_call"] == nil || prior["calls"] != nil {
@@ -59,9 +68,26 @@ func TestRejectedCallPresentationPreservesArgumentAvailability(t *testing.T) {
 						}
 					} else {
 						var calls []agenstra.ToolCall
-						if err := json.Unmarshal(prior["calls"], &calls); err != nil || len(calls) != 1 {
-							t.Error("known rejected input lost", content, err)
-							return
+						if mode == "output_tools" {
+							recorded, result := request.Messages[2], request.Messages[3]
+							if recorded.Role != "assistant" || len(recorded.ToolCalls) != 1 || result.Role != "tool" || result.ToolCallID != recorded.ToolCalls[0].ID || recorded.ToolCalls[0].Function.Name != "submit_tool_call" {
+								t.Error("known rejected call lost its tool result pairing")
+								return
+							}
+							var call agenstra.ToolCall
+							if err := json.Unmarshal([]byte(recorded.ToolCalls[0].Function.Arguments), &call); err != nil {
+								t.Error(err)
+								return
+							}
+							calls = []agenstra.ToolCall{call}
+						} else {
+							if err := json.Unmarshal(prior["calls"], &calls); err != nil || len(calls) != 1 {
+								t.Error("known rejected input lost", content, err)
+								return
+							}
+						}
+						if calls[0].Capability != "record.update" {
+							t.Error("known rejected capability changed")
 						}
 						raw, err := json.Marshal(calls[0].Arguments)
 						if err != nil {
