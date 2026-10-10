@@ -320,7 +320,11 @@ func TestDecisionOutputToolsKeepUserFormatsInsideFinal(t *testing.T) {
 					if !strings.Contains(prompt, "apply to final.answer_markdown only") || !strings.Contains(prompt, "never replace the submit_decision output tool call") {
 						t.Error("requested display format was not separated from the output protocol", prompt)
 					}
-					arguments, err := agentcontract.CanonicalJSON(agentcontract.JSON{"kind": "final", "answer_markdown": answer, "fact_ids": []string{}})
+					fields := agentcontract.JSON{"kind": "final", "answer_markdown": answer, "fact_ids": []string{}}
+					if review {
+						fields["completion_feedback"] = ""
+					}
+					arguments, err := agentcontract.CanonicalJSON(fields)
 					if err != nil {
 						t.Error(err)
 						return

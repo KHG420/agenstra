@@ -133,20 +133,23 @@ type ToolCall struct {
 // Decision represents one typed action in the ReAct protocol.
 // ModelCall is local request telemetry and is excluded from the decision JSON.
 type Decision struct {
-	Schema         string                `json:"schema"`
-	Kind           string                `json:"kind"`
-	Calls          []ToolCall            `json:"calls,omitempty"`
-	AnswerMarkdown string                `json:"answer_markdown,omitempty"`
-	FactIDs        []string              `json:"fact_ids,omitempty"`
-	ResultRefs     []ResultRefRequest    `json:"result_refs,omitempty"`
-	Field          string                `json:"field,omitempty"`
-	Prompt         string                `json:"prompt,omitempty"`
-	InputSchema    *RequestedInputSchema `json:"input_schema,omitempty"`
-	Query          string                `json:"query,omitempty"`
-	Name           string                `json:"name,omitempty"`
-	FactID         string                `json:"fact_id,omitempty"`
-	Path           []any                 `json:"path,omitempty"`
-	ModelCall      *ModelCallMetrics     `json:"-"`
+	Schema         string             `json:"schema"`
+	Kind           string             `json:"kind"`
+	Calls          []ToolCall         `json:"calls,omitempty"`
+	AnswerMarkdown string             `json:"answer_markdown,omitempty"`
+	FactIDs        []string           `json:"fact_ids,omitempty"`
+	ResultRefs     []ResultRefRequest `json:"result_refs,omitempty"`
+	// CompletionFeedback rejects premature completion during review. It does not
+	// authorize calls; the runtime returns the feedback to its normal decision loop.
+	CompletionFeedback string                `json:"completion_feedback,omitempty"`
+	Field              string                `json:"field,omitempty"`
+	Prompt             string                `json:"prompt,omitempty"`
+	InputSchema        *RequestedInputSchema `json:"input_schema,omitempty"`
+	Query              string                `json:"query,omitempty"`
+	Name               string                `json:"name,omitempty"`
+	FactID             string                `json:"fact_id,omitempty"`
+	Path               []any                 `json:"path,omitempty"`
+	ModelCall          *ModelCallMetrics     `json:"-"`
 }
 
 // DecisionTooManyCallsError rejects a batch larger than the protocol permits.
@@ -164,6 +167,9 @@ func (DecisionTooManyCallsError) Code() string { return "model_decision_invalid"
 // Human-readable text limits count Unicode code points, as JSON Schema does.
 func (d Decision) Validate() error {
 	if d.Schema != "" && d.Schema != "agenstra.decision.v1" {
+		return errors.New("model_decision_invalid")
+	}
+	if utf8.RuneCountInString(d.CompletionFeedback) > 2000 || (d.CompletionFeedback != "" && d.Kind != "final") {
 		return errors.New("model_decision_invalid")
 	}
 	switch d.Kind {
@@ -262,7 +268,7 @@ func StrictDecision(raw []byte) (Decision, error) {
 	if _, ok := obj["schema"]; !ok {
 		d.Schema = "agenstra.decision.v1"
 	}
-	allowed := map[string]map[string]bool{"tool_batch": {"schema": true, "kind": true, "calls": true}, "final": {"schema": true, "kind": true, "answer_markdown": true, "fact_ids": true, "result_refs": true}, "request_input": {"schema": true, "kind": true, "field": true, "prompt": true, "input_schema": true}, "search_capabilities": {"schema": true, "kind": true, "query": true}, "read_skill": {"schema": true, "kind": true, "name": true}, "inspect_capability": {"schema": true, "kind": true, "name": true}, "inspect_fact": {"schema": true, "kind": true, "fact_id": true, "path": true}}
+	allowed := map[string]map[string]bool{"tool_batch": {"schema": true, "kind": true, "calls": true}, "final": {"schema": true, "kind": true, "answer_markdown": true, "fact_ids": true, "result_refs": true, "completion_feedback": true}, "request_input": {"schema": true, "kind": true, "field": true, "prompt": true, "input_schema": true}, "search_capabilities": {"schema": true, "kind": true, "query": true}, "read_skill": {"schema": true, "kind": true, "name": true}, "inspect_capability": {"schema": true, "kind": true, "name": true}, "inspect_fact": {"schema": true, "kind": true, "fact_id": true, "path": true}}
 	keys := allowed[d.Kind]
 	if keys == nil {
 		return d, errors.New("model_decision_invalid")
@@ -271,6 +277,9 @@ func StrictDecision(raw []byte) (Decision, error) {
 		if !keys[k] {
 			return d, errors.New("model_decision_invalid")
 		}
+	}
+	if raw, exists := obj["completion_feedback"]; exists && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return d, errors.New("model_decision_invalid")
 	}
 	if d.Kind == "tool_batch" {
 		var calls []map[string]json.RawMessage

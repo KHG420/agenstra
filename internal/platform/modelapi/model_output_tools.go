@@ -16,7 +16,7 @@ type decisionOutputToolCall struct {
 	} `json:"function"`
 }
 
-func decisionOutputTools() []any {
+func decisionOutputTools(completionReview bool) []any {
 	uuid := agentcontract.JSON{"type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"}
 	path := agentcontract.JSON{"type": "array", "maxItems": 16, "items": agentcontract.JSON{"anyOf": []any{agentcontract.JSON{"type": "string"}, agentcontract.JSON{"type": "integer", "minimum": 0}}}}
 	object := func(properties agentcontract.JSON, required ...string) agentcontract.JSON {
@@ -51,11 +51,17 @@ func decisionOutputTools() []any {
 		}})
 	}
 	add("tool_batch", agentcontract.JSON{"calls": agentcontract.JSON{"type": "array", "minItems": 1, "maxItems": 4, "items": call}}, "calls")
-	add("final", agentcontract.JSON{
+	final := agentcontract.JSON{
 		"answer_markdown": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 30000},
 		"fact_ids":        agentcontract.JSON{"type": "array", "maxItems": 50, "items": uuid},
 		"result_refs":     agentcontract.JSON{"type": "array", "maxItems": 20, "items": resultRef},
-	}, "answer_markdown", "fact_ids")
+	}
+	required := []string{"answer_markdown", "fact_ids"}
+	if completionReview {
+		final["completion_feedback"] = agentcontract.JSON{"type": "string", "maxLength": 2000, "description": "Empty when requested work is handled or concretely blocked; otherwise identify missing original work. Rejects publication, never executes or authorizes calls."}
+		required = append(required, "completion_feedback")
+	}
+	add("final", final, required...)
 	add("request_input", agentcontract.JSON{
 		"field":  agentcontract.JSON{"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
 		"prompt": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 1000}, "input_schema": inputSchema,
@@ -120,17 +126,22 @@ func decisionOutputToolPrompt(prompt string, completionReview bool) string {
 		line = strings.ReplaceAll(line, "propose any tool call", "propose any capability call")
 		retained = append(retained, line)
 	}
-	bindings := decisionOutputFieldBindings()
+	bindings := decisionOutputFieldBindings(completionReview)
 	guidance := "\nCall submit_decision exactly once. Arguments are one native object {\"kind\":\"<one declared kind>\",...}; omit schema. Do not wrap the object in a decision property or stringify it. The response must contain exactly one tool_calls entry, including for read_skill, inspect_capability and inspect_fact. Choose one decision and wait for its result before the next decision. Use only the declared native fields, arrays and objects for that kind. Saved calls are historical evidence; do not replay them merely because they appear in history. This replaces content-only JSON output. Output tools do not execute business operations; the runtime separately validates and authorizes capability calls.\nFor one or more independent capability calls, choose kind tool_batch with calls as a native array. Each call contains capability, arguments and reason. Arguments must match the selected capability's input_schema, preserving all required nested objects. Omit call_ref: the adapter supplies a fresh local reference for every proposed call. Preserve exact capability and operation names in their own fields."
 	if completionReview {
-		guidance = "\nCall submit_decision exactly once with arguments {\"kind\":\"final\",\"answer_markdown\":\"...\",\"fact_ids\":[]} and optional result_refs. Omit schema. The response must contain exactly one tool_calls entry. This replaces content-only JSON output. All saved capability calls are historical evidence, not available decisions. Do not submit another decision kind or replay saved capability calls."
+		guidance = "\nCall submit_decision exactly once with arguments {\"kind\":\"final\",\"answer_markdown\":\"...\",\"fact_ids\":[],\"completion_feedback\":\"\"} and optional result_refs. Set completion_feedback to missing original work to reject premature publication, or an empty string when requested work is handled or concretely blocked. Omit schema. The response must contain exactly one tool_calls entry. This replaces content-only JSON output. All saved capability calls are historical evidence, not available decisions. Do not submit another decision kind or replay saved capability calls."
 	}
-	return strings.Join(retained, "\n") + guidance + "\nUse the exact output-tool field names and native types below. Do not substitute aliases such as answer, response, content or text for answer_markdown.\n" + strings.Join(bindings, "\n") + "\nUser requests for prose, Markdown, JSON, code or tables apply to final.answer_markdown only; they never replace the submit_decision output tool call. Put the requested display format inside that string."
+	prompt = strings.Join(retained, "\n") + guidance + "\nUse the exact output-tool field names and native types below. Do not substitute aliases such as answer, response, content or text for answer_markdown.\n" + strings.Join(bindings, "\n") + "\nUser requests for prose, Markdown, JSON, code or tables apply to final.answer_markdown only; they never replace the submit_decision output tool call. Put the requested display format inside that string."
+	if completionReview {
+		prompt += "\nCompletion validation has an explicit feedback field in the final decision for this review only: completion_feedback (string). Check every explicitly requested operation against this run's recorded calls and verified results, including a separately requested read after a write. If all required execution is evidenced, return completion_feedback as an empty string and correct any unsupported claim or display format in answer_markdown. If required execution is missing, return a nonempty completion_feedback that identifies only the missing work from the original request; keep the proposed answer as an unpublished draft. This signals rejection of premature completion, not permission to execute anything. Do not propose or execute any tool call during review. The runtime returns the feedback to a normal decision step with the original authorization and budgets; never request new authorization merely to finish already requested independent work. Do not invent missing requirements or treat a write receipt as a separately executed read. Return only the declared final decision fields plus completion_feedback through the existing output channel."
+		prompt += " A verified missing prerequisite, denied approval or uncertain outcome is a concrete blocker: report that limitation with empty completion_feedback rather than request an unsafe replay. Missing required execution without such a blocker must reject completion."
+	}
+	return prompt
 }
 
-func decisionOutputFieldBindings() []string {
+func decisionOutputFieldBindings(completionReview bool) []string {
 	bindings := []string{}
-	for _, tool := range decisionOutputTools() {
+	for _, tool := range decisionOutputTools(completionReview) {
 		function := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)
 		if function["name"] == "submit_tool_call" {
 			continue

@@ -37,7 +37,7 @@ func TestModelUnicodeTextLimitsAgreeAcrossOutputModes(t *testing.T) {
 			for _, extra := range []int{0, 1} {
 				t.Run(tc.name+"/"+mode+"/"+strings.Repeat("overflow", extra), func(t *testing.T) {
 					fields := tc.fields(strings.Repeat("中", tc.limit+extra))
-					for _, tool := range decisionOutputTools() {
+					for _, tool := range decisionOutputTools(false) {
 						function := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)
 						if function["name"] != tc.tool {
 							continue

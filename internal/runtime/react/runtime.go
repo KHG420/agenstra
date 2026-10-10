@@ -729,7 +729,19 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			state.ModelCalls[callIndex].ErrorCode = agentcontract.Strptr("model_decision_invalid")
 			RebuildModelUsage(state)
 		}
+		if err == nil && review == nil && d.CompletionFeedback != "" {
+			err = agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
+			state.ModelCalls[callIndex].ErrorCode = agentcontract.Strptr("model_decision_invalid")
+			RebuildModelUsage(state)
+		}
 		if err == nil {
+			if review != nil && strings.TrimSpace(d.CompletionFeedback) != "" {
+				// Reject publication, then let the driver checkpoint and re-enter
+				// ordinary execution. Reviewer text never dispatches calls or grants.
+				recordDecision(state, d)
+				Reject(state, "final", "agent.final", "completion_incomplete", agentcontract.JSON{"feedback": d.CompletionFeedback}, "")
+				return nil
+			}
 			if review == nil && d.Kind == "final" && len(packet.ActionOutcomes) > 0 {
 
 				// Save the proposal for audit/checkpointing, but never publish it.
@@ -763,7 +775,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 				feedback += " This is completion review: return only a final decision; tools and other decision kinds are not allowed."
 			}
 		} else if review != nil {
-			feedback = "\nYour previous review was invalid. Return exactly one final agenstra.decision.v1 JSON decision; no tools or other decision kinds are allowed during completion review."
+			feedback = "\nYour previous review was invalid. Return exactly one final agenstra.decision.v1 JSON decision with completion_feedback as a string: identify missing originally requested execution, or use an empty string when work is handled or concretely blocked. No tools or other decision kinds are allowed during completion review."
 		} else if errors.As(err, &oversized) {
 			feedback = "\nYour previous decision was invalid: tool_batch.calls has at most 4 items. Return one valid agenstra.decision.v1 JSON decision with no more than 4 calls."
 		} else {

@@ -72,6 +72,92 @@ func consistencyFixture(t *testing.T) (*AgentRuntime, *agentcontract.RuntimeStat
 	return r, s
 }
 
+func TestCompletionFeedbackRejectsPrematurePublication(t *testing.T) {
+	r, s := consistencyFixture(t)
+	r.Model = decisionModelFunc(func(_ context.Context, packet agentcontract.ContextPacket, _ string) (agentcontract.Decision, error) {
+		d := agentcontract.Decision{Kind: "final", AnswerMarkdown: "Created and independently read back", FactIDs: []string{s.Facts[0].FactID}}
+		if packet.CompletionReview != nil {
+			raw, err := json.Marshal(agentcontract.JSON{"kind": "final", "answer_markdown": d.AnswerMarkdown, "fact_ids": d.FactIDs, "completion_feedback": "The requested independent read has not executed."})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(raw, &d); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return d, nil
+	})
+	if err := r.Step(t.Context(), s, nil); err != nil {
+		t.Fatal(err)
+	}
+	if s.Status != "running" || s.AnswerMarkdown != "" || len(s.Pending) != 0 || len(s.Decisions) != 2 || s.ModelUsage.Requests != 2 {
+		t.Fatal("incomplete review published a draft, executed calls or lost accounting", s)
+	}
+	last := s.Observations[len(s.Observations)-1]
+	if last.ErrorCode == nil || *last.ErrorCode != "completion_incomplete" || last.Arguments["feedback"] != "The requested independent read has not executed." {
+		t.Fatal("missing-work feedback was not preserved", last)
+	}
+	raw, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored agentcontract.RuntimeState
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	r.Model = decisionModelFunc(func(_ context.Context, packet agentcontract.ContextPacket, _ string) (agentcontract.Decision, error) {
+		if packet.CompletionReview != nil || len(packet.Observations) < 1 || *packet.Observations[len(packet.Observations)-1].ErrorCode != "completion_incomplete" {
+			t.Fatal("feedback did not return to ordinary execution after checkpoint", packet)
+		}
+		return callDecision("record.create"), nil
+	})
+	r.Grants = map[string]bool{"record.create": false}
+	if err := r.Step(t.Context(), &restored, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.Pending) != 1 || restored.AnswerMarkdown != "" || len(restored.Facts) != 1 {
+		t.Fatal("normal decision did not prepare its call or lost existing evidence", restored)
+	}
+	item := restored.Pending[0]
+	outcome, err := ExecuteCall(t.Context(), r.Provider, r.Grants, item.Call, &agentcontract.InvocationContext{RunID: restored.RunID, InvocationID: item.InvocationID})
+	if err != nil || outcome.Fact != nil || outcome.ErrorCode != "capability_not_granted" {
+		t.Fatal("review feedback bypassed normal invocation authorization", outcome, err)
+	}
+}
+
+func TestCompletionFeedbackRemainsWithinRoundBudget(t *testing.T) {
+	r, s := consistencyFixture(t)
+	r.MaxModelRounds = 4
+	r.Model = decisionModelFunc(func(_ context.Context, packet agentcontract.ContextPacket, _ string) (agentcontract.Decision, error) {
+		d := agentcontract.Decision{Kind: "final", AnswerMarkdown: "draft", FactIDs: []string{s.Facts[0].FactID}}
+		if packet.CompletionReview != nil {
+			d.CompletionFeedback = "Requested work remains missing."
+		}
+		return d, nil
+	})
+	for range 3 {
+		if err := r.Step(t.Context(), s, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s.Status != "failed" || s.ErrorCode == nil || *s.ErrorCode != "model_round_budget_exhausted" || s.AnswerMarkdown != "" || s.ModelUsage.Requests != 4 || len(s.Facts) != 1 {
+		t.Fatal("completion feedback escaped the original budget or published a draft", s)
+	}
+}
+
+func TestCompletionFeedbackIsNotAnOrdinaryFinal(t *testing.T) {
+	r, s := consistencyFixture(t)
+	r.Model = decisionModelFunc(func(_ context.Context, _ agentcontract.ContextPacket, _ string) (agentcontract.Decision, error) {
+		return agentcontract.Decision{Kind: "final", AnswerMarkdown: "draft", FactIDs: []string{s.Facts[0].FactID}, CompletionFeedback: "Missing work"}, nil
+	})
+	if err := r.Step(t.Context(), s, nil); err != nil {
+		t.Fatal(err)
+	}
+	if s.Status != "failed" || s.ErrorCode == nil || *s.ErrorCode != "model_decision_invalid" || s.AnswerMarkdown != "" || len(s.Pending) != 0 {
+		t.Fatal("ordinary final misused reviewer feedback", s)
+	}
+}
+
 func TestCompletionReviewCannotExecuteToolsOrPublishOnError(t *testing.T) {
 	for _, failure := range []string{"tools", "gateway", "rounds", "tokens", "context"} {
 		t.Run(failure, func(t *testing.T) {

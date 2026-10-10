@@ -107,6 +107,15 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet agentcontract
 		}
 		return agentcontract.Decision{}, agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
 	}
+	if packet.CompletionReview != nil {
+		var review struct {
+			Feedback *string `json:"completion_feedback"`
+		}
+		if err := json.Unmarshal(body, &review); err != nil || decision.Kind != "final" || review.Feedback == nil {
+			metrics.FormatError = "model_decision_schema_invalid"
+			return agentcontract.Decision{}, agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
+		}
+	}
 	return decision, nil
 }
 

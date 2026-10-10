@@ -58,8 +58,12 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 	decisionPacket := false
 	if err := jsonvalue.DecodeStrict(input, &packet); err == nil && packet.Schema == "agenstra.context.v1" {
 		decisionPacket = true
-		if m.DecisionOutputMode != "output_tools" && packet.CompletionReview == nil && len(packet.Skills) == 0 {
-			messages[0] = agentcontract.JSON{"role": "system", "content": jsonDecisionPromptWithoutSkills(prompt)}
+		if m.DecisionOutputMode != "output_tools" {
+			if packet.CompletionReview != nil {
+				messages[0] = agentcontract.JSON{"role": "system", "content": jsonCompletionReviewPrompt(prompt)}
+			} else if len(packet.Skills) == 0 {
+				messages[0] = agentcontract.JSON{"role": "system", "content": jsonDecisionPromptWithoutSkills(prompt)}
+			}
 		}
 		history := packet.InspectionHistory
 		if len(history) > 0 {
@@ -156,7 +160,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		payload[field] = m.MaxOutputTokens
 	}
 	if m.DecisionOutputMode == "output_tools" && decisionPacket {
-		tools := decisionOutputTools()
+		tools := decisionOutputTools(packet.CompletionReview != nil)
 		toolPrompt := decisionOutputToolPrompt(prompt, packet.CompletionReview != nil)
 
 		// Skill availability is complete even with deferred capabilities. Search
@@ -168,7 +172,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		retainedTools := tools[:0]
 		for _, tool := range tools {
 			name := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)["name"].(string)
-			// Completion review cannot resume execution or request another input.
+			// Review can reject publication, but cannot propose calls or user input.
 			// Offer only the decision kind that the runtime accepts in this stage.
 			if packet.CompletionReview != nil && name != "submit_final" {
 				unavailable[name] = true
@@ -201,6 +205,22 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		}
 	}
 	return payload, nil
+}
+
+func jsonCompletionReviewPrompt(prompt string) string {
+	// Ordinary decision examples contradict this phase's final-only contract.
+	// Keep host usage and evidence rules; replace only framework protocol examples.
+	prompt = strings.ReplaceAll(prompt, "Choose one JSON decision at a time: tool_batch, read_skill, inspect_capability, inspect_fact, final, or request_input.", "This is completion review: final is the only available decision kind.")
+	lines := strings.Split(prompt, "\n")
+	retained := lines[:0]
+	for _, line := range lines {
+		if strings.HasPrefix(line, "Return one JSON object with schema") || strings.HasPrefix(line, "Skill: {") || line == agentcontract.DecisionObjectShapePrompt {
+			continue
+		}
+		retained = append(retained, line)
+	}
+	return strings.Join(retained, "\n") + `
+Available JSON decision for completion review: final only. Return exactly one raw JSON object with literal fields {"schema":"agenstra.decision.v1","kind":"final","answer_markdown":"unpublished draft or corrected answer","fact_ids":[],"completion_feedback":""}; optional result_refs keeps its existing contract. completion_feedback is REQUIRED and must be a string. Check each explicitly requested operation against the recorded calls, including a separately requested read after a write. If original work is missing, describe only that missing work in nonempty completion_feedback; the runtime will reject publication and return this feedback to a normal authorized decision step. A write receipt is not a separately executed read. Otherwise return an empty string and report only verified outcomes and concrete blockers. Do not choose tool_batch, read_skill, inspect_capability, inspect_fact, search_capabilities or request_input during review. Do not perform, propose or replay any call here; feedback is not permission. Never add requirements beyond the original request.`
 }
 
 func jsonDecisionPromptWithoutSkills(prompt string) string {

@@ -67,14 +67,21 @@ func TestJSONAvailabilityPreservesExistingSkillsAndMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 	model := &HTTPJSONDecisionModel{Model: "test", DecisionOutputMode: "json_object"}
-	for _, raw := range [][]byte{input, review, []byte(`{"text":"remember my preference","existing":[]}`)} {
-		payload, err := model.requestPayload(raw, prompt)
+	for _, tc := range []struct {
+		raw    []byte
+		prompt string
+	}{
+		{input, prompt},
+		{review, jsonCompletionReviewPrompt(prompt)},
+		{[]byte(`{"text":"remember my preference","existing":[]}`), prompt},
+	} {
+		payload, err := model.requestPayload(tc.raw, prompt)
 		if err != nil {
 			t.Fatal(err)
 		}
 		messages := payload["messages"].([]any)
-		if messages[0].(agentcontract.JSON)["content"] != prompt || messages[1].(agentcontract.JSON)["content"] != string(raw) {
-			t.Fatal("existing skill, completion review or non-decision request was changed")
+		if messages[0].(agentcontract.JSON)["content"] != tc.prompt || messages[1].(agentcontract.JSON)["content"] != string(tc.raw) {
+			t.Fatal("request prompt changed outside its phase or caller context was mutated")
 		}
 	}
 	const customPrompt = "Return the host's documented decision object."

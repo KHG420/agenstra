@@ -81,3 +81,64 @@ func TestAsyncCompletionReviewUsesTerminalPollReceipt(t *testing.T) {
 		t.Fatal("async review replayed an action or lost completion", err, run.Status, p.calls)
 	}
 }
+
+func TestHostCompletionFeedbackReturnsThroughApproval(t *testing.T) {
+	p := &hostProvider{caps: map[string]agentcontract.CapabilityDescription{
+		"records.create":  {Name: "records.create", Effect: "write", Replay: "never", InputSchema: agentcontract.JSON{"type": "object"}},
+		"records.publish": {Name: "records.publish", Effect: "write", Replay: "never", ApprovalRequired: true, InputSchema: agentcontract.JSON{"type": "object"}},
+	}}
+	invoked := []string{}
+	p.hook = func(_ context.Context, name string, _ map[string]any, _ *agentcontract.InvocationContext) (agentcontract.CapabilityResult, error) {
+		invoked = append(invoked, name)
+		return agentcontract.CapabilityResult{Data: agentcontract.JSON{"id": "R-1"}, ReferenceScope: "durable"}, nil
+	}
+	h := NewAgentHost(testStore(t), func(context.Context, string, string) (agentcontract.CapabilityProvider, error) { return p, nil }, &hostModel{}, func(context.Context, string, string) (agentcontract.ExecutionPolicy, error) {
+		return agentcontract.ExecutionPolicy{GrantedCapabilities: map[string]bool{"records.create": true, "records.publish": true}, AllowModelData: true}, nil
+	})
+	h.Model = decisionModelFunc(func(_ context.Context, packet agentcontract.ContextPacket, _ string) (agentcontract.Decision, error) {
+		if len(packet.Facts) == 0 {
+			return callDecision("records.create"), nil
+		}
+		if packet.CompletionReview != nil {
+			d := agentcontract.Decision{Kind: "final", AnswerMarkdown: "Created and published R-1", FactIDs: []string{packet.Facts[0].FactID}}
+			if len(invoked) == 1 {
+				d.CompletionFeedback = "The requested publication has not executed."
+			}
+			return d, nil
+		}
+		for _, observation := range packet.Observations {
+			if observation.ErrorCode != nil && *observation.ErrorCode == "completion_incomplete" && len(invoked) == 1 {
+				d := callDecision("records.publish")
+				d.Calls[0].CallRef = "publish-1"
+				return d, nil
+			}
+		}
+		return agentcontract.Decision{Kind: "final", AnswerMarkdown: "Created and published R-1", FactIDs: []string{packet.Facts[0].FactID}}, nil
+	})
+	run := createTestHostRun(t, h)
+	run, err := h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "needs_approval" || len(invoked) != 1 || invoked[0] != "records.create" {
+		t.Fatal("completion feedback bypassed approval or replayed the completed write", err, run.Status, invoked)
+	}
+	s, err := h.Restore(run)
+	if err != nil || s.AnswerMarkdown != "" || len(s.Pending) != 1 || len(s.Decisions) != 4 {
+		t.Fatal("feedback or unpublished proposal was not checkpointed", err, s)
+	}
+	item := s.Pending[0]
+	if item.Call.Capability != "records.publish" {
+		t.Fatal("incorrect operation requested approval", item)
+	}
+	run, err = h.Approve(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, run.Revision, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = h.Drive(t.Context(), run.RunID, "alice")
+	s, restoreErr := h.Restore(run)
+	if err != nil || restoreErr != nil || run.Status != "completed" || s.AnswerMarkdown != "Created and published R-1" || len(invoked) != 2 || invoked[1] != "records.publish" {
+		t.Fatal("approved missing work did not complete through the normal driver", err, restoreErr, run.Status, invoked)
+	}
+	telemetry, err := h.GetTelemetry(t.Context(), run.RunID, "alice")
+	if err != nil || telemetry.Budget.UsageByPurpose["completion_review"].Requests != 2 {
+		t.Fatal("review rejection lost persisted accounting", err, telemetry.Budget)
+	}
+}
