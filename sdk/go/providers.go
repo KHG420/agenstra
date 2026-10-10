@@ -84,6 +84,7 @@ type SkillDescription = agent.SkillDescription
 type Skill = agent.Skill
 
 // CapabilityResult contains provider data or a safe error code, never both.
+// Error codes use 1–120 ASCII letters, digits, underscores, dots, colons or hyphens.
 // An unknown external outcome must remain distinguishable from a definite failure.
 type CapabilityResult = agent.CapabilityResult
 

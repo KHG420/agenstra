@@ -98,6 +98,9 @@ func ExecuteCall(ctx context.Context, provider agentcontract.CapabilityProvider,
 	if err != nil {
 		return agentcontract.CallOutcome{ErrorCode: "provider_outcome_unknown"}, nil
 	}
+	if result.ErrorCode != "" && (result.Data != nil || !agentcontract.SafeCodePattern.MatchString(result.ErrorCode)) {
+		return agentcontract.CallOutcome{ErrorCode: "upstream_response_invalid"}, nil
+	}
 	if result.ErrorCode != "" || result.Data == nil {
 		return agentcontract.CallOutcome{ErrorCode: firstNonempty(result.ErrorCode, "upstream_response_invalid")}, nil
 	}
