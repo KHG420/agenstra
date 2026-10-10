@@ -49,7 +49,7 @@ func TestDecisionOutputToolsRejectMalformedOutput(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 					t.Error(err)
 				}
-				if payload["response_format"] != nil || payload["tool_choice"] != "required" || len(payload["tools"].([]any)) != 7 {
+				if payload["response_format"] != nil || payload["tool_choice"] != "required" || len(payload["tools"].([]any)) != 6 {
 					t.Error("incorrect output tool request")
 				}
 				calls := []any{}

@@ -2,6 +2,7 @@ package modelapi
 
 import (
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/KHG420/agenstra/internal/base/jsonvalue"
@@ -131,24 +132,29 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		tools := decisionOutputTools()
 		toolPrompt := decisionOutputToolPrompt(prompt)
 
-		// The authorized skill catalog is complete even when capabilities are
-		// deferred. Without a declared skill there is nothing to load.
-		if len(packet.Skills) == 0 {
-			for i, tool := range tools {
-				if tool.(agentcontract.JSON)["function"].(agentcontract.JSON)["name"] == "submit_read_skill" {
-					tools = append(tools[:i], tools[i+1:]...)
-					break
-				}
-			}
-			lines := strings.Split(toolPrompt, "\n")
-			retained := lines[:0]
-			for _, line := range lines {
-				if !strings.HasPrefix(line, "submit_read_skill:") {
-					retained = append(retained, line)
-				}
-			}
-			toolPrompt = strings.Join(retained, "\n")
+		// Skill availability is complete even with deferred capabilities. Search
+		// availability comes from the runtime, not the visible catalog length.
+		unavailable := map[string]bool{
+			"submit_read_skill":          len(packet.Skills) == 0,
+			"submit_search_capabilities": !slices.Contains(packet.RuntimeFeatures, "capability_search"),
 		}
+		retainedTools := tools[:0]
+		for _, tool := range tools {
+			name := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)["name"].(string)
+			if !unavailable[name] {
+				retainedTools = append(retainedTools, tool)
+			}
+		}
+		tools = retainedTools
+		lines := strings.Split(toolPrompt, "\n")
+		retained := lines[:0]
+		for _, line := range lines {
+			name, _, _ := strings.Cut(line, ":")
+			if !unavailable[name] {
+				retained = append(retained, line)
+			}
+		}
+		toolPrompt = strings.Join(retained, "\n")
 		payload["tools"] = tools
 		payload["tool_choice"] = "required"
 		payload["parallel_tool_calls"] = false
