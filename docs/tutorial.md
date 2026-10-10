@@ -265,6 +265,6 @@ stdio、HTTP JSON 和 SSE 的业务回执都须声明 `jsonrpc: "2.0"`，并且�
 
 MCP 工具结果的 `isError` 可以省略；出现时必须是布尔值。字符串、数值、`null` 或其他类型返回 `upstream_response_invalid`，不会生成成功 Fact；已发出的写操作仍沿用不确定结果核对规则。
 
-特殊 SDK 可实现 `CapabilityProvider`：提供 `Capabilities()`、`Skills()`、`SystemPrompt()`、`Invoke(ctx, name, arguments, invocationContext)` 和 `Close()`，由调用方应用构造按用户隔离的 `ProviderFactory` 传给 `AgentHost`。Provider 负责对输入和返回做验证，返回结构化 `CapabilityResult` 或安全错误码；不要让原始异常、密钥或不可信响应正文进入模型或审计文本。具体协议类型见 [Go Provider 接口](../sdk/go/providers.go)，持久 Host 接入见 [Go Host 接口](../sdk/go/host.go)。
+特殊 SDK 可实现 `CapabilityProvider`：提供 `Capabilities()`、`Skills()`、`SystemPrompt()`、`Invoke(ctx, name, arguments, invocationContext)` 和 `Close()`，由调用方应用构造按用户隔离的 `ProviderFactory` 传给 `AgentHost`。能力声明了 `InputSchema` 时，持久 Host、临时 Runtime 和公开 `ExecuteCall` 都在绑定可信幂等参数后、调用 Provider 前校验完整输入；不符合契约的输入返回 `capability_input_invalid`，不产生成功 Fact。Go 声明中的类型化 map、slice 按其等价 JSON 编译，保留整数精度和调用方原数据；未声明输入 Schema 时不推断参数约束。Provider 仍负责业务校验与返回验证，返回结构化 `CapabilityResult` 或安全错误码；不要让原始异常、密钥或不可信响应正文进入模型或审计文本。具体协议类型见 [Go Provider 接口](../sdk/go/providers.go)，持久 Host 接入见 [Go Host 接口](../sdk/go/host.go)。
 
 完成接入后，用真实 API 和模型验证授权、结果字段、错误情况、数据是否允许送模型、提交幂等、等待恢复与最终回答；自动化测试只能证明框架边界，不能代替具体场景验收。

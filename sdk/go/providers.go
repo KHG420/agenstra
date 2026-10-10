@@ -110,7 +110,7 @@ func BindIdempotency(call ToolCall, cap CapabilityDescription, inv InvocationCon
 	return react.BindIdempotency(call, cap, inv)
 }
 
-// ExecuteCall checks catalog access and invokes a provider with owned arguments.
+// ExecuteCall checks catalog access and declared input before invoking a provider with owned arguments.
 // It copies returned evidence and converts provider failures to safe outcome codes.
 func ExecuteCall(ctx context.Context, provider CapabilityProvider, grants map[string]bool, call ToolCall, inv *InvocationContext) (CallOutcome, error) {
 	return react.ExecuteCall(ctx, provider, grants, call, inv)

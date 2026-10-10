@@ -113,3 +113,27 @@ func TestSDKEmbeddedHostPersistsEvidenceAndOwnerIsolation(t *testing.T) {
 		t.Fatalf("another owner could read the run: %v", err)
 	}
 }
+
+type strictRecordProvider struct{ recordProvider }
+
+func (*strictRecordProvider) Capabilities() map[string]agenstra.CapabilityDescription {
+	return map[string]agenstra.CapabilityDescription{"records.get": {
+		Name: "records.get", Effect: "read", InputSchema: agenstra.JSON{
+			"type": "object", "properties": agenstra.JSON{"id": agenstra.JSON{"type": "integer"}},
+			"required": []string{"id"}, "additionalProperties": false,
+		},
+	}}
+}
+
+func TestSDKExecuteCallChecksDeclaredInputBeforeProvider(t *testing.T) {
+	provider := &strictRecordProvider{}
+	grants := map[string]bool{"records.get": true}
+	outcome, err := agenstra.ExecuteCall(t.Context(), provider, grants, agenstra.ToolCall{Capability: "records.get", Arguments: agenstra.JSON{"id": "invalid"}}, nil)
+	if err != nil || outcome.ErrorCode != "capability_input_invalid" || outcome.Fact != nil || provider.calls != 0 {
+		t.Fatalf("public SDK dispatched invalid declared input: %+v, error=%v, calls=%d", outcome, err, provider.calls)
+	}
+	outcome, err = agenstra.ExecuteCall(t.Context(), provider, grants, agenstra.ToolCall{Capability: "records.get", Arguments: agenstra.JSON{"id": 0}}, nil)
+	if err != nil || outcome.Fact == nil || outcome.ErrorCode != "" || provider.calls != 1 {
+		t.Fatalf("public SDK rejected valid zero: %+v, error=%v, calls=%d", outcome, err, provider.calls)
+	}
+}

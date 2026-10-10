@@ -499,3 +499,29 @@ func TestCoreFactPreviewNestedListKeepsSmallFields(t *testing.T) {
 		})
 	}
 }
+
+func TestTransientRuntimeRejectsCustomProviderInputBeforeRecovery(t *testing.T) {
+	cap := agentcontract.CapabilityDescription{Name: "records.preview", Effect: "compute", InputSchema: agentcontract.JSON{
+		"type": "object", "properties": agentcontract.JSON{"request": agentcontract.JSON{"type": "object"}},
+		"required": []string{"request"}, "additionalProperties": false,
+	}}
+	provider := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap}}
+	r := &AgentRuntime{Provider: provider, Grants: map[string]bool{cap.Name: true}}
+	r.Model = decisionModelFunc(func(_ context.Context, packet agentcontract.ContextPacket, _ string) (agentcontract.Decision, error) {
+		if len(packet.Observations) == 0 {
+			return agentcontract.Decision{Kind: "tool_batch", Calls: []agentcontract.ToolCall{{CallRef: "invalid-1", Capability: cap.Name, Arguments: agentcontract.JSON{"text": "preview"}, Reason: "Preview"}}}, nil
+		}
+		first := packet.Observations[0]
+		if first.Status != "failed" || first.ErrorCode == nil || *first.ErrorCode != "capability_input_invalid" {
+			t.Fatal("invalid input became successful evidence", packet.Observations)
+		}
+		if len(packet.Facts) == 0 {
+			return agentcontract.Decision{Kind: "tool_batch", Calls: []agentcontract.ToolCall{{CallRef: "valid-1", Capability: cap.Name, Arguments: agentcontract.JSON{"request": agentcontract.JSON{"text": "preview"}}, Reason: "Use the declared wrapper"}}}, nil
+		}
+		return agentcontract.Decision{Kind: "final", AnswerMarkdown: "Preview received.", FactIDs: []string{packet.Facts[0].FactID}}, nil
+	})
+	result, err := r.Run(t.Context(), "Preview a record")
+	if err != nil || result.Status != "completed" || provider.called != 1 || len(result.Facts) != 1 || len(result.Observations) != 2 || result.Observations[1].Status != "succeeded" {
+		t.Fatal("transient recovery bypassed input validation or lost valid evidence", result, err, provider.called)
+	}
+}

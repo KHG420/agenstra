@@ -52,7 +52,7 @@ func BindIdempotency(call agentcontract.ToolCall, cap agentcontract.CapabilityDe
 	return call, nil
 }
 
-// ExecuteCall checks catalog access and invokes a provider with owned arguments.
+// ExecuteCall checks catalog access and declared input before invoking a provider with owned arguments.
 // It copies returned evidence and converts provider failures to safe outcome codes.
 func ExecuteCall(ctx context.Context, provider agentcontract.CapabilityProvider, grants map[string]bool, call agentcontract.ToolCall, inv *agentcontract.InvocationContext) (agentcontract.CallOutcome, error) {
 	cap, ok := provider.Capabilities()[call.Capability]
@@ -78,6 +78,12 @@ func ExecuteCall(ctx context.Context, provider agentcontract.CapabilityProvider,
 	arguments, err := jsonvalue.Clone(call.Arguments)
 	if err != nil || arguments == nil {
 		return agentcontract.CallOutcome{ErrorCode: "capability_input_invalid"}, nil
+	}
+	if cap.InputSchema != nil {
+		schema, err := agentcontract.ValidateLocalSchema(cap.InputSchema, false)
+		if err != nil || agentcontract.ValidateSchema(schema, arguments) != nil {
+			return agentcontract.CallOutcome{ErrorCode: "capability_input_invalid"}, nil
+		}
 	}
 	var providerInvocation *agentcontract.InvocationContext
 	if inv != nil {

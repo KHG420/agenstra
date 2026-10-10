@@ -1,6 +1,10 @@
 package schema
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestCompileChecksOnlySchemaPositions(t *testing.T) {
 	literal := map[string]any{"$ref": "provider-data", "$id": "provider-id", "$schema": "provider-metadata"}
@@ -36,6 +40,38 @@ func TestValidateNormalizesNumbersWithoutCoercingOtherTypes(t *testing.T) {
 	for _, value := range []any{"1", true, 2} {
 		if err := Validate(contract, value); err == nil {
 			t.Fatal("different JSON value accepted", value)
+		}
+	}
+}
+
+func TestCompileNormalizesTypedJSONDeclarations(t *testing.T) {
+	input := map[string]any{"type": "object", "properties": map[string]any{
+		"count": map[string]any{"type": "integer", "minimum": json.Number("9007199254740993")},
+		"mode":  map[string]any{"enum": []string{"preview", "read"}},
+	}, "required": []string{"count", "mode"}, "additionalProperties": false}
+	contract, err := CompileLocal(input, false)
+	if err != nil {
+		t.Fatal("valid typed JSON declaration failed", err)
+	}
+	if err := Validate(contract, map[string]any{"count": int64(9007199254740993), "mode": "preview"}); err != nil {
+		t.Fatal("normalization changed an exact integer constraint", err)
+	}
+	for _, value := range []map[string]any{
+		{"count": int64(9007199254740992), "mode": "preview"},
+		{"count": int64(9007199254740993), "mode": "unknown"},
+		{"mode": "preview"},
+	} {
+		if Validate(contract, value) == nil {
+			t.Fatal("normalization relaxed a declared constraint", value)
+		}
+	}
+	if _, ok := input["required"].([]string); !ok {
+		t.Fatal("normalization changed caller-owned schema")
+	}
+	for _, keyword := range []string{"anyOf", "allOf", "oneOf"} {
+		_, err := CompileLocal(map[string]any{keyword: []map[string]any{{"$ref": "https://external.invalid/schema"}}}, false)
+		if err == nil || !strings.Contains(err.Error(), "schema requires local references") {
+			t.Fatal("typed branches bypassed the local-reference guard", keyword, err)
 		}
 	}
 }

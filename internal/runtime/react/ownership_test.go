@@ -63,6 +63,48 @@ func TestExecuteCallOwnsArgumentsAndEvidence(t *testing.T) {
 	}
 }
 
+func TestExecuteCallValidatesCustomProviderInput(t *testing.T) {
+	schema := agentcontract.JSON{"type": "object", "properties": agentcontract.JSON{
+		"request": agentcontract.JSON{"type": "object", "properties": agentcontract.JSON{"count": agentcontract.JSON{"type": "integer", "minimum": 0}, "key": agentcontract.JSON{"type": "string"}}, "required": []string{"count", "key"}, "additionalProperties": false},
+	}, "required": []string{"request"}, "additionalProperties": false}
+	for _, tc := range []struct {
+		name string
+		args agentcontract.JSON
+	}{
+		{"missing wrapper", agentcontract.JSON{"count": 0}},
+		{"wrong type", agentcontract.JSON{"request": agentcontract.JSON{"count": "0"}}},
+		{"extra property", agentcontract.JSON{"request": agentcontract.JSON{"count": 0, "extra": true}}},
+		{"negative count", agentcontract.JSON{"request": agentcontract.JSON{"count": -1}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cap := agentcontract.CapabilityDescription{Name: "records.write", InputSchema: schema, Effect: "write", IdempotencyArgument: []string{"request", "key"}}
+			p := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap}}
+			outcome, err := ExecuteCall(t.Context(), p, map[string]bool{cap.Name: true}, agentcontract.ToolCall{Capability: cap.Name, Arguments: tc.args}, &agentcontract.InvocationContext{IdempotencyKey: "trusted-key"})
+			if err != nil || outcome.ErrorCode != "capability_input_invalid" || outcome.Fact != nil || p.called != 0 {
+				t.Fatalf("invalid input reached custom provider: %+v, error=%v, calls=%d", outcome, err, p.called)
+			}
+		})
+	}
+	cap := agentcontract.CapabilityDescription{Name: "records.write", InputSchema: schema, Effect: "write", IdempotencyArgument: []string{"request", "key"}}
+	args := agentcontract.JSON{"request": agentcontract.JSON{"count": 0}}
+	p := &ownershipProvider{coreTestProvider: coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap}}, invoke: func(input agentcontract.JSON) agentcontract.CapabilityResult {
+		if input["request"].(agentcontract.JSON)["key"] != "trusted-key" {
+			t.Fatal("validation ran before trusted idempotency binding", input)
+		}
+		return agentcontract.CapabilityResult{Data: agentcontract.JSON{"count": 0}}
+	}}
+	outcome, err := ExecuteCall(t.Context(), p, map[string]bool{cap.Name: true}, agentcontract.ToolCall{Capability: cap.Name, Arguments: args}, &agentcontract.InvocationContext{IdempotencyKey: "trusted-key"})
+	if err != nil || outcome.Fact == nil || p.called != 1 || args["request"].(agentcontract.JSON)["key"] != nil {
+		t.Fatal("valid input was rejected or caller arguments mutated", outcome, err, p.called, args)
+	}
+	cap.InputSchema = agentcontract.JSON{"type": "invalid-type"}
+	p.caps[cap.Name] = cap
+	outcome, err = ExecuteCall(t.Context(), p, map[string]bool{cap.Name: true}, agentcontract.ToolCall{Capability: cap.Name, Arguments: args}, &agentcontract.InvocationContext{IdempotencyKey: "trusted-key"})
+	if err != nil || outcome.ErrorCode != "capability_input_invalid" || outcome.Fact != nil || p.called != 1 {
+		t.Fatal("invalid declared schema dispatched", outcome, err, p.called)
+	}
+}
+
 func TestExecuteCallRejectsNonJSONBoundaries(t *testing.T) {
 	cap := agentcontract.CapabilityDescription{Name: "records.get", Version: "1", Effect: "read"}
 	p := &ownershipProvider{coreTestProvider: coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap}}, invoke: func(agentcontract.JSON) agentcontract.CapabilityResult {

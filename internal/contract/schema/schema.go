@@ -14,6 +14,19 @@ import (
 
 // CompileLocal compiles a local-only JSON Schema, with optional REST dialect restrictions.
 func CompileLocal(schema map[string]any, strictREST bool) (*jsonschema.Schema, error) {
+	// SDK declarations may use typed Go slices and maps. Compile their JSON
+	// meaning, as Validate does for values, without mutating caller-owned data.
+	raw, err := jsonvalue.Canonical(schema)
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var normalized map[string]any
+	if err := dec.Decode(&normalized); err != nil {
+		return nil, err
+	}
+	schema = normalized
 	var walk func(any) error
 	walk = func(v any) error {
 		switch x := v.(type) {
