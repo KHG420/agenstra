@@ -58,6 +58,9 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 	decisionPacket := false
 	if err := jsonvalue.DecodeStrict(input, &packet); err == nil && packet.Schema == "agenstra.context.v1" {
 		decisionPacket = true
+		if m.DecisionOutputMode != "output_tools" && packet.CompletionReview == nil && len(packet.Skills) == 0 {
+			messages[0] = agentcontract.JSON{"role": "system", "content": jsonDecisionPromptWithoutSkills(prompt)}
+		}
 		history := packet.InspectionHistory
 		if len(history) > 0 {
 
@@ -198,4 +201,17 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		}
 	}
 	return payload, nil
+}
+
+func jsonDecisionPromptWithoutSkills(prompt string) string {
+	// The skill catalog is complete even when capabilities are deferred. Remove
+	// the framework's unavailable skill example, preserving host usage rules.
+	original := prompt
+	prompt = strings.ReplaceAll(prompt, "tool_batch, read_skill, inspect_capability", "tool_batch, inspect_capability")
+	prompt = strings.ReplaceAll(prompt, "Read the relevant skill before using an unfamiliar capability.", "No skills are available in this context; use the capability catalog and inspect_capability for usage contracts.")
+	prompt = strings.ReplaceAll(prompt, `Skill: {"schema":"agenstra.decision.v1","kind":"read_skill","name":"example-analysis"}. `, "")
+	if prompt == original {
+		return prompt
+	}
+	return prompt + "\nCurrent JSON decision availability: read_skill is unavailable. The skills list is complete, including when capabilities are deferred. Capability names identify callable operations, never skills. To call a capability, use tool_batch with its declared arguments; inspect_capability reads its schema. This does not change capability prerequisites or authorization."
 }
