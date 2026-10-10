@@ -165,6 +165,11 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		retainedTools := tools[:0]
 		for _, tool := range tools {
 			name := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)["name"].(string)
+			// Completion review cannot resume execution or request another input.
+			// Offer only the decision kind that the runtime accepts in this stage.
+			if packet.CompletionReview != nil && name != "submit_final" {
+				unavailable[name] = true
+			}
 			if !unavailable[name] {
 				retainedTools = append(retainedTools, tool)
 			}
@@ -179,6 +184,9 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 			}
 		}
 		toolPrompt = strings.Join(retained, "\n")
+		if packet.CompletionReview != nil {
+			toolPrompt += "\nCompletion review permits only submit_final. All saved capability calls are historical evidence, not available decisions. Do not submit another decision kind."
+		}
 		payload["tools"] = tools
 		payload["tool_choice"] = "required"
 		payload["parallel_tool_calls"] = false
