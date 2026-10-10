@@ -53,7 +53,7 @@ func BindIdempotency(call agentcontract.ToolCall, cap agentcontract.CapabilityDe
 }
 
 // ExecuteCall checks catalog access and declared input before invoking a provider with owned arguments.
-// It copies returned evidence and converts provider failures to safe outcome codes.
+// It copies and validates declared output before retaining evidence and converts provider failures to safe outcome codes.
 func ExecuteCall(ctx context.Context, provider agentcontract.CapabilityProvider, grants map[string]bool, call agentcontract.ToolCall, inv *agentcontract.InvocationContext) (agentcontract.CallOutcome, error) {
 	cap, ok := provider.Capabilities()[call.Capability]
 	if !ok {
@@ -104,6 +104,14 @@ func ExecuteCall(ctx context.Context, provider agentcontract.CapabilityProvider,
 	data, err := jsonvalue.Clone(result.Data)
 	if err != nil {
 		return agentcontract.CallOutcome{ErrorCode: "upstream_response_invalid"}, nil
+	}
+	if cap.OutputSchema != nil {
+		schema, err := agentcontract.ValidateLocalSchema(cap.OutputSchema, false)
+		if err != nil || agentcontract.ValidateSchema(schema, data) != nil {
+			// A provider may have committed a write before returning invalid data.
+			// Keep the existing uncertain-outcome code instead of claiming failure.
+			return agentcontract.CallOutcome{ErrorCode: "upstream_response_invalid"}, nil
+		}
 	}
 	scope := "durable"
 	if result.ReferenceScope == "connection" || cap.ReferenceScope == "connection" {

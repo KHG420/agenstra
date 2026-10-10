@@ -137,3 +137,26 @@ func TestSDKExecuteCallChecksDeclaredInputBeforeProvider(t *testing.T) {
 		t.Fatalf("public SDK rejected valid zero: %+v, error=%v, calls=%d", outcome, err, provider.calls)
 	}
 }
+
+type outputRecordProvider struct{ recordProvider }
+
+func (*outputRecordProvider) Capabilities() map[string]agenstra.CapabilityDescription {
+	return map[string]agenstra.CapabilityDescription{"records.get": {
+		Name: "records.get", Effect: "read", OutputSchema: agenstra.JSON{
+			"type": "object", "properties": agenstra.JSON{"id": agenstra.JSON{"type": "string"}}, "required": []string{"id"},
+		},
+	}}
+}
+
+func TestSDKExecuteCallChecksDeclaredOutputBeforeFact(t *testing.T) {
+	provider := &outputRecordProvider{}
+	grants := map[string]bool{"records.get": true}
+	outcome, err := agenstra.ExecuteCall(t.Context(), provider, grants, agenstra.ToolCall{Capability: "records.get", Arguments: agenstra.JSON{"id": 7}}, nil)
+	if err != nil || outcome.ErrorCode != "upstream_response_invalid" || outcome.Fact != nil || provider.calls != 1 {
+		t.Fatalf("public SDK accepted invalid declared output: %+v, error=%v, calls=%d", outcome, err, provider.calls)
+	}
+	outcome, err = agenstra.ExecuteCall(t.Context(), provider, grants, agenstra.ToolCall{Capability: "records.get", Arguments: agenstra.JSON{"id": "R-1"}}, nil)
+	if err != nil || outcome.Fact == nil || outcome.ErrorCode != "" || provider.calls != 2 {
+		t.Fatalf("public SDK rejected valid output: %+v, error=%v, calls=%d", outcome, err, provider.calls)
+	}
+}
