@@ -176,6 +176,82 @@ func TestMemoryExplicitCorrectionTemporaryExceptionsAndForget(t *testing.T) {
 	}
 }
 
+func TestMemoryOneOffExplicitProposalsDoNotChangeDefaults(t *testing.T) {
+	text := "仅操作本轮专属记录 106。先单独读取一次上下文。只执行一次重置。最后仅报告实际回执的编号和状态。不输出执行过程。"
+	model := &memoryTestModel{hostModel: &hostModel{}, extract: func(agentcontract.MemoryExtractionRequest) ([]agentcontract.MemoryProposal, error) {
+		// Replay the real extractor failure: explicit labels for current-task
+		// constraints, including quotes that omit the input's temporal qualifier.
+		return []agentcontract.MemoryProposal{
+			{Scope: "pack", Key: "project.operation.scope", Value: "仅操作本轮专属记录 106", Kind: "constraint", Mode: "explicit", Quote: "仅操作本轮专属记录 106"},
+			{Scope: "pack", Key: "project.operation.sequence", Value: "先单独读取一次上下文", Kind: "constraint", Mode: "explicit", Quote: "先单独读取一次上下文"},
+			{Scope: "pack", Key: "project.operation.api_restriction", Value: "只执行一次重置", Kind: "constraint", Mode: "explicit", Quote: "只执行一次重置"},
+			{Scope: "pack", Key: "report.format", Value: "最后仅报告实际回执的编号和状态", Kind: "preference", Mode: "explicit", Quote: "最后仅报告实际回执的编号和状态"},
+			{Scope: "pack", Key: "report.output.exclusions", Value: "不输出执行过程", Kind: "constraint", Mode: "explicit", Quote: "不输出执行过程"},
+		}, nil
+	}}
+	h, _ := memoryTestHost(t, model)
+	previous, err := h.SetMemory(t.Context(), "alice", "records", agentcontract.MemoryUpdate{Scope: "pack", Key: "report.format", Value: "concise", Kind: "preference"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		run := memoryRun(t, h, "alice", "records", text, fmt.Sprintf("one-off-explicit-%d", i))
+		items, err := h.ListMemories(t.Context(), "alice", "records", 100, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != 1 || items[0].ID != previous.ID || items[0].Value != previous.Value || items[0].Revision != previous.Revision {
+			t.Fatalf("one-off explicit proposal changed durable defaults: %+v", items)
+		}
+		views, err := h.runMemories(run)
+		if err != nil || len(views) != 1 || views[0].Value != previous.Value {
+			t.Fatalf("one-off constraints entered the run memory snapshot: %+v %v", views, err)
+		}
+	}
+}
+
+func TestMemoryExplicitLastingClauseAlongsideTemporaryTask(t *testing.T) {
+	for _, clause := range []string{"以后报告使用中文", "记住：报告使用中文", "From now on use Chinese reports", "Remember: use Chinese reports"} {
+		t.Run(clause, func(t *testing.T) {
+			model := &memoryTestModel{hostModel: &hostModel{}, extract: func(agentcontract.MemoryExtractionRequest) ([]agentcontract.MemoryProposal, error) {
+				return []agentcontract.MemoryProposal{{Scope: "user", Key: "report.language", Value: "zh-CN", Kind: "preference", Mode: "explicit", Quote: clause}}, nil
+			}}
+			h, _ := memoryTestHost(t, model)
+			memoryRun(t, h, "alice", "records", "本轮只处理记录 106。"+clause, "mixed-persistence-intent")
+			items, err := h.ListMemories(t.Context(), "alice", "records", 100, 0)
+			if err != nil || len(items) != 1 || items[0].Status != "active" || items[0].Value != "zh-CN" {
+				t.Fatalf("explicit lasting clause was lost with temporary task: %+v %v", items, err)
+			}
+		})
+	}
+}
+
+func TestMemoryTemporaryExplicitLabelsKeepTemporaryScope(t *testing.T) {
+	for _, text := range []string{"这次报告用英文", "本次报告用英文", "Remember: this time use English", "For this task use English", "For this run use English"} {
+		t.Run(text, func(t *testing.T) {
+			model := &memoryTestModel{hostModel: &hostModel{}, extract: func(r agentcontract.MemoryExtractionRequest) ([]agentcontract.MemoryProposal, error) {
+				return memoryProposal(r, "user", "report.language", "en", "explicit"), nil
+			}}
+			h, _ := memoryTestHost(t, model)
+			previous, err := h.SetMemory(t.Context(), "alice", "records", agentcontract.MemoryUpdate{Scope: "user", Key: "report.language", Value: "zh-CN", Kind: "preference"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range 3 {
+				memoryRun(t, h, "alice", "records", text, fmt.Sprintf("temporary-explicit-%d", i))
+			}
+			current, err := h.GetMemory(t.Context(), "alice", "records", previous.ID)
+			if err != nil || current.Value != previous.Value || current.Revision != previous.Revision {
+				t.Fatalf("temporary explicit label changed the default: %+v %v", current, err)
+			}
+			history, err := h.MemoryHistory(t.Context(), "alice", "records", previous.ID)
+			if err != nil || len(history.Evidence) != 0 || len(history.Revisions) != 1 {
+				t.Fatalf("temporary input accumulated durable evidence: %+v %v", history, err)
+			}
+		})
+	}
+}
+
 func TestMemoryHostManagementIsolationPrecedenceAndConcurrentRevisions(t *testing.T) {
 	h, _ := memoryTestHost(t, &memoryTestModel{hostModel: &hostModel{}, extract: func(agentcontract.MemoryExtractionRequest) ([]agentcontract.MemoryProposal, error) { return nil, nil }})
 	global, err := h.SetMemory(t.Context(), "alice", "records", agentcontract.MemoryUpdate{Scope: "user", Key: "report.language", Value: "zh-CN", Kind: "preference"})

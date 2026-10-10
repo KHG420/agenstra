@@ -243,9 +243,9 @@ func (s *SQLiteStore) ApplyMemoryInput(run agentcontract.StoredRun, input Memory
 				continue
 			}
 
-			// Even when a model misses a temporary qualifier, it cannot count this input
-			// toward a learned habit. Explicit lasting clauses remain eligible.
-			if p.Mode == "habit" && temporaryMemoryInput(input.Text) {
+			// A model's explicit label does not remove the source's temporary scope.
+			// Only a separately supported lasting declaration can outlive that input.
+			if temporaryMemoryInput(input.Text) && (p.Mode == "habit" || p.Mode == "explicit" && !lastingMemoryQuote(p.Quote)) {
 				continue
 			}
 			m, e := scanMemory(tx.QueryRow("SELECT payload FROM memories WHERE owner=? AND scope=? AND topic=?", run.OwnerID, memoryScope(p.Scope, run.PackID), p.Key))
@@ -327,9 +327,28 @@ func (s *SQLiteStore) ApplyMemoryInput(run agentcontract.StoredRun, input Memory
 
 func temporaryMemoryInput(text string) bool {
 	lower := strings.ToLower(text)
-	for _, marker := range []string{"这次", "本次", "临时", "仅此", "this time", "for this task", "just this once", "temporarily"} {
+	for _, marker := range []string{"这次", "本次", "本轮", "临时", "仅此", "this time", "for this task", "for this run", "just this once", "temporarily"} {
 		if strings.Contains(lower, marker) {
 			return true
+		}
+	}
+	return false
+}
+
+func lastingMemoryQuote(quote string) bool {
+	lower := strings.ToLower(quote)
+	for _, marker := range []string{"以后", "今后", "从现在起", "from now on", "going forward", "for future", "in future"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	// A request to remember a this-time exception is still temporary. A separate
+	// remember/default clause can establish persistence alongside the task.
+	if !temporaryMemoryInput(quote) {
+		for _, marker := range []string{"记住", "默认", "remember", "by default"} {
+			if strings.Contains(lower, marker) {
+				return true
+			}
 		}
 	}
 	return false
