@@ -52,8 +52,8 @@ func TestExecuteCallValidatesCustomProviderOutput(t *testing.T) {
 		cap := agentcontract.CapabilityDescription{Name: "records.get", OutputSchema: agentcontract.JSON{"type": "invalid-type"}}
 		p := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap}}
 		outcome, err := ExecuteCall(t.Context(), p, map[string]bool{cap.Name: true}, agentcontract.ToolCall{Capability: cap.Name, Arguments: agentcontract.JSON{}}, nil)
-		if err != nil || outcome.ErrorCode != "upstream_response_invalid" || outcome.Fact != nil || p.called != 1 {
-			t.Fatal("malformed output contract became a success", outcome, err, p.called)
+		if err != nil || outcome.ErrorCode != "upstream_response_invalid" || outcome.Fact != nil || p.called != 0 {
+			t.Fatal("malformed output contract reached provider", outcome, err, p.called)
 		}
 	})
 	t.Run("declared provider failure remains a failure", func(t *testing.T) {

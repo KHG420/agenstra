@@ -133,6 +133,26 @@ func TestExecuteCallRetainsDeclaredOutputContractDuringInvocation(t *testing.T) 
 	}
 }
 
+func TestExecuteCallRejectsInvalidOutputContractBeforeInvocation(t *testing.T) {
+	for _, effect := range []string{"read", "write"} {
+		for name, schema := range map[string]agentcontract.JSON{
+			"invalid type":             {"type": "invalid-type"},
+			"missing local definition": {"$ref": "#/$defs/missing"},
+		} {
+			t.Run(effect+"/"+name, func(t *testing.T) {
+				cap := agentcontract.CapabilityDescription{Name: "records.apply", Version: "1", Effect: effect, OutputSchema: schema}
+				p := &ownershipProvider{coreTestProvider: coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap}}, invoke: func(agentcontract.JSON) agentcontract.CapabilityResult {
+					return agentcontract.CapabilityResult{Data: agentcontract.JSON{"count": 1}}
+				}}
+				outcome, err := ExecuteCall(t.Context(), p, map[string]bool{cap.Name: true}, agentcontract.ToolCall{Capability: cap.Name, Arguments: agentcontract.JSON{}}, nil)
+				if err != nil || outcome.ErrorCode != "upstream_response_invalid" || outcome.Fact != nil || p.called != 0 {
+					t.Fatalf("invalid output contract reached provider: outcome=%+v error=%v calls=%d", outcome, err, p.called)
+				}
+			})
+		}
+	}
+}
+
 func TestExecuteCallRejectsNonJSONBoundaries(t *testing.T) {
 	cap := agentcontract.CapabilityDescription{Name: "records.get", Version: "1", Effect: "read"}
 	p := &ownershipProvider{coreTestProvider: coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap}}, invoke: func(agentcontract.JSON) agentcontract.CapabilityResult {

@@ -9,6 +9,8 @@ import (
 	"errors"
 	"time"
 
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
+
 	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
@@ -99,6 +101,13 @@ func ExecuteCall(ctx context.Context, provider agentcontract.CapabilityProvider,
 	if err != nil {
 		return agentcontract.CallOutcome{ErrorCode: "upstream_response_invalid"}, nil
 	}
+	var outputValidator *jsonschema.Schema
+	if outputSchema != nil {
+		outputValidator, err = agentcontract.ValidateLocalSchema(outputSchema, false)
+		if err != nil {
+			return agentcontract.CallOutcome{ErrorCode: "upstream_response_invalid"}, nil
+		}
+	}
 	result, err := provider.Invoke(ctx, call.Capability, arguments, providerInvocation)
 	if err != nil {
 		return agentcontract.CallOutcome{ErrorCode: "provider_outcome_unknown"}, nil
@@ -113,9 +122,8 @@ func ExecuteCall(ctx context.Context, provider agentcontract.CapabilityProvider,
 	if err != nil {
 		return agentcontract.CallOutcome{ErrorCode: "upstream_response_invalid"}, nil
 	}
-	if outputSchema != nil {
-		schema, err := agentcontract.ValidateLocalSchema(outputSchema, false)
-		if err != nil || agentcontract.ValidateSchema(schema, data) != nil {
+	if outputValidator != nil {
+		if agentcontract.ValidateSchema(outputValidator, data) != nil {
 			// A provider may have committed a write before returning invalid data.
 			// Keep the existing uncertain-outcome code instead of claiming failure.
 			return agentcontract.CallOutcome{ErrorCode: "upstream_response_invalid"}, nil
