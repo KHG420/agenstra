@@ -54,6 +54,76 @@ func TestBrowserProgressCountsActionsWithoutDuplicatePolls(t *testing.T) {
 	}
 }
 
+func TestReconciledBrowserContextKeepsOneCurrentActionResult(t *testing.T) {
+	r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{}}}
+	state, err := r.NewState("Report the verified original result", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "write-1"
+	id := DeterministicInvocationID(state.RunID, ref)
+	unknown, reconciled := agentcontract.NewID(), agentcontract.NewID()
+	state.Facts = []agentcontract.Fact{
+		{FactID: unknown, SourceCapability: "ui.command_status", Value: agentcontract.JSON{"data": agentcontract.JSON{"command_id": id, "status": "unknown"}}},
+		{FactID: reconciled, SourceCapability: "ui.command_status", Quality: "verified_reconciliation", Value: agentcontract.JSON{"data": agentcontract.JSON{"command_id": id, "status": "succeeded", "result": agentcontract.JSON{"count": 1}}}},
+	}
+	state.Observations = []agentcontract.Observation{
+		{CallRef: ref, Capability: "ui.update_record", Status: "succeeded", FactID: agentcontract.Strptr(agentcontract.NewID())},
+		{CallRef: "poll-" + id + "-1", Capability: "ui.command_status", Status: "succeeded", FactID: agentcontract.Strptr(unknown)},
+		{CallRef: ref, Capability: "ui.update_record", Status: "succeeded", FactID: agentcontract.Strptr(reconciled)},
+	}
+	state.ModelObservations = append([]agentcontract.Observation{}, state.Observations...)
+	before, err := agentcontract.CanonicalJSON(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet := r.Context(state)
+	if len(packet.Observations) != 1 || packet.Observations[0].FactID == nil || *packet.Observations[0].FactID != reconciled {
+		t.Errorf("reconciliation left duplicate/stale action evidence: %+v", packet.Observations)
+	}
+	progress := RunProgress(state, 8)
+	if progress.CompletedCount != 1 || len(progress.Completed) != 1 || *progress.Completed[0].FactID != reconciled {
+		t.Errorf("reconciliation counted an obsolete poll as another completion: %+v", progress)
+	}
+	after, err := agentcontract.CanonicalJSON(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("current evidence projection changed immutable history")
+	}
+}
+
+func TestReconciledContextDoesNotSuppressUnrelatedPolls(t *testing.T) {
+	for _, mismatch := range []string{"command", "source", "quality"} {
+		t.Run(mismatch, func(t *testing.T) {
+			state := &agentcontract.RuntimeState{RunID: agentcontract.NewID()}
+			ref := "write-1"
+			id := DeterministicInvocationID(state.RunID, ref)
+			unknown, reconciled := agentcontract.NewID(), agentcontract.NewID()
+			fact := agentcontract.Fact{FactID: reconciled, SourceCapability: "ui.command_status", Quality: "verified_reconciliation", Value: agentcontract.JSON{"data": agentcontract.JSON{"command_id": id}}}
+			switch mismatch {
+			case "command":
+				fact.Value = agentcontract.JSON{"data": agentcontract.JSON{"command_id": "another-command"}}
+			case "source":
+				fact.SourceCapability = "records.read"
+			case "quality":
+				fact.Quality = "observed"
+			}
+			state.Facts = []agentcontract.Fact{{FactID: unknown}, fact}
+			state.Observations = []agentcontract.Observation{
+				{CallRef: "poll-" + id + "-1", Capability: "ui.command_status", Status: "succeeded", FactID: agentcontract.Strptr(unknown)},
+				{CallRef: ref, Capability: "ui.update_record", Status: "succeeded", FactID: agentcontract.Strptr(reconciled)},
+				{CallRef: "another-write", Capability: "ui.update_record", Status: "succeeded", FactID: agentcontract.Strptr(reconciled)},
+			}
+			view := currentEvidenceObservations(state, state.Observations)
+			if len(view) != 3 || *view[1].FactID != reconciled || *view[2].FactID != reconciled {
+				t.Fatal("unrelated poll or a distinct invocation was removed", view)
+			}
+		})
+	}
+}
+
 func TestBrowserReadReceiptsDoNotDisguiseStagnation(t *testing.T) {
 	for _, inspect := range []bool{false, true} {
 		t.Run(fmt.Sprintf("inspect=%t", inspect), func(t *testing.T) {

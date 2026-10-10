@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
+	reactcore "github.com/KHG420/agenstra/internal/runtime/react"
 )
 
 func TestBrowserContextDiagnosticsIdentifyPagePrerequisite(t *testing.T) {
@@ -16,6 +17,52 @@ func TestBrowserContextDiagnosticsIdentifyPagePrerequisite(t *testing.T) {
 	}
 	if finding := ExplainRunError("browser_handler_outcome_unknown", "ui.finish_round"); finding.Category != "reconciliation" {
 		t.Fatalf("uncertain writes must still require reconciliation: %+v", finding)
+	}
+}
+
+func TestDiagnosticsRestoreReconciledFactsForProgress(t *testing.T) {
+	h := testHost(t, testStore(t), &hostProvider{}, &hostModel{})
+	run := createTestHostRun(t, h)
+	state, err := h.Restore(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "write-1"
+	id := reactcore.DeterministicInvocationID(state.RunID, ref)
+	unknown, reconciled := agentcontract.NewID(), agentcontract.NewID()
+	state.Status = "completed"
+	state.Facts = []agentcontract.Fact{
+		{FactID: unknown, SourceCapability: "ui.command_status", Value: agentcontract.JSON{"data": agentcontract.JSON{"command_id": id, "status": "unknown"}}},
+		{FactID: reconciled, SourceCapability: "ui.command_status", Quality: "verified_reconciliation", Value: agentcontract.JSON{"data": agentcontract.JSON{"command_id": id, "status": "succeeded"}}},
+	}
+	state.Observations = []agentcontract.Observation{
+		{CallRef: "poll-" + id + "-1", Capability: "ui.command_status", Status: "succeeded", FactID: agentcontract.Strptr(unknown)},
+		{CallRef: ref, Capability: "ui.update_record", Status: "succeeded", FactID: agentcontract.Strptr(reconciled)},
+	}
+	run, err = h.Store.Claim(run.RunID, "alice", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = h.save(run, state, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, err := h.Get(t.Context(), run.RunID, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := h.GetDiagnostics(t.Context(), run.RunID, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Progress.CompletedCount != 1 || len(report.Progress.Completed) != 1 || *report.Progress.Completed[0].FactID != reconciled {
+		t.Fatalf("diagnostics did not use persisted original completion evidence: %+v", report.Progress)
+	}
+	after, err := h.Get(t.Context(), run.RunID, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Revision != after.Revision {
+		t.Fatal("diagnostic read changed the checkpoint")
 	}
 }
 

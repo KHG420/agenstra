@@ -2,7 +2,6 @@ package host
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
@@ -46,19 +45,15 @@ func (h *AgentHost) GetDiagnostics(ctx context.Context, id, owner string) (agent
 	if err != nil {
 		return agentcontract.RunDiagnostics{}, err
 	}
-	raw, err := agentcontract.CanonicalJSON(run.State["runtime"])
+	state, err := h.Restore(run)
 	if err != nil {
 		return agentcontract.RunDiagnostics{}, err
-	}
-	var state agentcontract.RuntimeState
-	if err := json.Unmarshal(raw, &state); err != nil {
-		return agentcontract.RunDiagnostics{}, agentcontract.NewHostError("run_state_invalid")
 	}
 	end := h.Now()
 	if run.Status == "completed" || run.Status == "failed" || run.Status == "cancelled" {
 		end = run.UpdatedAt
 	}
-	result := agentcontract.RunDiagnostics{Schema: "agenstra.run-diagnostics.v1", RunID: id, Status: run.Status, Revision: run.Revision, ElapsedMS: int64(max(0, end-run.CreatedAt) * 1000), Findings: []agentcontract.DiagnosticFinding{}, Progress: reactcore.RunProgress(&state, h.runSettings(run).MaxStagnantRounds), Budget: telemetry.Budget}
+	result := agentcontract.RunDiagnostics{Schema: "agenstra.run-diagnostics.v1", RunID: id, Status: run.Status, Revision: run.Revision, ElapsedMS: int64(max(0, end-run.CreatedAt) * 1000), Findings: []agentcontract.DiagnosticFinding{}, Progress: reactcore.RunProgress(state, h.runSettings(run).MaxStagnantRounds), Budget: telemetry.Budget}
 	seen := map[string]int{}
 	add := func(f agentcontract.DiagnosticFinding) {
 		key := f.Code + ":" + f.Capability

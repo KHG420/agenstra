@@ -158,13 +158,16 @@ func RunProgress(state *agentcontract.RuntimeState, limit int) *agentcontract.Ru
 // audit observations, but direct model views to the retained result of that same
 // invocation rather than an unavailable queued receipt.
 func currentEvidenceObservations(state *agentcontract.RuntimeState, observations []agentcontract.Observation) []agentcontract.Observation {
-	facts := map[string]bool{}
+	facts := map[string]agentcontract.Fact{}
 	for _, fact := range state.Facts {
-		facts[fact.FactID] = true
+		facts[fact.FactID] = fact
 	}
 	polls := map[string]agentcontract.Observation{}
 	for _, observation := range state.Observations {
-		if observation.FactID == nil || !facts[*observation.FactID] || observation.ErrorCode != nil || !strings.HasPrefix(observation.CallRef, "poll-") {
+		if observation.FactID == nil || observation.ErrorCode != nil || !strings.HasPrefix(observation.CallRef, "poll-") {
+			continue
+		}
+		if _, retained := facts[*observation.FactID]; !retained {
 			continue
 		}
 		end := strings.LastIndex(observation.CallRef, "-")
@@ -172,14 +175,34 @@ func currentEvidenceObservations(state *agentcontract.RuntimeState, observations
 			polls[observation.CallRef[len("poll-"):end]] = observation
 		}
 	}
-	result := append([]agentcontract.Observation{}, observations...)
+	// Reconciliation appends a newer outcome for the original call reference.
+	// Present one current outcome per call without changing the saved history.
+	latest := map[string]int{}
+	for i, observation := range observations {
+		if observation.CallRef != "" {
+			latest[observation.CallRef] = i
+		}
+	}
+	result := make([]agentcontract.Observation, 0, len(observations))
+	for i, observation := range observations {
+		if observation.CallRef == "" || latest[observation.CallRef] == i {
+			result = append(result, observation)
+		}
+	}
 	redundantPolls := map[string]bool{}
 	for i, observation := range result {
 		if observation.FactID == nil || observation.ErrorCode != nil {
 			continue
 		}
-		if poll, ok := polls[DeterministicInvocationID(state.RunID, observation.CallRef)]; ok {
-			if facts[*observation.FactID] && *observation.FactID != *poll.FactID {
+		id := DeterministicInvocationID(state.RunID, observation.CallRef)
+		if poll, ok := polls[id]; ok {
+			if fact, retained := facts[*observation.FactID]; retained && *observation.FactID != *poll.FactID {
+				// A retained original result must not borrow a different Fact. A
+				// verified receipt for this same command supersedes its old poll.
+				commandID, err := agentcontract.ValueAt(fact.Value, []any{"data", "command_id"})
+				if err == nil && commandID == id && fact.SourceCapability == poll.Capability && fact.Quality == "verified_reconciliation" {
+					redundantPolls[poll.CallRef] = true
+				}
 				continue
 			}
 			result[i].FactID = poll.FactID
