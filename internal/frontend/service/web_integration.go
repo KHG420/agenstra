@@ -463,8 +463,14 @@ func (p *browserProvider) Close() error {
 }
 
 // ValidateInvocation checks provider prerequisites without executing the capability; execution rechecks live state after approval.
-func (p *browserProvider) ValidateInvocation(_ context.Context, name string, inv agentcontract.InvocationContext) error {
-	if !strings.HasPrefix(name, "ui.") || name == "ui.get_context" || name == "ui.command_status" {
+func (p *browserProvider) ValidateInvocation(ctx context.Context, name string, inv agentcontract.InvocationContext) error {
+	if !strings.HasPrefix(name, "ui.") {
+		if validator, ok := p.base.(agentcontract.InvocationValidator); ok {
+			return validator.ValidateInvocation(ctx, name, inv)
+		}
+		return nil
+	}
+	if name == "ui.get_context" || name == "ui.command_status" {
 		return nil
 	}
 	binding, err := p.web.Store.binding(inv.OwnerID, inv.RunID)

@@ -573,14 +573,22 @@ func (p *boundProvider) ConcurrentInvocation(name string) bool {
 	return ok && provider.ConcurrentInvocation(name)
 }
 
+// ValidateInvocation preserves optional provider prerequisites before approval.
+func (p *boundProvider) ValidateInvocation(ctx context.Context, name string, inv agentcontract.InvocationContext) error {
+	if validator, ok := p.CapabilityProvider.(agentcontract.InvocationValidator); ok {
+		return validator.ValidateInvocation(ctx, name, inv)
+	}
+	return nil
+}
+
 // BindingID returns the stable connection identity used to detect configuration changes.
 func (p *boundProvider) BindingID() string { return p.binding }
 
 // BoundSubject returns the trusted subject checked when opening the connection.
 func (p *boundProvider) BoundSubject() string { return p.subject }
 
-// BindProvider preserves a provider's concurrency guarantee and attaches the
-// trusted connection identity established by deployment wiring.
+// BindProvider preserves provider preflight and concurrency guarantees and
+// attaches the trusted connection identity established by deployment wiring.
 func BindProvider(provider agentcontract.CapabilityProvider, binding, subject string) agentcontract.CapabilityProvider {
 	return &boundProvider{CapabilityProvider: provider, binding: binding, subject: subject}
 }
