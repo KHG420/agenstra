@@ -167,6 +167,7 @@ func ResolveArgument(value any, facts map[string]Fact, connectionID string, chec
 }
 
 // Reject records a failed model observation without dispatching a provider call.
+// Nil args mark unavailable arguments; an explicit empty map records known empty input.
 func Reject(state *RuntimeState, callRef, capability, code string, args map[string]any, factID string) {
 	react.Reject(state, callRef, capability, code, args, factID)
 }

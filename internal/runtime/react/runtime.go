@@ -473,16 +473,19 @@ func (r *AgentRuntime) Context(state *agentcontract.RuntimeState) agentcontract.
 }
 
 // Reject records a failed model observation without dispatching a provider call.
+// Nil args mark unavailable arguments; an explicit empty map records known empty input.
 func Reject(state *agentcontract.RuntimeState, callRef, capability, code string, args map[string]any, factID string) {
+	omitted := args == nil
 	if args == nil {
 		args = agentcontract.JSON{}
 	}
-	obs := agentcontract.Observation{CallRef: callRef, Capability: capability, Status: "rejected", ErrorCode: agentcontract.Strptr(code), FactID: agentcontract.Strptr(factID), Arguments: args}
+	obs := agentcontract.Observation{CallRef: callRef, Capability: capability, Status: "rejected", ErrorCode: agentcontract.Strptr(code), FactID: agentcontract.Strptr(factID), Arguments: args, ArgumentsOmitted: omitted}
 	state.Observations = append(state.Observations, obs)
 	state.ModelObservations = append(state.ModelObservations, obs)
 }
 
 // Reject records a failed model observation without dispatching the call.
+// Nil args mark unavailable arguments; an explicit empty map records known empty input.
 func (r *AgentRuntime) Reject(state *agentcontract.RuntimeState, callRef, capability, code string, args map[string]any, factID string) {
 	Reject(state, callRef, capability, code, args, factID)
 }

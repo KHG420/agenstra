@@ -27,7 +27,7 @@ func TestOperationFailureFeedbackKeepsBusinessAndUnknownOutcomesDistinct(t *test
 				return
 			}
 			observation := state.ModelObservations[0]
-			if item.Status != "failed" || *observation.ErrorCode != "operation_failed" || *observation.FactID != fact.FactID || len(observation.Arguments) != 0 {
+			if item.Status != "failed" || *observation.ErrorCode != "operation_failed" || *observation.FactID != fact.FactID || len(observation.Arguments) != 0 || !observation.ArgumentsOmitted {
 				t.Fatal("business failure lost its evidence or received browser retry advice", observation)
 			}
 		})
