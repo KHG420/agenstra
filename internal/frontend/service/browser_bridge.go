@@ -539,7 +539,10 @@ func (w *WebIntegration) CompleteBrowserCommand(owner, id, key string, generatio
 	if status != "succeeded" && !agentcontract.SafeCodePattern.MatchString(errorCode) {
 		return c, agentcontract.NewHostError("browser_result_invalid")
 	}
-	if status == "succeeded" {
+	if status == "succeeded" && errorCode != "" {
+		return c, agentcontract.NewHostError("browser_result_invalid")
+	}
+	if status == "succeeded" || result != nil {
 		p, e := w.frontend(c.ProfileDigest)
 		if e != nil {
 			return c, e

@@ -288,6 +288,8 @@ stateDiagram-v2
 
 SDK 执行前保存 command，执行后保存结果，再提交 ACK。ACK 丢失时重发原结果，不重跑 handler。服务端以 invocation ID 去重。刷新递增 generation，同一 owner、会话和 profile 的任务后续调用绑定同步到新代数，并清除旧页面观察版本，模型须重新读取 `ui.get_context`。SDK 在恢复请求前保存 `request_id`，响应丢失或网关失败后保留同一身份；重新加载后重试可取得同一次恢复的当前会话，不另开会话或再次清除页面与命令。只有原 owner、key、generation 和最后一次请求身份匹配时允许重试；后续恢复、会话关闭和 profile 改变仍会阻断旧请求。省略 `request_id` 的旧客户端保留原 generation 协议。旧 queued/dispatched 动作取消，旧 running 变 unknown；原 generation 的缓存结果可确认原动作，并恢复同一个 operation。确认 ACK 后的恢复待办也会持久保留，以便重试网络和 revision 错误。
 
+`succeeded` 回执的 `error_code` 必须为空；`failed` 和 `unknown` 必须提供已有格式约束的安全错误码，可以不带 `result`。任何状态携带的非空 `result` 都须符合原动作的 `output_schema`，且 JSON 编码不超过 65,536 字节。宿主须在输出契约中限定可供模型查看的字段；失败或不确定状态同样不能绕过该契约传入未声明字段或超限数据。非法回执返回 `browser_result_invalid`，不会改写已保存的命令。合法的 `unknown` 仍可由原命令的真实回执补齐为成功或确定失败。
+
 页面读取或同步在发送 begin 请求前失败时，SDK 报告错误并移除本次尚未认领的本地记录，允许同步恢复后继续投递原命令；此时没有执行 handler，也不提交 unknown 业务结果。begin 请求一旦尝试发送，丢失响应仍保留 unknown，不能自动重跑。SDK 在 handler 返回时复制结果，后续页面状态变化不改写原回执；结果无法复制时仍视为未知，不能把已经执行的动作当作未执行。已缓存回执的重试错误通过 SDK 的 error 事件报告，并保留回执。
 
 心跳先重试缓存回执及 ACK 后的恢复工作，再同步当前页面。即使 `getPageObservation` 持续抛错或页面观察上传失败，已经完成的动作仍可确认并恢复原任务，不重跑 handler；新的动作仍须等待页面同步成功。
