@@ -67,6 +67,29 @@ func TestInputValidationFeedbackIdentifiesMissingWrapper(t *testing.T) {
 	}
 }
 
+func TestInputValidationFeedbackOffersLiteralTagsWithoutRewritingCall(t *testing.T) {
+	cap := agentcontract.CapabilityDescription{Name: "records.manage", Effect: "write", InputSchema: taggedInputSchema("anyOf")}
+	provider := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap}}
+	r := &AgentRuntime{Provider: provider, Grants: map[string]bool{cap.Name: true}}
+	s := &agentcontract.RuntimeState{RunID: "run", Status: "queued", Instruction: "Update a record"}
+	args := agentcontract.JSON{"kind": "records.update", "arguments": agentcontract.JSON{"id": 1}}
+	obs := agentcontract.Observation{CallRef: "update-1", Capability: cap.Name, Status: "failed", ErrorCode: agentcontract.Strptr("capability_input_invalid"), Arguments: args}
+	s.Observations, s.ModelObservations = []agentcontract.Observation{obs}, []agentcontract.Observation{obs}
+	r.Model = decisionModelFunc(func(_ context.Context, _ agentcontract.ContextPacket, prompt string) (agentcontract.Decision, error) {
+		if !strings.Contains(prompt, `at "/kind"`) || !strings.Contains(prompt, `allowed literal values: "list", "update"`) ||
+			!strings.Contains(prompt, "matching arguments schema") {
+			t.Fatal("model did not receive actionable literal tag feedback", prompt)
+		}
+		return agentcontract.Decision{Kind: "inspect_capability", Name: cap.Name}, nil
+	})
+	if err := r.Step(t.Context(), s, nil); err != nil {
+		t.Fatal(err)
+	}
+	if provider.called != 0 || len(s.Pending) != 0 || s.Observations[0].Arguments["kind"] != "records.update" || args["kind"] != "records.update" {
+		t.Fatal("diagnostic rewrote or executed the rejected call", s)
+	}
+}
+
 func TestUnknownCapabilityFeedbackKeepsRuntimeDecisionsSeparate(t *testing.T) {
 	cap := agentcontract.CapabilityDescription{Name: "records.list", Effect: "read"}
 	provider := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap, "private.delete": {Name: "private.delete", Effect: "destructive"}}}

@@ -1,6 +1,7 @@
 package react
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -46,7 +47,28 @@ func TestInputValidationFeedbackUnknownUnionTag(t *testing.T) {
 			if !strings.Contains(feedback, `at "/kind"`) || !strings.Contains(feedback, "not supported by this capability") || strings.Contains(feedback, "private-input-marker") || strings.Contains(feedback, "must be 'list'") {
 				t.Fatal("unknown tag was mistaken for an unrelated field error or leaked input", feedback)
 			}
+			if !strings.Contains(feedback, `allowed literal values: "list", "update"`) {
+				t.Fatal("unknown tag feedback omitted the contract's allowed values", feedback)
+			}
 		})
+	}
+}
+
+func TestInputValidationFeedbackBoundsDeclaredTagChoices(t *testing.T) {
+	schema := taggedInputSchema("anyOf")
+	branch := schema["anyOf"].([]any)[0].(agentcontract.JSON)
+	branches := []any{}
+	for i := 0; i < 40; i++ {
+		tag := fmt.Sprintf("choice-%02d-%s", i, strings.Repeat("名", 30))
+		branches = append(branches, agentcontract.JSON{"type": "object", "required": branch["required"],
+			"properties": agentcontract.JSON{"kind": agentcontract.JSON{"const": tag}}})
+	}
+	schema["anyOf"] = branches
+	feedback := inputValidationFeedback(schema, agentcontract.JSON{"kind": "private-input-marker"})
+	if !strings.Contains(feedback, "choice-00-") || !strings.Contains(feedback, "of 40 shown") ||
+		strings.Contains(feedback, "choice-39-") || strings.Contains(feedback, "private-input-marker") ||
+		utf8.RuneCountInString(feedback) > 1000 {
+		t.Fatal("declared choices were missing, unbounded or leaked rejected input", feedback)
 	}
 }
 

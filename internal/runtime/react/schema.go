@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
@@ -92,7 +93,24 @@ func taggedInputDiagnostic(compiled *jsonschema.Schema, arguments agentcontract.
 		}
 		if selected == nil {
 			path := "/" + strings.NewReplacer("~", "~0", "/", "~1").Replace(name)
-			return compiled, fmt.Sprintf("at %q: discriminator value is not supported by this capability; inspect its declared variants or another authorized capability before constructing arguments. This rejection did not execute the business operation and does not prove that the host lacks it.", path)
+			tags := make([]string, 0, len(seen))
+			for tag := range seen {
+				tags = append(tags, tag)
+			}
+			slices.Sort(tags)
+			choices := []string{}
+			for _, tag := range tags {
+				quoted := fmt.Sprintf("%q", tag)
+				if utf8.RuneCountInString(strings.Join(choices, ", ")+", "+quoted) > 400 {
+					break
+				}
+				choices = append(choices, quoted)
+			}
+			hint := "allowed literal values: " + strings.Join(choices, ", ")
+			if len(choices) != len(tags) {
+				hint += fmt.Sprintf(" (%d of %d shown; inspect the full input_schema for all values)", len(choices), len(tags))
+			}
+			return compiled, fmt.Sprintf("at %q: discriminator value is not supported by this capability; %s. Use a literal declared value and its matching arguments schema, or inspect another authorized capability. This rejection did not execute the business operation and does not prove that the host lacks it.", path, hint)
 		}
 		narrowed := *compiled
 		if len(compiled.AnyOf) != 0 {
