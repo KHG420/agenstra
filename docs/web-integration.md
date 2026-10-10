@@ -271,6 +271,8 @@ SDK 的 `id()` 在没有 `crypto.randomUUID` 的 HTTP 页面使用 `crypto.getRa
 
 模型先读取 `ui.get_context`；SDK 在执行前刷新页面观察数据。服务端 begin 检查 generation、revision、当前授权、取消状态和审批参数，只有一次认领允许执行。动作初始 receipt 只表示已接收；现有 Host 异步轮询得到实际结果。完成回执的 Fact 来源为 `ui.command_status`，回执位于 `data`，业务输出位于 `data.result`；例如对象 ID 引用使用路径 `["data", "result", "id"]`。成功断言应同时核对完成回执的 `data.status` 和实际业务字段，不能要求初始动作 Fact 含完成结果。参数 `$fact_value` 和最终 `result_refs` 都从完整 Fact 的真实路径解析；最终引用只接受已引用 Fact 中实际存在的标量业务 ID。无需对象引用时可以省略 `result_refs`。引用不合法会给模型纠正反馈，校验要求保持不变。
 
+业务对象引用接受非空字符串和整数值。字符串 ID 保留原文；保留为 JSON 数字的整数按精确数值生成十进制 ID，例如 `42.0` 和 `4.2e1` 都解析为 `"42"`，精确大整数不会先转成浮点数。非整数值（如 `1.5`）被拒绝，解析后的 ID 仍受 256 字节上限约束。已经以 `float64` 提供的数字继续要求处于安全整数范围；引用解析不会恢复上游已丢失的精度。拒绝使用已有 `final_result_refs_invalid` 反馈及原有决策预算，模型可用现有证据纠正回答，无需重复业务调用。服务端校验结构化输出、拒绝非整数并避免大整数浮点转换的取舍参考 [Pydantic AI 的输出校验](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_output.py#L973-L989)及其 [Pydantic Core 数值校验](https://github.com/pydantic/pydantic-core/blob/383eb95a19433754c0cecf7025b50c26b6d97a36/src/input/shared.rs#L144-L155)。Agenstra 沿用自己的证据解析与纠正路径。
+
 ```mermaid
 stateDiagram-v2
     [*] --> queued

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
+	"strings"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
@@ -28,7 +30,29 @@ func resolveResultRefs(requests []agentcontract.ResultRefRequest, cited []string
 		case string:
 			id = v
 		case json.Number:
-			id = v.String()
+			if len(v.String()) > 256 || !json.Valid([]byte(v.String())) {
+				return nil, fmt.Errorf("final_result_refs_invalid")
+			}
+			bounded, err := v.Float64()
+			if err != nil {
+				return nil, fmt.Errorf("final_result_refs_invalid")
+			}
+			if bounded == 0 {
+				// Distinguish exact zero from a nonzero fraction that underflowed.
+				mantissa, _, _ := strings.Cut(strings.ToLower(v.String()), "e")
+				if strings.Trim(mantissa, "-0.") != "" {
+					return nil, fmt.Errorf("final_result_refs_invalid")
+				}
+				id = "0"
+				break
+			}
+			// Float64 above only bounds exponent work. Resolve the exact value,
+			// without rounding a fractional or large integer business identity.
+			exact, ok := new(big.Rat).SetString(v.String())
+			if !ok || !exact.IsInt() {
+				return nil, fmt.Errorf("final_result_refs_invalid")
+			}
+			id = exact.Num().String()
 		case int:
 			id = fmt.Sprint(v)
 		case int64:
