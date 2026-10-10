@@ -2,6 +2,26 @@
 
 默认采用独立服务：原软件保留登录、业务权限与业务数据库；Agenstra 负责模型决策、上下文、任务执行、审批和恢复。宿主通过 HTTP 提交任务，Agenstra 通过 REST 或 MCP 调用已经授权的业务接口。只有页面函数需要接入的 Web 软件可以使用纯浏览器模式，无需额外提供占位 REST/MCP 能力包。Go 软件也可将运行库嵌入原进程。
 
+## 使用开发者的 coding agent
+
+开发者可使用 Codex、Claude Code 或 DeepSeek Harness 完成接入。本仓库提供 [agenstra-integrate-host Skill](../.agents/skills/agenstra-integrate-host/SKILL.md)，指导 agent 调查宿主的原操作、生成契约、绑定已有业务函数和身份、完成本地验收。它复用本页的 CLI/SDK，不需要启动第二个 coding agent，也不改变框架运行内核。
+
+从选定的 Agenstra 版本复制整个 `.agents/skills/agenstra-integrate-host/` 目录（包含 `references/`）到宿主仓库：
+
+| Coding agent | 宿主内的 Skill 目录 | 调用方式 |
+| --- | --- | --- |
+| Codex | `.agents/skills/agenstra-integrate-host/` | `$agenstra-integrate-host` |
+| Claude Code | `.claude/skills/agenstra-integrate-host/` | `/agenstra-integrate-host` |
+| DeepSeek Harness | `.agents/skills/agenstra-integrate-host/` 或 `.dsh/skills/agenstra-integrate-host/` | 在会话中明确要求使用该 Skill，并确认当前技能目录已加载 |
+
+Skill 只使用通用的 `name`、`description` frontmatter 和相对引用；无需覆盖宿主原有 `AGENTS.md`、`CLAUDE.md` 或全局设置。目标目录已有同名 Skill 时先审查版本差异，保留宿主已有定制。安装后检查 agent 的技能目录或显式调用，确认加载的是所选版本；自动发现与调用受 agent 的版本和设置影响。加载路径依据 [Codex 文档](https://learn.chatgpt.com/docs/build-skills)、[Claude Code 文档](https://code.claude.com/docs/en/skills) 和 [DSH skill-filesystem 文档](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/skill/skill-filesystem/README.md)；DSH 尚处于 developer preview，使用前核对本地插件与版本。
+
+可直接交给 agent 的任务示例：
+
+> 使用 agenstra-integrate-host Skill，把 Agenstra 接入当前 Web 应用的指定业务操作。使用我选定的 Agenstra 源码目录和版本，复用原登录、权限、业务函数与测试设施，生成真实接入代码并完成本地验收；说明测试结果和未验证部分。
+
+Skill 提供工作流指导；接入是否完成仍由宿主测试、真实业务证据和框架验收工具判定。MCP 可在后续需要统一工具接口时封装这些现有工具；当前 Skill 可以直接通过 agent 的 shell 使用它们。开发期指导与运行期能力包内的业务技能分开维护。
+
 ## 1. 启动服务
 
 按[部署指南](deployment.md)准备模型网关、持久盘和 `deployment.json`，启动 `agenstra-serve --config deployment.json`。需要接入管理界面时，配置 `management`；需要聊天入口时，配置 `web_integration.chat`。页面动作另行开启 `browser_bridge`。
