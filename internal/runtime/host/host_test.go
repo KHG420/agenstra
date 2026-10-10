@@ -703,6 +703,15 @@ func TestHostModelRepairCheckpoint(t *testing.T) {
 	}
 }
 
+type pythonFingerprintProvider struct {
+	*capabilitypack.RestPack
+	prompt string
+}
+
+// Pin the historical prompt so these fixtures test cross-language hashing,
+// independently of changes to the current model instructions.
+func (p pythonFingerprintProvider) SystemPrompt() string { return p.prompt }
+
 func TestPythonProviderFingerprintCompatibility(t *testing.T) {
 	provider, err := capabilitypack.LoadRestPack("testdata/rest-v2.json", map[string]string{"RECORDS_URL": "https://records.example"}, nil)
 	if err != nil {
@@ -717,7 +726,15 @@ func TestPythonProviderFingerprintCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := Fingerprint(provider); got != strings.TrimSpace(string(want)) {
+	rawPrompt, err := os.ReadFile("testdata/python-system-prompt.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prompt string
+	if err := agentcontract.DecodeDocument(string(rawPrompt), &prompt); err != nil {
+		t.Fatal(err)
+	}
+	if got := Fingerprint(pythonFingerprintProvider{provider, prompt}); got != strings.TrimSpace(string(want)) {
 		t.Fatalf("Python fingerprint mismatch: got %s want %s", got, want)
 	}
 }
@@ -736,7 +753,15 @@ func TestPythonOperationFingerprintCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := Fingerprint(provider); got != strings.TrimSpace(string(want)) {
+	rawPrompt, err := os.ReadFile("testdata/python-system-prompt.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prompt string
+	if err := agentcontract.DecodeDocument(string(rawPrompt), &prompt); err != nil {
+		t.Fatal(err)
+	}
+	if got := Fingerprint(pythonFingerprintProvider{provider, prompt}); got != strings.TrimSpace(string(want)) {
 		t.Fatalf("Python operation fingerprint mismatch: got %s want %s", got, want)
 	}
 }

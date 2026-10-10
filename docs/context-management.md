@@ -63,6 +63,8 @@ utf8.RuneCountInString(systemPrompt) + utf8.RuneCount(CanonicalJSON(packet))
 
 Fact 预览计算对象和数组的结构开销以及标量替代值。整体能放下时保留原值；过大的数组保留最多 32 个原始位置的样本，遗漏的数组元素可用带路径标记的 `null` 占位；无法容纳的对象字段直接省略，避免被误认作真实的 `null` 或空值。其余缺失部分通过 `omitted_paths` 明示。过大的字符串不截成貌似完整的引文。
 
+需要精确统计返回数组的元素数、且宿主没有提供同口径的数量字段时，通用提示要求检查该数组路径，并使用 `inspect_fact` 已有的 `array_length`；即使预览完整，也不让模型逐项估算。长度由框架从已获准给模型查看的完整数组计算，不重发业务查询，不新增字段或宿主接线。它只表示所检查数组的长度，不能替代分页 `total`、账单数量或其他业务统计。这个取舍沿用成熟 Agent 将精确计算交给工具执行的方式（例如 [smolagents 的代码执行结果](https://github.com/huggingface/smolagents/blob/c30b115286e000e98711fae5e85993547b73d826/src/smolagents/agents.py#L1714-L1734)），Agenstra 使用已有的受限事实检查，不引入代码执行器。提示有助于模型选择可信数量依据，最终是否符合任务仍需独立验收。
+
 零预算仍需要 `{}` 作为合法对象，最小为两个字符，并用 JSON 根路径 `[]` 表示整个值被省略。`omitted_paths`、Fact 元数据的大小由整个上下文包的预算另行计算。
 
 完整恢复沿用已有决策：
