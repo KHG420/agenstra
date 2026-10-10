@@ -167,7 +167,15 @@ func (p *MCPPack) Invoke(ctx context.Context, name string, args map[string]any, 
 	if err != nil {
 		return agentcontract.CapabilityResult{ErrorCode: "provider_outcome_unknown"}, nil
 	}
-	if reply["isError"] == true {
+	var isError bool
+	if flag, present := reply["isError"]; present {
+		var valid bool
+		isError, valid = flag.(bool)
+		if !valid {
+			return agentcontract.CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
+		}
+	}
+	if isError {
 		var selected any = reply["structuredContent"]
 		for _, key := range p.Manifest.ErrorCodePath {
 			m, ok := selected.(map[string]any)

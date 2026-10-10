@@ -14,7 +14,7 @@ import (
 )
 
 func TestMCPInvalidWriteReceiptPausesWithoutReplaying(t *testing.T) {
-	for _, responseCase := range []string{"incomplete-sse", "missing-version", "wrong-version", "result-and-null-error", "request-with-result"} {
+	for _, responseCase := range []string{"incomplete-sse", "missing-version", "wrong-version", "result-and-null-error", "request-with-result", "string-error-flag", "null-error-flag", "object-error-flag"} {
 		t.Run(responseCase, func(t *testing.T) { testMCPInvalidWriteReceipt(t, responseCase) })
 	}
 }
@@ -62,6 +62,12 @@ func testMCPInvalidWriteReceipt(t *testing.T, responseCase string) {
 				reply["error"] = nil
 			case "request-with-result":
 				reply["method"] = "ping"
+			case "string-error-flag":
+				result["isError"] = "true"
+			case "null-error-flag":
+				result["isError"] = nil
+			case "object-error-flag":
+				result["isError"] = agentcontract.JSON{}
 			}
 			w.Header().Set("Content-Type", "application/json")
 			if callErr10 := json.NewEncoder(w).Encode(reply); callErr10 != nil {
@@ -102,6 +108,13 @@ func testMCPInvalidWriteReceipt(t *testing.T, responseCase string) {
 		}
 		if writes.Load() != 1 {
 			t.Fatalf("business operation replayed: %d", writes.Load())
+		}
+		state, err := host.Restore(run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(state.Facts) != 0 || len(state.Pending) != 1 || state.Pending[0].Status != "unknown" || state.Pending[0].Receipt == nil || state.Pending[0].Receipt.Status != "unknown" {
+			t.Fatal("invalid write receipt became confirmed execution evidence", state.Pending)
 		}
 	}
 }

@@ -263,6 +263,8 @@ Streamable HTTP 的 SSE 响应按事件边界组装多行 `data:`，收到当前
 
 stdio、HTTP JSON 和 SSE 的业务回执都须声明 `jsonrpc: "2.0"`，并且只能包含 `result` 或 `error` 中的一项；`result` 与 `error: null` 同时出现也不合法。无效协议消息不能作为已确认的业务结果。
 
+MCP 工具结果的 `isError` 可以省略；出现时必须是布尔值。字符串、数值、`null` 或其他类型返回 `upstream_response_invalid`，不会生成成功 Fact；已发出的写操作仍沿用不确定结果核对规则。
+
 特殊 SDK 可实现 `CapabilityProvider`：提供 `Capabilities()`、`Skills()`、`SystemPrompt()`、`Invoke(ctx, name, arguments, invocationContext)` 和 `Close()`，由调用方应用构造按用户隔离的 `ProviderFactory` 传给 `AgentHost`。Provider 负责对输入和返回做验证，返回结构化 `CapabilityResult` 或安全错误码；不要让原始异常、密钥或不可信响应正文进入模型或审计文本。具体协议类型见 [Go Provider 接口](../sdk/go/providers.go)，持久 Host 接入见 [Go Host 接口](../sdk/go/host.go)。
 
 完成接入后，用真实 API 和模型验证授权、结果字段、错误情况、数据是否允许送模型、提交幂等、等待恢复与最终回答；自动化测试只能证明框架边界，不能代替具体场景验收。
