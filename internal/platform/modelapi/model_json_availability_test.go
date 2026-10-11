@@ -68,19 +68,28 @@ func TestJSONAvailabilityPreservesExistingSkillsAndMemory(t *testing.T) {
 	}
 	model := &HTTPJSONDecisionModel{Model: "test", DecisionOutputMode: "json_object"}
 	for _, tc := range []struct {
-		raw    []byte
-		prompt string
+		raw      []byte
+		prompt   string
+		decision bool
 	}{
-		{input, prompt},
-		{review, jsonCompletionReviewPrompt(prompt)},
-		{[]byte(`{"text":"remember my preference","existing":[]}`), prompt},
+		{input, prompt, true},
+		{review, jsonCompletionReviewPrompt(prompt), true},
+		{[]byte(`{"text":"remember my preference","existing":[]}`), prompt, false},
 	} {
 		payload, err := model.requestPayload(tc.raw, prompt)
 		if err != nil {
 			t.Fatal(err)
 		}
 		messages := payload["messages"].([]any)
-		if messages[0].(agentcontract.JSON)["content"] != tc.prompt || messages[1].(agentcontract.JSON)["content"] != string(tc.raw) {
+		got := messages[0].(agentcontract.JSON)["content"].(string)
+		if tc.decision {
+			if !strings.HasPrefix(got, tc.prompt+"\n\n") || !strings.Contains(got, "apply to final.answer_markdown only") {
+				t.Fatal("decision prompt lost existing phase guidance or display boundary")
+			}
+		} else if got != tc.prompt {
+			t.Fatal("decision display guidance changed a memory request")
+		}
+		if messages[1].(agentcontract.JSON)["content"] != string(tc.raw) {
 			t.Fatal("request prompt changed outside its phase or caller context was mutated")
 		}
 	}
@@ -89,7 +98,8 @@ func TestJSONAvailabilityPreservesExistingSkillsAndMemory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if payload["messages"].([]any)[0].(agentcontract.JSON)["content"] != customPrompt {
-		t.Fatal("transport rewrote a custom prompt without the framework skill guidance")
+	got := payload["messages"].([]any)[0].(agentcontract.JSON)["content"].(string)
+	if !strings.HasPrefix(got, customPrompt+"\n\n") || !strings.Contains(got, "apply to final.answer_markdown only") {
+		t.Fatal("transport lost a custom decision prompt or display boundary")
 	}
 }

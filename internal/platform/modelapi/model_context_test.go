@@ -148,7 +148,8 @@ func TestModelContextWindowReservesOutputAndCountsSerializedInput(t *testing.T) 
 	}
 	r, state, _ := contextBudgetRuntime(t, 30000)
 	r.Model = m
-	r.ModelContextWindowTokens = 2500
+	// Leave room for the decision protocol while still requiring Fact projection.
+	r.ModelContextWindowTokens = 2800
 	r.ModelOutputReserveTokens = 128
 	r.ModelProtocolReserveTokens = 64
 	for i := 0; i < 12; i++ {
@@ -158,7 +159,7 @@ func TestModelContextWindowReservesOutputAndCountsSerializedInput(t *testing.T) 
 		t.Fatal(err)
 	}
 	c := state.ContextTelemetry
-	if requests != 1 || c.TokenMeasurementSource != "tokenizer" || c.InputTokens == nil || *c.InputTokens > 2308 || *c.EffectiveInputTokenLimit != 2308 || *c.ReservedOutputTokens != 128 || c.TokensRemaining == nil {
+	if requests != 1 || c.TokenMeasurementSource != "tokenizer" || c.InputTokens == nil || *c.InputTokens > 2608 || *c.EffectiveInputTokenLimit != 2608 || *c.ReservedOutputTokens != 128 || c.TokensRemaining == nil || c.Strategy != "projection" {
 		t.Fatalf("%+v requests=%d", c, requests)
 	}
 	var callErr4 error

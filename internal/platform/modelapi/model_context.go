@@ -60,10 +60,11 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		decisionPacket = true
 		if m.DecisionOutputMode != "output_tools" {
 			if packet.CompletionReview != nil {
-				messages[0] = agentcontract.JSON{"role": "system", "content": jsonCompletionReviewPrompt(prompt)}
+				prompt = jsonCompletionReviewPrompt(prompt)
 			} else if len(packet.Skills) == 0 {
-				messages[0] = agentcontract.JSON{"role": "system", "content": jsonDecisionPromptWithoutSkills(prompt)}
+				prompt = jsonDecisionPromptWithoutSkills(prompt)
 			}
+			messages[0] = agentcontract.JSON{"role": "system", "content": prompt + "\n\nUser requests for prose, Markdown, JSON, code or tables apply to final.answer_markdown only; they never replace the agenstra.decision.v1 JSON decision object. Put the requested display format inside that string. For a final decision, keep literal fields schema, kind, answer_markdown and fact_ids; serialize requested JSON business data as escaped text in answer_markdown, never as the top-level decision. Keep supporting evidence identifiers in fact_ids and result_refs."}
 		}
 		history := packet.InspectionHistory
 		if len(history) > 0 {
