@@ -245,7 +245,7 @@ func (m *ModelManager) Check(ctx context.Context, id, purpose string, config *ag
 		_, result.Metrics, err = model.ExtractMemoriesMeasured(ctx, agentcontract.MemoryExtractionRequest{Text: "Remember: all my reports should use Chinese."})
 	} else {
 		var d agentcontract.Decision
-		d, err = model.Decide(ctx, agentcontract.ContextPacket{}, `Return JSON only. This is a synthetic protocol check, with no business tools. Return exactly {"kind":"final","answer_markdown":"ok","fact_ids":[]}.`)
+		d, err = model.Decide(ctx, agentcontract.ContextPacket{Schema: "agenstra.context.v1"}, `This is a synthetic protocol check, with no business capabilities. Return a final decision with answer_markdown set to "ok" and fact_ids set to an empty array, using the configured output protocol.`)
 		if d.ModelCall != nil {
 			result.Metrics = *d.ModelCall
 		}

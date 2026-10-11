@@ -85,7 +85,7 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 控制台可以对当前草稿发送一条合成的决策或记忆提取请求，也可以验证尚未保存的配置。检查只做一次传输尝试，不执行宿主能力、不写入用户记忆，不计入某个业务任务预算，但会产生所选 API 的模型费用。
 
-检查结果包含 passed、错误码和分项调用指标。HTTP 200 不是通过标准：响应还需符合 Chat Completions envelope、完整 JSON 及框架决策/记忆契约。JSON 后附 DSML 标签、空内容、错误结构和截断响应均不能通过。通过一个合成样本不能证明业务成功率、审批正确性或长期输出稳定性。
+检查结果包含 passed、错误码和分项调用指标。决策检查使用所选配置的实际输出协议：`json_object` 检查 JSON 内容，`output_tools` 声明并选择 `submit_decision`，只返回普通 JSON 不能证明工具输出支持；记忆提取继续检查 JSON 内容。HTTP 200 不是通过标准：响应还需符合 Chat Completions envelope、完整 JSON 及框架决策/记忆契约。JSON 后附 DSML 标签、空内容、错误结构和截断响应均不能通过。通过一个合成样本不能证明业务成功率、审批正确性或长期输出稳定性。
 
 业务运行继续保留原有严格解析与有界纠正，不截取 JSON 前缀或剥除协议片段。`ModelCallMetrics.format_error` 区分 `model_response_invalid`、`model_output_empty`、`model_output_invalid_json`、`model_output_protocol_mismatch`、`model_decision_schema_invalid` 和 `model_memory_schema_invalid`。外层 `model_decision_invalid` 及既有纠正规则保持可用；诊断接口展示具体原因和后续成功纠正的记录。
 
