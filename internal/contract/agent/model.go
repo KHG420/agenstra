@@ -169,9 +169,9 @@ func NotifyModelRequest(ctx context.Context, p ModelRequestProgress) error {
 	return nil
 }
 
-// ValidDecisionOutputMode checks the supported JSON and tool-call decision output modes.
+// ValidDecisionOutputMode checks the supported decision output transports.
 func ValidDecisionOutputMode(mode string) bool {
-	return mode == "" || mode == "json_object" || mode == "output_tools"
+	return mode == "" || mode == "json_object" || mode == "json_schema" || mode == "output_tools"
 }
 
 // ModelConfiguration contains connection references, never resolved API keys.

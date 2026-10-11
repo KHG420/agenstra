@@ -15,11 +15,14 @@ func TestModelCheckUsesSelectedOutputProtocol(t *testing.T) {
 		name, mode, purpose, content, tool, arguments, want string
 	}{
 		{"json decision", "json_object", "decision", final, "", "", ""},
+		{"native schema decision", "json_schema", "decision", `{"schema":"agenstra.decision.v1","kind":"final","answer_markdown":"ok","fact_ids":[]}`, "", "", ""},
+		{"native schema missing identity", "json_schema", "decision", final, "", "", "model_decision_schema_invalid"},
 		{"typed decision", "output_tools", "decision", "", "submit_decision", final, ""},
 		{"plain JSON cannot prove typed support", "output_tools", "decision", final, "", "", "model_output_tool_calls_invalid"},
 		{"undeclared typed output", "output_tools", "decision", final, "submit_final", `{"answer_markdown":"ok","fact_ids":[]}`, "model_output_tool_calls_invalid"},
 		{"typed malformed arguments", "output_tools", "decision", "", "submit_decision", `{"kind":"final","answer_markdown":"ok","fact_ids":"[]"}`, "model_decision_schema_invalid"},
 		{"memory retains JSON", "output_tools", "memory_extraction", `{"proposals":[]}`, "", "", ""},
+		{"native profile memory retains JSON", "json_schema", "memory_extraction", `{"proposals":[]}`, "", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requests := 0
@@ -44,8 +47,14 @@ func TestModelCheckUsesSelectedOutputProtocol(t *testing.T) {
 					if err != nil || string(choice) != `{"function":{"name":"submit_decision"},"type":"function"}` || payload["parallel_tool_calls"] != false || payload["response_format"] != nil {
 						t.Error("check changed selected output transport", string(choice), err)
 					}
-				} else if payload["tools"] != nil || payload["tool_choice"] != nil || payload["response_format"].(map[string]any)["type"] != "json_object" {
-					t.Error("JSON or memory check changed output channel", payload)
+				} else {
+					format := "json_object"
+					if tc.mode == "json_schema" && tc.purpose == "decision" {
+						format = "json_schema"
+					}
+					if payload["tools"] != nil || payload["tool_choice"] != nil || payload["response_format"].(map[string]any)["type"] != format {
+						t.Error("JSON or memory check changed output channel", payload)
+					}
 				}
 				message := agentcontract.JSON{"content": tc.content}
 				if tc.tool != "" {

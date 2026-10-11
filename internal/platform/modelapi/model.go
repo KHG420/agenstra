@@ -361,7 +361,17 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	if strings.TrimSpace(envelope.Choices[0].Message.Content) == "" {
 		return nil, invalidModelOutput(ctx, "model_output_empty")
 	}
-	return unwrapModelJSON([]byte(envelope.Choices[0].Message.Content)), nil
+	body = unwrapModelJSON([]byte(envelope.Choices[0].Message.Content))
+	if format := payload["response_format"].(agentcontract.JSON); format["type"] == "json_schema" {
+		if len(envelope.Choices[0].Message.ToolCalls) != 0 {
+			return nil, invalidModelOutput(ctx, "model_output_tool_calls_invalid")
+		}
+		descriptor := format["json_schema"].(agentcontract.JSON)
+		if detail := validateNativeDecisionOutput(body, descriptor["schema"].(agentcontract.JSON)); detail != "" {
+			return nil, invalidModelOutput(ctx, detail)
+		}
+	}
+	return body, nil
 }
 
 // unwrapModelJSON removes only a complete outer Markdown fence. It does not

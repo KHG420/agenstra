@@ -160,7 +160,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		}
 		payload[field] = m.MaxOutputTokens
 	}
-	if m.DecisionOutputMode == "output_tools" && decisionPacket {
+	if (m.DecisionOutputMode == "output_tools" || m.DecisionOutputMode == "json_schema") && decisionPacket {
 		tools := decisionOutputTools(packet.CompletionReview != nil)
 		if packet.CompletionReview == nil && len(packet.Skills) == 0 {
 			prompt = jsonDecisionPromptWithoutSkills(prompt)
@@ -186,6 +186,12 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 			}
 		}
 		tools = retainedTools
+		if m.DecisionOutputMode == "json_schema" {
+			payload["response_format"] = agentcontract.JSON{"type": "json_schema", "json_schema": agentcontract.JSON{
+				"name": "agenstra_decision", "strict": false, "schema": nativeDecisionOutputSchema(tools),
+			}}
+			return payload, nil
+		}
 		lines := strings.Split(toolPrompt, "\n")
 		retained := lines[:0]
 		for _, line := range lines {
