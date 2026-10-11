@@ -352,7 +352,7 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		}
 	}
 	if usesOutputTools {
-		raw, detail := decisionOutputToolBody(envelope.Choices[0].Message.ToolCalls)
+		raw, detail := decisionOutputToolBody(envelope.Choices[0].Message.ToolCalls, payload["tools"].([]any))
 		if detail != "" {
 			return nil, invalidModelOutput(ctx, detail)
 		}

@@ -73,7 +73,7 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 `output_tools` 的提示同时区分用户要求的展示格式与决策协议：用户需要的 JSON、代码块、表格或普通文字放在 `final.answer_markdown` 字符串中，普通决策和完成复核仍通过 `submit_decision` 输出。缺少输出工具的普通消息继续被拒绝，不把其中的 JSON 或文字自动转成决策；提示本身不能保证网关或模型遵守协议。
 
-输出函数名必须与当前请求声明的 `submit_decision` 完全一致。`submit_final`、`submit_tool_batch` 等未声明名称即使携带有效参数也会被拒绝，不转换为决策或派发业务调用；拒绝仍保留模型用量，并沿用原有的有界格式纠正与预算。这与 Pydantic AI 按当轮可用工具名查找、再校验输出参数的方式一致（[固定版本源码](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/tool_manager.py)）。
+输出函数名必须与当前请求声明的 `submit_decision` 完全一致；参数中的 `kind` 也必须属于该请求实际声明的决策联合。没有技能时返回 `read_skill`、没有搜索功能时返回 `search_capabilities`，或在完成复核阶段返回非 `final`，均在模型适配器内按格式错误拒绝，不交给运行内核尝试。`submit_final`、`submit_tool_batch` 等未声明名称即使携带有效参数也会被拒绝，不转换为决策或派发业务调用；拒绝仍保留模型用量，并沿用原有的有界格式纠正与预算。这与 Pydantic AI 按当轮可用工具名查找、再校验输出参数的方式一致（[固定版本源码](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/tool_manager.py)）。
 
 网关仍可能在 `parallel_tool_calls=false` 时返回多个输出工具。框架拒绝整个响应，在原有纠正次数与预算内明确反馈每轮只能有一个输出工具，包括检查 Fact 时也须逐轮进行，不选择其中一个执行或自动合并。类型化输出的纠正提示移除旧内容 JSON 示例，保留字段、引用和完成复核约束。明确反馈多个结构化输出的参考实现见 [LangChain](https://github.com/langchain-ai/langchain/blob/007cc15b713cea17df63ba603aca6c7b27086638/libs/langchain_v1/langchain/agents/factory.py#L1287-L1308)。
 

@@ -2,6 +2,7 @@ package modelapi
 
 import (
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 
@@ -169,7 +170,7 @@ func decisionOutputFieldBindings(completionReview bool) []string {
 // decisionOutputToolBody selects the typed output channel and assigns local call identities.
 // Business arguments are preserved without coercion; optional model labels are validated.
 // Local decision and runtime validation still follow before any capability executes.
-func decisionOutputToolBody(calls []decisionOutputToolCall) ([]byte, string) {
+func decisionOutputToolBody(calls []decisionOutputToolCall, tools []any) ([]byte, string) {
 	if len(calls) != 1 || calls[0].Type != "function" || calls[0].Function.Name != "submit_decision" {
 		return nil, "model_output_tool_calls_invalid"
 	}
@@ -185,9 +186,21 @@ func decisionOutputToolBody(calls []decisionOutputToolCall) ([]byte, string) {
 	if err := json.Unmarshal(fields["kind"], &kind); err != nil {
 		return nil, "model_decision_schema_invalid"
 	}
-	switch kind {
-	case "tool_batch", "final", "request_input", "search_capabilities", "read_skill", "inspect_capability", "inspect_fact":
-	default:
+	// Resolve availability from the actual request, including stage, skills and
+	// runtime features. Recognizing a kind globally does not declare it here.
+	declared := false
+	for _, tool := range tools {
+		function := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)
+		if function["name"] != calls[0].Function.Name {
+			continue
+		}
+		parameters := function["parameters"].(agentcontract.JSON)
+		properties := parameters["properties"].(agentcontract.JSON)
+		kinds := properties["kind"].(agentcontract.JSON)["enum"].([]string)
+		declared = slices.Contains(kinds, kind)
+		break
+	}
+	if !declared {
 		return nil, "model_decision_schema_invalid"
 	}
 	delete(fields, "kind")
