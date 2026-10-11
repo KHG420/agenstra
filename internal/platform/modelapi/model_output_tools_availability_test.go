@@ -5,7 +5,64 @@ import (
 	"testing"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
+	"github.com/KHG420/agenstra/internal/ext/capability"
 )
+
+func TestOutputToolsSkillGuidanceMatchesAvailableDecisions(t *testing.T) {
+	const hostRule = "Read page context before each host action. Do not repeat a successful write."
+	prompt := capability.AgentPrompt(hostRule)
+	for _, tc := range []struct {
+		name   string
+		skills []agentcontract.JSON
+	}{
+		{name: "absent"},
+		{name: "empty", skills: []agentcontract.JSON{}},
+		{name: "declared", skills: []agentcontract.JSON{{"name": "pack.guide"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := &HTTPJSONDecisionModel{Model: "test", DecisionOutputMode: "output_tools"}
+			packet := agentcontract.ContextPacket{Schema: "agenstra.context.v1", Skills: tc.skills, CapabilityCatalogTotal: 20}
+			input, err := agentcontract.CanonicalJSON(packet)
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, err := model.requestPayload(input, prompt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			messages := payload["messages"].([]any)
+			got := messages[0].(agentcontract.JSON)["content"].(string)
+			wantSkills := len(tc.skills) > 0
+			if strings.Contains(got, "tool_batch, read_skill,") != wantSkills || strings.Contains(got, "Read the relevant skill before") != wantSkills || (outputDecisionSchemas(t, payload)["read_skill"] != nil) != wantSkills {
+				t.Fatal("skill usage instructions and output schema disagree about current availability")
+			}
+			if !wantSkills && !strings.Contains(got, "read_skill is unavailable") {
+				t.Fatal("unavailable skill guidance is missing")
+			}
+			for _, rule := range []string{hostRule, "Call submit_decision exactly once", "runtime separately validates and authorizes capability calls", "tool_batch: required", "inspect_capability: required", "final: required"} {
+				if !strings.Contains(got, rule) {
+					t.Fatalf("required protocol or host rule missing: %q", rule)
+				}
+			}
+			assertSingleDecisionOutputRequest(t, payload)
+			if messages[1].(agentcontract.JSON)["content"] != string(input) {
+				t.Fatal("skill availability changed cumulative evidence")
+			}
+			raw, err := agentcontract.CanonicalJSON(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			measurement, err := model.MeasureInput(packet, prompt)
+			if err != nil || measurement.Tokens != int64(len(raw)+128) {
+				t.Fatal("measurement and actual request differ", measurement, err)
+			}
+			after, err := agentcontract.CanonicalJSON(packet)
+			if err != nil || string(after) != string(input) {
+				t.Fatal("skill availability mutated caller context")
+			}
+		})
+	}
+}
 
 func TestDecisionOutputToolsSearchMatchesRuntimeFeature(t *testing.T) {
 	for _, tc := range []struct {

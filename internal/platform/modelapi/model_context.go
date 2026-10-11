@@ -161,6 +161,9 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 	}
 	if m.DecisionOutputMode == "output_tools" && decisionPacket {
 		tools := decisionOutputTools(packet.CompletionReview != nil)
+		if packet.CompletionReview == nil && len(packet.Skills) == 0 {
+			prompt = jsonDecisionPromptWithoutSkills(prompt)
+		}
 		toolPrompt := decisionOutputToolPrompt(prompt, packet.CompletionReview != nil)
 
 		// Skill availability is complete even with deferred capabilities. Search
@@ -233,5 +236,5 @@ func jsonDecisionPromptWithoutSkills(prompt string) string {
 	if prompt == original {
 		return prompt
 	}
-	return prompt + "\nCurrent JSON decision availability: read_skill is unavailable. The skills list is complete, including when capabilities are deferred. Capability names identify callable operations, never skills. To call a capability, use tool_batch with its declared arguments; inspect_capability reads its schema. This does not change capability prerequisites or authorization."
+	return prompt + "\nCurrent decision availability: read_skill is unavailable. The skills list is complete, including when capabilities are deferred. Capability names identify callable operations, never skills. To call a capability, use tool_batch with its declared arguments; inspect_capability reads its schema. This does not change capability prerequisites or authorization."
 }

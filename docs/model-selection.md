@@ -87,7 +87,7 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 业务运行继续保留原有严格解析与有界纠正，不截取 JSON 前缀或剥除协议片段。`ModelCallMetrics.format_error` 区分 `model_response_invalid`、`model_output_empty`、`model_output_invalid_json`、`model_output_protocol_mismatch`、`model_decision_schema_invalid` 和 `model_memory_schema_invalid`。外层 `model_decision_invalid` 及既有纠正规则保持可用；诊断接口展示具体原因和后续成功纠正的记录。
 
-JSON 内容模式在普通决策上下文的技能列表为空时，不再提供框架的 `read_skill` 示例或要求读取技能，并明确区分技能与可调用能力。这沿用类型化工具模式按当前可用集合提供决策的原则，参考 [Pydantic AI 对当前工具集合的过滤](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/models/openai.py#L1583-L1620)；能力仍须遵守原有契约、前置条件和授权。已有技能、完成复核及记忆提取的提示保持各自语义。动态提示同样纳入请求输入测量，不保证模型必然遵守，运行内核继续拒绝不存在的技能。
+JSON 内容和类型化工具模式在普通决策上下文的技能列表为空时，都不再提供框架的 `read_skill` 示例或要求读取技能，并明确区分技能与可调用能力；类型化工具的使用提示与当轮输出 Schema 保持一致。这沿用按当前可用集合提供决策的原则，参考 [Pydantic AI 对当前工具集合的过滤](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/models/openai.py#L1583-L1620)；能力仍须遵守原有契约、前置条件和授权。已有技能、完成复核及记忆提取的提示保持各自语义。动态提示同样纳入请求输入测量，不保证模型必然遵守，运行内核继续拒绝不存在的技能。
 
 JSON 内容输出的首次决策说明与格式纠正说明都提供本地 `call_ref` 的现有约束：`^[a-z][a-z0-9-]{0,63}$`。模型可以使用 `read-1`、`read-2` 等新引用；能力名称、操作名称和参数值继续遵守各自契约，包括操作名称里的大写字母。这个引用仅用于本次运行的调用身份，框架仍严格校验。`output_tools` 由适配器分配本地引用，业务参数与事实引用不作类型转换或自动修复。提供输出约束及有界纠正的取舍参考 [Pydantic AI 的输出契约提示](https://github.com/pydantic/pydantic-ai/blob/721c78d6014f197c595a9c2a83789aa4dbf6d008/pydantic_ai_slim/pydantic_ai/_output.py#L722-L733) 和 [校验错误转为重试反馈](https://github.com/pydantic/pydantic-ai/blob/721c78d6014f197c595a9c2a83789aa4dbf6d008/pydantic_ai_slim/pydantic_ai/_output.py#L124-L126)。Agenstra 沿用自己的安全错误码和恢复预算。
 
