@@ -598,12 +598,41 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			if last.ErrorCode != nil && *last.ErrorCode == "capability_unknown" {
 				prompt += fmt.Sprintf("\nYour previous call to %q used an unavailable capability name and was not executed. Use only literal names from the current authorized capability catalog. read_skill, inspect_capability, inspect_fact and search_capabilities are standalone decision kinds, never business calls inside tool_batch. Use search_capabilities only when runtime_features includes capability_search; inspect a matching contract before constructing its arguments. Do not guess aliases or infer lack of permission from an unknown name.", last.Capability)
 			}
-			if last.ErrorCode != nil && *last.ErrorCode == "capability_input_invalid" {
-				prompt += fmt.Sprintf("\nYour previous call to %q failed its input contract. Inspect its full input_schema and repair the failing structure before retrying. ToolCall.arguments contains the capability input; any nested arguments object declared by that schema must also be preserved. Do not infer a business validation cause from this error.", last.Capability)
-				if cap, ok := r.Provider.Capabilities()[last.Capability]; ok && cap.InputSchema != nil {
-					arguments := last.Arguments
+			validationFailure := &last
+			steered := false
+			for _, followup := range packet.Followups {
+				steered = steered || strings.HasPrefix(followup, "steering: ")
+			}
+			if !steered && review == nil {
+				// An unrelated observation must not erase a still-unresolved input
+				// diagnostic. A later call to that capability supersedes it.
+				validationFailure = nil
+				seen := map[string]bool{}
+				for i := len(state.ModelObservations) - 1; i >= 0; i-- {
+					observation := &state.ModelObservations[i]
+					if seen[observation.Capability] {
+						continue
+					}
+					seen[observation.Capability] = true
+					if !r.Grants[observation.Capability] {
+						continue
+					}
+					if observation.Status == "failed" && observation.ErrorCode != nil && *observation.ErrorCode == "capability_input_invalid" {
+						validationFailure = observation
+						break
+					}
+				}
+			}
+			if validationFailure != nil && validationFailure.ErrorCode != nil && *validationFailure.ErrorCode == "capability_input_invalid" {
+				position := "previous"
+				if validationFailure.CallRef != last.CallRef {
+					position = "earlier"
+				}
+				prompt += fmt.Sprintf("\nYour %s call to %q failed its input contract. Inspect its full input_schema and repair the failing structure before retrying. ToolCall.arguments contains the capability input; any nested arguments object declared by that schema must also be preserved. Do not infer a business validation cause from this error.", position, validationFailure.Capability)
+				if cap, ok := r.Provider.Capabilities()[validationFailure.Capability]; ok && cap.InputSchema != nil {
+					arguments := validationFailure.Arguments
 					for _, observation := range state.Observations {
-						if observation.CallRef == last.CallRef {
+						if observation.CallRef == validationFailure.CallRef {
 							arguments = observation.Arguments
 						}
 					}

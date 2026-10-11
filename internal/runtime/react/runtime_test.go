@@ -67,6 +67,76 @@ func TestInputValidationFeedbackIdentifiesMissingWrapper(t *testing.T) {
 	}
 }
 
+func TestInputValidationFeedbackSurvivesUnrelatedObservations(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		projected      bool
+		laterStatus    string
+		laterError     string
+		steered        bool
+		revoked        bool
+		expectFeedback bool
+	}{
+		{name: "unrelated read", expectFeedback: true},
+		{name: "projected arguments", projected: true, expectFeedback: true},
+		{name: "same capability succeeded", laterStatus: "succeeded"},
+		{name: "same capability has another error", laterStatus: "failed", laterError: "operation_failed"},
+		{name: "new user steering", steered: true},
+		{name: "capability grant revoked", revoked: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cap := agentcontract.CapabilityDescription{Name: "records.create", Effect: "write", InputSchema: agentcontract.JSON{"type": "object", "properties": agentcontract.JSON{"arguments": agentcontract.JSON{"type": "object"}}, "required": []any{"arguments"}, "additionalProperties": false}}
+			observe := agentcontract.CapabilityDescription{Name: "page.observe", Effect: "read", InputSchema: agentcontract.JSON{"type": "object"}}
+			provider := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap, observe.Name: observe}}
+			r := &AgentRuntime{Provider: provider, Grants: map[string]bool{cap.Name: true, observe.Name: true}}
+			failed := agentcontract.Observation{CallRef: "create-1", Capability: cap.Name, Status: "failed", ErrorCode: agentcontract.Strptr("capability_input_invalid"), Arguments: agentcontract.JSON{"request": agentcontract.JSON{}}}
+			observations := []agentcontract.Observation{failed}
+			if tc.laterStatus != "" {
+				later := agentcontract.Observation{CallRef: "create-2", Capability: cap.Name, Status: tc.laterStatus, Arguments: agentcontract.JSON{"arguments": agentcontract.JSON{}}}
+				if tc.laterError != "" {
+					later.ErrorCode = agentcontract.Strptr(tc.laterError)
+				}
+				observations = append(observations, later)
+			}
+			observations = append(observations, agentcontract.Observation{CallRef: "observe-1", Capability: observe.Name, Status: "succeeded", Arguments: agentcontract.JSON{}})
+			s := &agentcontract.RuntimeState{RunID: "run", Status: "queued", Instruction: "Create a record", Observations: observations, ModelObservations: append([]agentcontract.Observation(nil), observations...)}
+			if tc.projected {
+				s.ModelObservations[0].Arguments = agentcontract.JSON{}
+				s.ModelObservations[0].ArgumentsOmitted = true
+			}
+			if tc.steered {
+				s.Followups = []string{"steering: Read another record instead."}
+			}
+			if tc.revoked {
+				r.Grants[cap.Name] = false
+			}
+			r.Model = decisionModelFunc(func(_ context.Context, _ agentcontract.ContextPacket, prompt string) (agentcontract.Decision, error) {
+				hasFeedback := strings.Contains(prompt, "Local input schema validation errors (contract data):") && strings.Contains(prompt, "missing property 'arguments'")
+				if hasFeedback != tc.expectFeedback {
+					t.Fatalf("input validation feedback present = %v, want %v", hasFeedback, tc.expectFeedback)
+				}
+				if tc.projected && !strings.Contains(prompt, "'request'") {
+					t.Fatal("feedback did not use the stored original arguments")
+				}
+				if strings.Contains(prompt, "file://") {
+					t.Fatal("feedback exposed the validator's local schema URL")
+				}
+				name := cap.Name
+				if tc.revoked {
+					name = observe.Name
+				}
+				return agentcontract.Decision{Kind: "inspect_capability", Name: name}, nil
+			})
+			if err := r.Step(t.Context(), s, nil); err != nil {
+				t.Fatal(err)
+			}
+			if provider.called != 0 || len(failed.Arguments) != 1 || failed.Arguments["request"] == nil {
+				t.Fatal("feedback dispatched a call or rewrote saved arguments")
+			}
+		})
+	}
+}
+
 func TestInputValidationFeedbackOffersLiteralTagsWithoutRewritingCall(t *testing.T) {
 	cap := agentcontract.CapabilityDescription{Name: "records.manage", Effect: "write", InputSchema: taggedInputSchema("anyOf")}
 	provider := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{cap.Name: cap}}
