@@ -170,16 +170,7 @@ func decisionOutputFieldBindings(completionReview bool) []string {
 // Business arguments are preserved without coercion; optional model labels are validated.
 // Local decision and runtime validation still follow before any capability executes.
 func decisionOutputToolBody(calls []decisionOutputToolCall) ([]byte, string) {
-	if len(calls) != 1 || calls[0].Type != "function" {
-		return nil, "model_output_tool_calls_invalid"
-	}
-	kind := strings.TrimPrefix(calls[0].Function.Name, "submit_")
-	switch calls[0].Function.Name {
-	case "submit_decision":
-	case "submit_tool_call":
-		kind = "tool_batch"
-	case "submit_tool_batch", "submit_final", "submit_request_input", "submit_search_capabilities", "submit_read_skill", "submit_inspect_capability", "submit_inspect_fact":
-	default:
+	if len(calls) != 1 || calls[0].Type != "function" || calls[0].Function.Name != "submit_decision" {
 		return nil, "model_output_tool_calls_invalid"
 	}
 	raw := []byte(calls[0].Function.Arguments)
@@ -190,26 +181,18 @@ func decisionOutputToolBody(calls []decisionOutputToolCall) ([]byte, string) {
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		return nil, "model_decision_schema_invalid"
 	}
-	if calls[0].Function.Name == "submit_decision" {
-		if err := json.Unmarshal(fields["kind"], &kind); err != nil {
-			return nil, "model_decision_schema_invalid"
-		}
-		switch kind {
-		case "tool_batch", "final", "request_input", "search_capabilities", "read_skill", "inspect_capability", "inspect_fact":
-		default:
-			return nil, "model_decision_schema_invalid"
-		}
-		delete(fields, "kind")
-	}
-	if fields["kind"] != nil || fields["schema"] != nil {
+	var kind string
+	if err := json.Unmarshal(fields["kind"], &kind); err != nil {
 		return nil, "model_decision_schema_invalid"
 	}
-	if calls[0].Function.Name == "submit_tool_call" {
-		batch, err := json.Marshal([]map[string]json.RawMessage{fields})
-		if err != nil {
-			return nil, "model_decision_schema_invalid"
-		}
-		fields = map[string]json.RawMessage{"calls": batch}
+	switch kind {
+	case "tool_batch", "final", "request_input", "search_capabilities", "read_skill", "inspect_capability", "inspect_fact":
+	default:
+		return nil, "model_decision_schema_invalid"
+	}
+	delete(fields, "kind")
+	if fields["schema"] != nil {
+		return nil, "model_decision_schema_invalid"
 	}
 	if kind == "tool_batch" {
 		var proposed []map[string]json.RawMessage

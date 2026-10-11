@@ -53,7 +53,7 @@ func TestModelSelectionPinsBothPurposesAndSurvivesRestart(t *testing.T) {
 		}
 		message := agentcontract.JSON{"content": content}
 		if payload["tools"] != nil {
-			message = agentcontract.JSON{"tool_calls": []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_final", "arguments": `{"answer_markdown":"ok","fact_ids":[]}`}}}}
+			message = agentcontract.JSON{"tool_calls": []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_decision", "arguments": content}}}}
 		}
 		if callErr3 := json.NewEncoder(w).Encode(agentcontract.JSON{"usage": agentcontract.JSON{"prompt_tokens": 100, "completion_tokens": 10}, "choices": []any{agentcontract.JSON{"message": message}}}); callErr3 != nil {
 			t.Error(callErr3)

@@ -14,32 +14,32 @@ import (
 )
 
 func TestDecisionOutputToolsRejectMalformedOutput(t *testing.T) {
-	valid := `{"answer_markdown":"line 1\nline 2","fact_ids":[]}`
+	valid := `{"kind":"final","answer_markdown":"line 1\nline 2","fact_ids":[]}`
 	cases := []struct {
 		name, tool, arguments, content, finish, want string
 		count                                        int
 	}{
-		{"final", "submit_final", valid, "ignored non-executable commentary", "tool_calls", "", 1},
+		{"final", "submit_decision", valid, "ignored non-executable commentary", "tool_calls", "", 1},
 		{"no output tool", "", "", valid, "stop", "model_decision_invalid", 0},
 		{"user JSON without output tool", "", "", `{"subject":"preview","html":"<p>preview</p>"}`, "stop", "model_decision_invalid", 0},
-		{"multiple", "submit_final", valid, "", "tool_calls", "model_decision_invalid", 2},
+		{"multiple", "submit_decision", valid, "", "tool_calls", "model_decision_invalid", 2},
 		{"unknown tool", "submit_other", valid, "", "tool_calls", "model_decision_invalid", 1},
-		{"kind mismatch", "submit_tool_batch", valid, "", "tool_calls", "model_decision_invalid", 1},
-		{"stringified ids", "submit_final", `{"answer_markdown":"ok","fact_ids":"[]"}`, "", "tool_calls", "model_decision_invalid", 1},
-		{"duplicate keys", "submit_final", `{"answer_markdown":"ok","fact_ids":[],"fact_ids":[]}`, "", "tool_calls", "model_decision_invalid", 1},
-		{"truncated", "submit_final", valid, "", "length", "model_output_truncated", 1},
-		{"unknown field", "submit_final", `{"answer_markdown":"ok","fact_ids":[],"execute":true}`, "", "tool_calls", "model_decision_invalid", 1},
-		{"bad ref", "submit_tool_batch", `{"calls":[{"call_ref":"Get-1","capability":"x","arguments":{},"reason":"read"}]}`, "", "tool_calls", "model_decision_invalid", 1},
-		{"stringified batch", "submit_tool_batch", `{"calls":"[{\"call_ref\":\"read-1\",\"capability\":\"x\",\"arguments\":{},\"reason\":\"read\"}]"}`, "", "tool_calls", "model_decision_invalid", 1},
-		{"single bad ref", "submit_tool_call", `{"call_ref":"Get-1","capability":"x","arguments":{},"reason":"read"}`, "", "tool_calls", "model_decision_invalid", 1},
-		{"single stringified arguments", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":"{}","reason":"read"}`, "", "tool_calls", "model_decision_invalid", 1},
-		{"single unknown field", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read","execute":true}`, "", "tool_calls", "model_decision_invalid", 1},
-		{"single schema override", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read","schema":"agenstra.decision.v1"}`, "", "tool_calls", "model_decision_invalid", 1},
-		{"single kind override", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read","kind":"final"}`, "", "tool_calls", "model_decision_invalid", 1},
-		{"single duplicate key", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read","reason":"write"}`, "", "tool_calls", "model_decision_invalid", 1},
-		{"single batch wrapper", "submit_tool_call", `{"calls":[{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read"}]}`, "", "tool_calls", "model_decision_invalid", 1},
-		{"single multiple outputs", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read"}`, "", "tool_calls", "model_decision_invalid", 2},
-		{"single truncated", "submit_tool_call", `{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read"}`, "", "length", "model_output_truncated", 1},
+		{"kind mismatch", "submit_decision", `{"kind":"tool_batch","answer_markdown":"ok","fact_ids":[]}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"stringified ids", "submit_decision", `{"kind":"final","answer_markdown":"ok","fact_ids":"[]"}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"duplicate keys", "submit_decision", `{"kind":"final","answer_markdown":"ok","fact_ids":[],"fact_ids":[]}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"truncated", "submit_decision", valid, "", "length", "model_output_truncated", 1},
+		{"unknown field", "submit_decision", `{"kind":"final","answer_markdown":"ok","fact_ids":[],"execute":true}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"bad ref", "submit_decision", `{"kind":"tool_batch","calls":[{"call_ref":"Get-1","capability":"x","arguments":{},"reason":"read"}]}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"stringified batch", "submit_decision", `{"kind":"tool_batch","calls":"[{\"call_ref\":\"read-1\",\"capability\":\"x\",\"arguments\":{},\"reason\":\"read\"}]"}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single bad ref", "submit_decision", `{"kind":"tool_batch","calls":[{"call_ref":"Get-1","capability":"x","arguments":{},"reason":"read"}]}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single stringified arguments", "submit_decision", `{"kind":"tool_batch","calls":[{"call_ref":"read-1","capability":"x","arguments":"{}","reason":"read"}]}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single unknown field", "submit_decision", `{"kind":"tool_batch","calls":[{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read","execute":true}]}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single schema override", "submit_decision", `{"kind":"tool_batch","calls":[{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read","schema":"agenstra.decision.v1"}]}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single kind override", "submit_decision", `{"kind":"tool_batch","calls":[{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read","kind":"final"}]}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single duplicate key", "submit_decision", `{"kind":"tool_batch","calls":[{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read","reason":"write"}]}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single batch wrapper", "submit_decision", `{"kind":"tool_batch","calls":[{"calls":[{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read"}]}]}`, "", "tool_calls", "model_decision_invalid", 1},
+		{"single multiple outputs", "submit_decision", `{"kind":"tool_batch","calls":[{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read"}]}`, "", "tool_calls", "model_decision_invalid", 2},
+		{"single truncated", "submit_decision", `{"kind":"tool_batch","calls":[{"call_ref":"read-1","capability":"x","arguments":{},"reason":"read"}]}`, "", "length", "model_output_truncated", 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -81,15 +81,15 @@ func TestDecisionOutputToolsRejectMalformedOutput(t *testing.T) {
 
 func TestDecisionOutputToolsPreserveSingleAndBatchCalls(t *testing.T) {
 	call := `{"call_ref":"read-1","capability":"pack.read","arguments":{"operation":"GetByID","arguments":{"id":2,"values":[true,"line 1\nline 2",null]}},"reason":"Read the requested object"}`
-	for _, name := range []string{"submit_tool_call", "submit_tool_batch"} {
+	for _, name := range []string{"single", "batch"} {
 		t.Run(name, func(t *testing.T) {
-			arguments := call
-			if name == "submit_tool_batch" {
-				arguments = `{"calls":[` + call + `,` + strings.Replace(call, "read-1", "read-2", 1) + `]}`
+			arguments := `{"kind":"tool_batch","calls":[` + call + `]}`
+			if name == "batch" {
+				arguments = `{"kind":"tool_batch","calls":[` + call + `,` + strings.Replace(call, "read-1", "read-2", 1) + `]}`
 			}
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				if err := json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{agentcontract.JSON{
-					"message":       agentcontract.JSON{"tool_calls": []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": name, "arguments": arguments}}}},
+					"message":       agentcontract.JSON{"tool_calls": []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_decision", "arguments": arguments}}}},
 					"finish_reason": "tool_calls",
 				}}}); err != nil {
 					t.Error(err)
@@ -106,7 +106,7 @@ func TestDecisionOutputToolsPreserveSingleAndBatchCalls(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantBody := `{"schema":"agenstra.decision.v1","kind":"tool_batch","calls":[` + call + `]}`
-			if name == "submit_tool_batch" {
+			if name == "batch" {
 				wantBody = `{"schema":"agenstra.decision.v1","kind":"tool_batch","calls":[` + call + `,` + strings.Replace(call, "read-1", "read-2", 1) + `]}`
 			}
 			want, err := agentcontract.StrictDecision([]byte(wantBody))
@@ -137,9 +137,9 @@ func TestDecisionOutputToolsPreserveSingleAndBatchCalls(t *testing.T) {
 
 func TestDecisionOutputToolsAssignFreshCallReferences(t *testing.T) {
 	for _, tc := range []struct{ name, tool, arguments string }{
-		{"single without reference", "submit_tool_call", `{"capability":"pack.read","arguments":{"id":2},"reason":"Read"}`},
-		{"batch without references", "submit_tool_batch", `{"calls":[{"capability":"pack.read","arguments":{"id":2},"reason":"Read"},{"capability":"pack.read","arguments":{"id":3},"reason":"Read"}]}`},
-		{"repeated supplied reference", "submit_tool_call", `{"call_ref":"read-1","capability":"pack.read","arguments":{"id":2},"reason":"Read"}`},
+		{"single without reference", "submit_decision", `{"kind":"tool_batch","calls":[{"capability":"pack.read","arguments":{"id":2},"reason":"Read"}]}`},
+		{"batch without references", "submit_decision", `{"kind":"tool_batch","calls":[{"capability":"pack.read","arguments":{"id":2},"reason":"Read"},{"capability":"pack.read","arguments":{"id":3},"reason":"Read"}]}`},
+		{"repeated supplied reference", "submit_decision", `{"kind":"tool_batch","calls":[{"call_ref":"read-1","capability":"pack.read","arguments":{"id":2},"reason":"Read"}]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -258,14 +258,14 @@ func TestDecisionOutputToolsRecoveryRejectsMultipleInspectionsBeforeExecution(t 
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Error(err)
 		}
-		function := agentcontract.JSON{"name": "submit_inspect_fact", "arguments": `{"fact_id":"12345678-1234-1234-1234-123456789012","path":["data"]}`}
+		function := agentcontract.JSON{"name": "submit_decision", "arguments": `{"kind":"inspect_fact","fact_id":"12345678-1234-1234-1234-123456789012","path":["data"]}`}
 		calls := []any{agentcontract.JSON{"type": "function", "function": function}, agentcontract.JSON{"type": "function", "function": function}}
 		if requests == 2 {
 			prompt := payload["messages"].([]any)[0].(map[string]any)["content"].(string)
 			if !strings.Contains(prompt, "response did not contain exactly one valid registered output tool") || !strings.Contains(prompt, "never return several output functions") {
 				t.Error("missing actionable output-count feedback", prompt)
 			}
-			calls = []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_final", "arguments": `{"answer_markdown":"hello","fact_ids":[]}`}}}
+			calls = []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_decision", "arguments": `{"kind":"final","answer_markdown":"hello","fact_ids":[]}`}}}
 		}
 		if err := json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{agentcontract.JSON{"message": agentcontract.JSON{"tool_calls": calls}, "finish_reason": "tool_calls"}}}); err != nil {
 			t.Error(err)

@@ -88,7 +88,7 @@ func TestSearchResultPresentationIsMeasuredAndBudgeted(t *testing.T) {
 				}
 				message := agentcontract.JSON{"content": `{"kind":"request_input","field":"choice","prompt":"Choose"}`}
 				if mode == "output_tools" {
-					message = agentcontract.JSON{"tool_calls": []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_request_input", "arguments": `{"field":"choice","prompt":"Choose"}`}}}}
+					message = agentcontract.JSON{"tool_calls": []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_decision", "arguments": `{"kind":"request_input","field":"choice","prompt":"Choose"}`}}}}
 				}
 				if err = json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{agentcontract.JSON{"message": message}}}); err != nil {
 					t.Error(err)

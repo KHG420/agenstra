@@ -61,12 +61,20 @@ func TestModelUnicodeTextLimitsAgreeAcrossOutputModes(t *testing.T) {
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 						var message agentcontract.JSON
 						if mode == "output_tools" {
-							arguments, err := agentcontract.CanonicalJSON(fields)
+							value := agentcontract.JSON{"kind": tc.kind}
+							if tc.kind == "tool_batch" {
+								value["calls"] = []any{fields}
+							} else {
+								for key, field := range fields {
+									value[key] = field
+								}
+							}
+							arguments, err := agentcontract.CanonicalJSON(value)
 							if err != nil {
 								t.Error(err)
 								return
 							}
-							message = agentcontract.JSON{"tool_calls": []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": tc.tool, "arguments": string(arguments)}}}}
+							message = agentcontract.JSON{"tool_calls": []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_decision", "arguments": string(arguments)}}}}
 						} else {
 							var value agentcontract.JSON
 							if tc.kind == "tool_batch" {

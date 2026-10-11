@@ -169,7 +169,7 @@ func TestSavedToolPairIsIncludedInActualInputMeasurement(t *testing.T) {
 		}
 		if err := json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{agentcontract.JSON{
 			"finish_reason": "tool_calls", "message": agentcontract.JSON{"tool_calls": []any{agentcontract.JSON{
-				"type": "function", "function": agentcontract.JSON{"name": "submit_final", "arguments": `{"answer_markdown":"Verified","fact_ids":[],"result_refs":[]}`},
+				"type": "function", "function": agentcontract.JSON{"name": "submit_decision", "arguments": `{"kind":"final","answer_markdown":"Verified","fact_ids":[],"result_refs":[]}`},
 			}}},
 		}}}); err != nil {
 			t.Error(err)

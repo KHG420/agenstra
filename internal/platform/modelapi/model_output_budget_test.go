@@ -109,7 +109,7 @@ func TestOutputToolsEmptyOutputAtEffectiveTokenLimit(t *testing.T) {
 			{name: "unknown limit", output: 4096, want: "model_decision_invalid"},
 			{name: "missing usage", configured: 4096, omitUsage: true, want: "model_decision_invalid"},
 			{name: "invalid usage", configured: 4096, output: 1000000001, want: "model_decision_invalid"},
-			{name: "complete tool at limit", configured: 4096, output: 4096, outputTool: true, arguments: `{"answer_markdown":"done","fact_ids":[]}`},
+			{name: "complete tool at limit", configured: 4096, output: 4096, outputTool: true, arguments: `{"kind":"final","answer_markdown":"done","fact_ids":[]}`},
 			{name: "plain text at limit", configured: 4096, output: 4096, content: "done", want: "model_decision_invalid"},
 			{name: "malformed tool at limit", configured: 4096, output: 4096, outputTool: true, arguments: `{"answer_markdown":`, want: "model_decision_invalid"},
 		} {
@@ -127,7 +127,7 @@ func TestOutputToolsEmptyOutputAtEffectiveTokenLimit(t *testing.T) {
 					}
 					message := agentcontract.JSON{"content": tc.content}
 					if tc.outputTool {
-						message["tool_calls"] = []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_final", "arguments": tc.arguments}}}
+						message["tool_calls"] = []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_decision", "arguments": tc.arguments}}}
 					}
 					reply := agentcontract.JSON{"choices": []any{agentcontract.JSON{"finish_reason": "stop", "message": message}}}
 					if !tc.omitUsage {
