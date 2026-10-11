@@ -80,8 +80,8 @@ func TestCompletionReviewOffersOnlyFinalOutput(t *testing.T) {
 			t.Fatalf("output field guidance offers unavailable review decision %s", name)
 		}
 	}
-	if len(messages) != 4 || messages[2].(agentcontract.JSON)["role"] != "assistant" || messages[3].(agentcontract.JSON)["role"] != "tool" {
-		t.Fatal("completion restriction changed saved call evidence")
+	if len(messages) != 2 || messages[1].(agentcontract.JSON)["role"] != "user" || messages[1].(agentcontract.JSON)["content"] != string(before) {
+		t.Fatal("completion restriction changed cumulative evidence or reconstructed an execution decision")
 	}
 	assertSingleDecisionOutputRequest(t, payload)
 	raw, err := agentcontract.CanonicalJSON(payload)

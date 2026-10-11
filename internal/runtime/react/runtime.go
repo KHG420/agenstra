@@ -547,6 +547,19 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		}
 		packet := r.contextCandidate(state)
 		packet.CompletionReview = review
+		if review != nil {
+			// Review consumes evidence and a draft, not executable contracts. Apply
+			// this projection before budgeting so catalogs cannot displace evidence.
+			packet.Capabilities = nil
+			packet.InspectedCapability = nil
+			packet.CapabilitySearchResults = nil
+			packet.CapabilitySearchQuery = ""
+			packet.CapabilityCatalogTotal = 0
+			packet.RuntimeFeatures = slices.DeleteFunc(packet.RuntimeFeatures, func(feature string) bool { return feature == "capability_search" })
+			packet.ContextOmissions = slices.DeleteFunc(packet.ContextOmissions, func(note string) bool {
+				return strings.HasPrefix(note, "capability catalog:") || strings.HasPrefix(note, "capability search ")
+			})
+		}
 		if _, err := agentcontract.CanonicalJSON(packet); err != nil {
 			state.Status = "failed"
 			state.ErrorCode = agentcontract.Strptr("run_state_invalid")

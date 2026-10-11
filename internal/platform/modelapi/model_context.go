@@ -90,7 +90,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		if len(packet.Observations) > 0 {
 			last = packet.Observations[len(packet.Observations)-1]
 		}
-		if !steered && last.CallRef != "" && last.Capability != "" && !strings.HasPrefix(last.Capability, "agent.") {
+		if packet.CompletionReview == nil && !steered && last.CallRef != "" && last.Capability != "" && !strings.HasPrefix(last.Capability, "agent.") {
 			var previous any = agentcontract.Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []agentcontract.ToolCall{{CallRef: last.CallRef, Capability: last.Capability, Arguments: last.Arguments, Reason: "Previously recorded call from saved runtime evidence."}}}
 			if last.ArgumentsOmitted {
 
