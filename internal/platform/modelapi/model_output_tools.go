@@ -53,8 +53,8 @@ func decisionOutputTools(completionReview bool) []any {
 	}
 	add("tool_batch", agentcontract.JSON{"calls": agentcontract.JSON{"type": "array", "minItems": 1, "maxItems": 4, "items": call}}, "calls")
 	final := agentcontract.JSON{
-		"answer_markdown": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 30000},
-		"fact_ids":        agentcontract.JSON{"type": "array", "maxItems": 50, "items": uuid},
+		"answer_markdown": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 30000, "description": "User-facing response with the requested business values and necessary limitations. Never put internal Fact IDs in prose, tables, links or footnotes. Keep supporting evidence IDs only in fact_ids and result_refs. Requested business record IDs remain ordinary answer data."},
+		"fact_ids":        agentcontract.JSON{"type": "array", "maxItems": 50, "items": uuid, "description": "Supporting evidence identifiers from this run: copy full Fact IDs exactly here. Do not repeat these internal evidence identifiers in answer_markdown."},
 		"result_refs":     agentcontract.JSON{"type": "array", "maxItems": 20, "items": resultRef},
 	}
 	required := []string{"answer_markdown", "fact_ids"}

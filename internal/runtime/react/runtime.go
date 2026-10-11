@@ -530,6 +530,10 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		state.ErrorCode = agentcontract.Strptr("agent_stagnated")
 		return nil
 	}
+	facts := map[string]agentcontract.Fact{}
+	for _, f := range state.Facts {
+		facts[f.FactID] = f
+	}
 	feedback := ""
 	formatRecovery := false
 	var decision agentcontract.Decision
@@ -756,7 +760,13 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 				return nil
 			}
 			if review == nil && d.Kind == "final" && len(packet.ActionOutcomes) > 0 {
-
+				// Do not spend a review request on a proposal already known to
+				// violate publication rules. Ordinary correction retains evidence.
+				if _, code, feedback := validateFinalEvidence(d, facts, r.ConnectionID); code != "" {
+					recordDecision(state, d)
+					Reject(state, "final", "agent.final", code, agentcontract.JSON{"feedback": feedback}, "")
+					return nil
+				}
 				// Save the proposal for audit/checkpointing, but never publish it.
 				// The reviewer has no path to executing another business action.
 				recordDecision(state, d)
@@ -806,10 +816,6 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		}
 	}
 	recordDecision(state, decision)
-	facts := map[string]agentcontract.Fact{}
-	for _, f := range state.Facts {
-		facts[f.FactID] = f
-	}
 	switch decision.Kind {
 	case "search_capabilities":
 		if r.MaxContextCapabilities <= 0 {
@@ -852,30 +858,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			state.LoadedSkills = append(next, decision.Name)
 		}
 	case "final":
-		valid := true
-		if len(facts) > 0 && len(decision.FactIDs) == 0 {
-			valid = false
-		}
-		for _, id := range decision.FactIDs {
-			if _, ok := facts[id]; !ok {
-				valid = false
-			}
-		}
-		refs, refsErr := resolveResultRefs(decision.ResultRefs, decision.FactIDs, facts, r.ConnectionID)
-		exposesInternalID := false
-		answerFold := strings.ToLower(decision.AnswerMarkdown)
-		for id := range facts {
-			if id != "" && strings.Contains(answerFold, strings.ToLower(id)) {
-				exposesInternalID = true
-				break
-			}
-		}
-		if !valid {
-			Reject(state, "final", "agent.final", "final_fact_citations_invalid", agentcontract.JSON{"feedback": "Cite at least one observed Fact when Facts exist. Every fact_ids entry must be an existing Fact ID from this run; use inspect_fact to read evidence before correcting the answer."}, "")
-		} else if refsErr != nil {
-			Reject(state, "final", "agent.final", "final_result_refs_invalid", agentcontract.JSON{"feedback": "Each result_refs entry must name an available Fact included in fact_ids and a path to a nonempty scalar business ID (string or integer). Inspect the Fact and use its actual path, including data and, for browser receipts, result. Omit result_refs when the answer needs no object reference; never invent an ID."}, "")
-		} else if exposesInternalID {
-			Reject(state, "final", "agent.final", "final_internal_fact_id_exposed", agentcontract.JSON{"feedback": "Remove internal Fact identifiers from answer_markdown. Keep genuine citations in fact_ids and object references in result_refs. Answer the requested business values using existing successful evidence; do not repeat business operations."}, "")
+		refs, code, feedback := validateFinalEvidence(decision, facts, r.ConnectionID)
+		if code != "" {
+			Reject(state, "final", "agent.final", code, agentcontract.JSON{"feedback": feedback}, "")
 		} else if r.CompletionValidator != nil {
 			err := r.CompletionValidator(ctx, agentcontract.CompletionContext{RunID: state.RunID, OriginPackID: r.OriginPackID, Instruction: state.Instruction, AnswerMarkdown: decision.AnswerMarkdown, FactIDs: decision.FactIDs, Facts: state.Facts, Observations: state.Observations, Followups: state.Followups})
 			if ctx.Err() != nil {
