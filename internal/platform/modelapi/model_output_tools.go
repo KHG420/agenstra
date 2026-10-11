@@ -110,11 +110,16 @@ func singleDecisionOutputTool(tools []any) agentcontract.JSON {
 }
 
 func decisionOutputToolPrompt(prompt string, completionReview bool) string {
+	if completionReview {
+		// Match the final-only stage before replacing its JSON output channel.
+		prompt = jsonCompletionReviewPrompt(prompt)
+	}
 	lines := strings.Split(prompt, "\n")
 	retained := make([]string, 0, len(lines))
 	for _, line := range lines {
 		if strings.HasPrefix(line, "Return one JSON object with schema") ||
 			strings.HasPrefix(line, "Skill: {") ||
+			strings.HasPrefix(line, "Available JSON decision for completion review:") ||
 			strings.HasPrefix(line, "Return exactly one raw JSON object.") || line == agentcontract.DecisionObjectShapePrompt {
 			continue
 		}
