@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,6 +69,12 @@ func TestUndeclaredOutputWriteCannotExecuteBeforeBoundedRecovery(t *testing.T) {
 		name := "submit_tool_batch"
 		arguments := `{"calls":[{"capability":"records.write","arguments":{},"reason":"write"}]}`
 		if requests > 1 {
+			prompt := payload["messages"].([]any)[0].(map[string]any)["content"].(string)
+			if strings.Contains(prompt, "submit_*") || strings.Contains(prompt, "inspect_fact functions") ||
+				!strings.Contains(prompt, "output function declared for this request") ||
+				!strings.Contains(prompt, "Call submit_decision exactly once.") {
+				t.Error("recovery contradicts the actual declared output channel", prompt)
+			}
 			name, arguments = "submit_decision", `{"kind":"final","answer_markdown":"No business operation was performed.","fact_ids":[]}`
 		}
 		if err := json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{agentcontract.JSON{

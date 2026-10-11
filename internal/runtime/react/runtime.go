@@ -805,7 +805,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			feedback = "\nYour previous response was not a valid agenstra.decision.v1 JSON decision. Return exactly one raw JSON object without Markdown or code fences. Preserve the capability's input structure, including any nested arguments object required by its schema. Do not put read_skill, inspect_capability, or inspect_fact inside tool_batch.calls."
 			switch metrics.FormatError {
 			case "model_output_tool_calls_invalid":
-				feedback += " The response did not contain exactly one valid registered output tool. Return exactly one tool_calls entry using a registered submit_* function; never return several output functions, including several inspect_fact functions. Choose one inspection and wait for its result before the next decision."
+				feedback += " The response did not contain exactly one valid registered output tool. Use exactly one output function declared for this request with its native argument schema. Inspection decisions must also use the declared output channel. Choose one inspection and wait for its result before the next decision."
 			case "model_output_duplicate_key":
 				feedback += " Each object key must occur only once, including in nested capability arguments."
 			case "model_output_invalid_json":

@@ -262,7 +262,7 @@ func TestDecisionOutputToolsRecoveryRejectsMultipleInspectionsBeforeExecution(t 
 		calls := []any{agentcontract.JSON{"type": "function", "function": function}, agentcontract.JSON{"type": "function", "function": function}}
 		if requests == 2 {
 			prompt := payload["messages"].([]any)[0].(map[string]any)["content"].(string)
-			if !strings.Contains(prompt, "response did not contain exactly one valid registered output tool") || !strings.Contains(prompt, "never return several output functions") {
+			if !strings.Contains(prompt, "response did not contain exactly one valid registered output tool") || !strings.Contains(prompt, "Use exactly one output function declared for this request") {
 				t.Error("missing actionable output-count feedback", prompt)
 			}
 			calls = []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_decision", "arguments": `{"kind":"final","answer_markdown":"hello","fact_ids":[]}`}}}
@@ -319,6 +319,10 @@ func TestDecisionOutputToolsKeepUserFormatsInsideFinal(t *testing.T) {
 					prompt := payload["messages"].([]any)[0].(map[string]any)["content"].(string)
 					if !strings.Contains(prompt, "apply to final.answer_markdown only") || !strings.Contains(prompt, "never replace the submit_decision output tool call") {
 						t.Error("requested display format was not separated from the output protocol", prompt)
+					}
+					if review && (strings.Contains(prompt, "Do not propose or execute any tool call during review.") ||
+						!strings.Contains(prompt, "the required submit_decision call only returns the final decision")) {
+						t.Error("review forbids its own required output function", prompt)
 					}
 					fields := agentcontract.JSON{"kind": "final", "answer_markdown": answer, "fact_ids": []string{}}
 					if review {
