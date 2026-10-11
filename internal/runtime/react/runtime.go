@@ -552,9 +552,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		packet := r.contextCandidate(state)
 		packet.CompletionReview = review
 		if review != nil {
-			// Review consumes evidence and a draft, not executable contracts. Apply
-			// this projection before budgeting so catalogs cannot displace evidence.
-			packet.Capabilities = nil
+			// Keep observed source meanings, not executable contracts. Apply this
+			// projection before budgeting so catalogs cannot displace evidence.
+			packet.Capabilities = r.completionSourceDescriptions(state)
 			packet.InspectedCapability = nil
 			packet.CapabilitySearchResults = nil
 			packet.CapabilitySearchQuery = ""
