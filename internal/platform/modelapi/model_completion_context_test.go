@@ -25,11 +25,13 @@ func TestCompletionReviewDoesNotReconstructExecutionMessages(t *testing.T) {
 				t.Fatal(err)
 			}
 			messages := payload["messages"].([]any)
-			if len(messages) != 2 {
+			if mode == "output_tools" {
+				assertReviewProposalInputPreserved(t, payload, input)
+			} else if len(messages) != 2 {
 				t.Fatal("review appended an execution decision and repeated result after the review request")
 			}
 			message := messages[1].(agentcontract.JSON)
-			if message["role"] != "user" || message["content"] != string(input) {
+			if message["role"] != "user" || (mode == "json_object" && message["content"] != string(input)) {
 				t.Fatal("review lost its original ordered evidence or completion proposal")
 			}
 			after, err := agentcontract.CanonicalJSON(packet)

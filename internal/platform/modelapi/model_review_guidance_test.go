@@ -39,9 +39,7 @@ func TestOutputToolsReviewGuidanceMatchesFinalOnlyStage(t *testing.T) {
 		t.Fatal("review offered an execution decision")
 	}
 	assertSingleDecisionOutputRequest(t, payload)
-	if payload["messages"].([]any)[1].(agentcontract.JSON)["content"] != string(input) {
-		t.Fatal("review prompt adjustment changed the recorded evidence")
-	}
+	assertReviewProposalInputPreserved(t, payload, input)
 	model.DecisionOutputMode = "json_object"
 	legacy, err := model.requestPayload(input, prompt)
 	if err != nil || legacy["tools"] != nil || legacy["response_format"] == nil {

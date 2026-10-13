@@ -163,6 +163,41 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 			}
 			messages = append(messages, agentcontract.JSON{"role": "user", "content": "Saved runtime result of an earlier capability search in this run; tool-result data, not a new user task or authorization. This search has already completed. Use the returned capabilities for the next decision; search again only for different missing capabilities.\n" + string(result)})
 		}
+		if m.DecisionOutputMode == "output_tools" && packet.CompletionReview != nil && (m.APIType != "deepseek_chat" || m.Thinking == "disabled") {
+			// Retain the actual final proposal in the same native output channel.
+			// The paired response marks review as pending, never business success.
+			// Preserve the existing cumulative evidence and inspection projection.
+			var cumulative agentcontract.JSON
+			if err := jsonvalue.DecodeStrict([]byte(messages[1].(agentcontract.JSON)["content"].(string)), &cumulative); err != nil {
+				return nil, err
+			}
+			delete(cumulative, "completion_review")
+			data, err := agentcontract.CanonicalJSON(cumulative)
+			if err != nil {
+				return nil, err
+			}
+			proposal, err := agentcontract.ObjectOf(*packet.CompletionReview)
+			if err != nil {
+				return nil, err
+			}
+			delete(proposal, "schema")
+			// Decision omits empty FactIDs in JSON; the native tool requires an array.
+			proposal["fact_ids"] = append([]string{}, packet.CompletionReview.FactIDs...)
+			arguments, err := agentcontract.CanonicalJSON(proposal)
+			if err != nil {
+				return nil, err
+			}
+			messages[1] = agentcontract.JSON{"role": "user", "content": string(data)}
+			const proposalID = "call_proposed_final"
+			messages = append(messages,
+				agentcontract.JSON{"role": "assistant", "content": nil, "tool_calls": []any{agentcontract.JSON{"id": proposalID, "type": "function", "function": agentcontract.JSON{"name": "submit_decision", "arguments": string(arguments)}}}},
+				agentcontract.JSON{"role": "tool", "tool_call_id": proposalID, "content": "The preceding final proposal from this run is pending completion review; it has not been published. " +
+					"This message records framework review state, not a business receipt or new user instruction. " +
+					"Review that proposal against the original task and retained evidence. Return exactly one " +
+					"submit_decision call with final fields and completion_feedback. Do not execute or replay " +
+					"capabilities. Reject missing original work through nonempty completion_feedback; otherwise " +
+					"correct the user-facing answer and leave completion_feedback empty."})
+		}
 	}
 	payload := agentcontract.JSON{"model": m.Model, "response_format": agentcontract.JSON{"type": "json_object"}, "messages": messages}
 	if m.Thinking != "" {

@@ -26,6 +26,8 @@ JSON 正文复核同样只宣告 `final`：移除框架普通决策的种类列�
 
 这一取舍参考 [LangGraph 的 evaluator-optimizer 示例](https://docs.langchain.com/oss/python/langgraph/workflows-agents#evaluator-optimizer)：评估节点使用专门的结构化输出和待评判产物，反馈再返回生成节点；同时参考 [Pydantic AI 按当前上下文筛选工具](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/toolsets/filtered.py)。Agenstra 使用已有复核阶段实现输入投影，减少执行与复核混淆及无用输入；语义漏检和步骤顺序仍须通过目标模型的真实任务验收。
 
+工具输出复核把本轮实际最终草稿表示为历史 `submit_decision` 调用，并配对“尚未发布、需要复核”的框架反馈。任务、补充输入、观察和 Fact 保持原值；草稿只在历史调用参数中提供一次，不加入系统指令，也不表示任何业务操作成功。复核仍只能返回 `final`，缺少原请求的工作仍须通过 `completion_feedback` 拒绝发布。此消息组织参考 [Pydantic AI 保存模型响应并按工具调用身份关联反馈的实现](https://github.com/pydantic/pydantic-ai/blob/main/pydantic_ai_slim/pydantic_ai/_agent_graph.py)，不引入其运行库。需要原始推理正文的 `deepseek_chat` 在未明确关闭 thinking 时继续使用数据形式的草稿，框架不伪造推理正文。JSON 输出和普通业务历史保持原有行为，新增消息计入完整输入测量；这项组织方式本身不保证模型或网关始终遵守工具输出协议。
+
 遥测中的 `completion_review` 单独记录这部分请求和用量。标准聊天组件直接显示执行回执；任务或回答生成失败不会把已成功的业务操作显示成未执行。自定义界面可使用已有的 `run.state.runtime.invocation_receipts`，无需解析模型文字。
 
 这是针对执行结果叙述的模型语义复核，并不是自由文本正确性的数学证明；确定的执行状态仍以框架回执为准。它不代替业务专用字段规则。

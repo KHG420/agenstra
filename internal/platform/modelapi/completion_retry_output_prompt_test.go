@@ -47,9 +47,7 @@ func TestCompletionReviewRetryDoesNotForbidRequiredOutputTool(t *testing.T) {
 			if len(schemas) != 1 || schemas["final"] == nil {
 				t.Fatal("retry enabled a non-final decision")
 			}
-			if len(messages) != 2 || messages[1].(agentcontract.JSON)["content"] != string(input) {
-				t.Fatal("retry altered completion evidence")
-			}
+			assertReviewProposalInputPreserved(t, payload, input)
 		})
 	}
 }
