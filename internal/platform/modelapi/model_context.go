@@ -297,7 +297,9 @@ func jsonCompletionReviewPrompt(prompt string) string {
 	lines := strings.Split(prompt, "\n")
 	retained := lines[:0]
 	for _, line := range lines {
-		if strings.HasPrefix(line, "Return one JSON object with schema") || strings.HasPrefix(line, "Skill: {") || line == agentcontract.DecisionObjectShapePrompt {
+		if strings.HasPrefix(line, "Return one JSON object with schema") || strings.HasPrefix(line, "Skill: {") ||
+			strings.HasPrefix(line, "read_skill, inspect_capability and inspect_fact are runtime decision kinds,") ||
+			strings.HasPrefix(line, "When runtime_features includes capability_search,") || line == agentcontract.DecisionObjectShapePrompt {
 			continue
 		}
 		retained = append(retained, line)
