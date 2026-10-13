@@ -109,7 +109,21 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		// Keep both in the packet, without replaying the older preview after the
 		// inspected result and presenting incomplete data as the newest outcome.
 		if packet.CompletionReview == nil && !steered && !inspectedLatestFact && last.CallRef != "" && last.Capability != "" && !strings.HasPrefix(last.Capability, "agent.") {
-			var previous any = agentcontract.Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []agentcontract.ToolCall{{CallRef: last.CallRef, Capability: last.Capability, Arguments: last.Arguments, Reason: "Previously recorded call from saved runtime evidence."}}}
+			reason := "Previously recorded call from saved runtime evidence."
+			if packet.LastCallReason != "" && !last.ArgumentsOmitted && last.Arguments != nil {
+				reason = packet.LastCallReason
+				var cumulative agentcontract.JSON
+				if err := jsonvalue.DecodeStrict([]byte(messages[1].(agentcontract.JSON)["content"].(string)), &cumulative); err != nil {
+					return nil, err
+				}
+				delete(cumulative, "last_call_reason")
+				data, err := agentcontract.CanonicalJSON(cumulative)
+				if err != nil {
+					return nil, err
+				}
+				messages[1] = agentcontract.JSON{"role": "user", "content": string(data)}
+			}
+			var previous any = agentcontract.Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []agentcontract.ToolCall{{CallRef: last.CallRef, Capability: last.Capability, Arguments: last.Arguments, Reason: reason}}}
 			if last.ArgumentsOmitted {
 
 				// Preserve the recorded identity without inventing executable arguments.
@@ -142,7 +156,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 			// which runtime observations do not retain. Keep their data-only
 			// history unless thinking is explicitly disabled; never invent it.
 			if m.DecisionOutputMode == "output_tools" && !last.ArgumentsOmitted && last.Arguments != nil && (m.APIType != "deepseek_chat" || m.Thinking == "disabled") {
-				arguments, err := agentcontract.CanonicalJSON(agentcontract.JSON{"kind": "tool_batch", "calls": []any{agentcontract.JSON{"capability": last.Capability, "arguments": last.Arguments, "reason": "Previously recorded call from saved runtime evidence."}}})
+				arguments, err := agentcontract.CanonicalJSON(agentcontract.JSON{"kind": "tool_batch", "calls": []any{agentcontract.JSON{"capability": last.Capability, "arguments": last.Arguments, "reason": reason}}})
 				if err != nil {
 					return nil, err
 				}

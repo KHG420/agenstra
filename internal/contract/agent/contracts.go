@@ -120,6 +120,8 @@ type ContextPacket struct {
 	Progress                *RunProgress      `json:"progress,omitempty"`
 	ActionOutcomes          []ActionOutcome   `json:"action_outcomes,omitempty"`
 	CompletionReview        *Decision         `json:"completion_review,omitempty"`
+	// LastCallReason is the recorded intent of the last visible call, not authorization.
+	LastCallReason string `json:"last_call_reason,omitempty"`
 }
 
 // ToolCall binds a model call reference to a capability and JSON arguments.

@@ -28,6 +28,11 @@ func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.Runt
 	if contextCharacters(packet) <= available {
 		return packet
 	}
+	// Prior intent is useful history, but must not displace task or result evidence.
+	packet.LastCallReason = ""
+	if contextCharacters(packet) <= available {
+		return packet
+	}
 	baseOmissions := []string{}
 	for _, note := range packet.ContextOmissions {
 		if !strings.HasPrefix(note, "fact ") {
@@ -320,4 +325,37 @@ func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.Runt
 		}
 	}
 	return packet
+}
+
+func recordedCallReason(state *agentcontract.RuntimeState, observation agentcontract.Observation) string {
+	if observation.CallRef == "" || observation.ArgumentsOmitted || observation.Arguments == nil {
+		return ""
+	}
+	arguments, err := agentcontract.CanonicalJSON(observation.Arguments)
+	if err != nil {
+		return ""
+	}
+	for i := len(state.Decisions) - 1; i >= 0; i-- {
+		decision := state.Decisions[i]
+		if decision["kind"] != "tool_batch" {
+			continue
+		}
+		calls, _ := decision["calls"].([]any)
+		for _, value := range calls {
+			call, ok := value.(map[string]any)
+			if !ok || call["call_ref"] != observation.CallRef || call["capability"] != observation.Capability {
+				continue
+			}
+			recorded, err := agentcontract.CanonicalJSON(call["arguments"])
+			if err != nil || string(recorded) != string(arguments) {
+				return ""
+			}
+			reason, _ := call["reason"].(string)
+			if utf8.RuneCountInString(reason) > 2000 {
+				return ""
+			}
+			return reason
+		}
+	}
+	return ""
 }

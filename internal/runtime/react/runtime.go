@@ -419,6 +419,19 @@ func (r *AgentRuntime) contextCandidate(state *agentcontract.RuntimeState) agent
 		}
 		obs = append(obs, o)
 	}
+	lastCallReason := ""
+	if len(obs) > 0 {
+		last := obs[len(obs)-1]
+		if _, exists := r.Provider.Capabilities()[last.Capability]; exists && r.Grants[last.Capability] {
+			lastCallReason = recordedCallReason(state, last)
+		}
+	}
+	for _, followup := range state.Followups {
+		if strings.HasPrefix(followup, "steering: ") {
+			lastCallReason = ""
+			break
+		}
+	}
 	if start > 0 {
 		omissions = append(omissions, fmt.Sprintf("observations: %d older entries", start))
 	}
@@ -456,6 +469,7 @@ func (r *AgentRuntime) contextCandidate(state *agentcontract.RuntimeState) agent
 		omissions = append(omissions, fmt.Sprintf("inspection_history: %d older entries; inspect_fact to reload", omittedInspections))
 	}
 	packet := agentcontract.ContextPacket{OriginPackID: r.OriginPackID, Schema: "agenstra.context.v1", Instruction: state.Instruction, Capabilities: caps, Facts: views, Observations: obs, RoundIndex: state.RoundsUsed, RoundsRemaining: r.MaxModelRounds - state.RoundsUsed, ToolCallsRemaining: r.MaxToolCalls - state.ToolCallsUsed, Skills: skillViews, LoadedSkills: loaded, InspectedCapability: inspected, InspectedFact: state.InspectedFact, InspectionHistory: history, Followups: state.Followups, RuntimeFeatures: features, ContextOmissions: omissions, Memories: append([]agentcontract.MemoryView{}, r.Memories...)}
+	packet.LastCallReason = lastCallReason
 	if r.MaxContextCapabilities > 0 {
 		packet.CapabilityCatalogTotal = catalogTotal
 		packet.CapabilitySearchQuery = state.CapabilitySearchQuery
@@ -571,6 +585,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			// Keep observed source meanings, not executable contracts. Apply this
 			// projection before budgeting so catalogs cannot displace evidence.
 			packet.Capabilities = r.completionSourceDescriptions(state)
+			packet.LastCallReason = ""
 			packet.InspectedCapability = nil
 			packet.CapabilitySearchResults = nil
 			packet.CapabilitySearchQuery = ""
