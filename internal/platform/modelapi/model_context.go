@@ -96,6 +96,15 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 			preview, _ := packet.InspectedFact["preview"].(map[string]any)
 			_, inspectedLatestFact = preview["value"]
 		}
+		if inspectedLatestFact {
+			compact, err := completeInspectionInput(packet)
+			if err != nil {
+				return nil, err
+			}
+			if compact != nil {
+				messages[1] = agentcontract.JSON{"role": "user", "content": string(compact)}
+			}
+		}
 		// This inspection necessarily follows the call that produced its Fact.
 		// Keep both in the packet, without replaying the older preview after the
 		// inspected result and presenting incomplete data as the newest outcome.

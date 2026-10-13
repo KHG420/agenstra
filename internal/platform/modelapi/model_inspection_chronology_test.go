@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
 
@@ -47,8 +48,24 @@ func TestCurrentInspectionDoesNotReplayOlderPreviewAfterIt(t *testing.T) {
 				if len(messages) != want {
 					t.Fatal("older business preview was replayed after its inspection, or an unrelated outcome disappeared", len(messages), want)
 				}
-				if messages[1].(agentcontract.JSON)["content"] != string(input) {
-					t.Fatal("suppressing redundant presentation lost original observation or inspected data")
+				content := messages[1].(agentcontract.JSON)["content"].(string)
+				if view == "complete" || view == "null" {
+					var wire agentcontract.ContextPacket
+					if err := jsonvalue.DecodeStrict([]byte(content), &wire); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := agentcontract.ValueAt(wire.Facts[0].Value, []any{"data", "entries"}); err == nil || len(wire.Facts[0].OmittedPaths) != 2 {
+						t.Fatal("complete inspection kept the overlapping partial preview or lost its omission")
+					}
+					for _, pair := range [][2]any{{wire.InspectedFact, packet.InspectedFact}, {wire.Observations, packet.Observations}} {
+						a, aErr := agentcontract.CanonicalJSON(pair[0])
+						b, bErr := agentcontract.CanonicalJSON(pair[1])
+						if aErr != nil || bErr != nil || !bytes.Equal(a, b) {
+							t.Fatal("suppressing duplicate preview lost original observation or inspected data", aErr, bErr)
+						}
+					}
+				} else if content != string(input) {
+					t.Fatal("partial, unrelated or unverified inspection changed the original packet")
 				}
 				raw, err := agentcontract.CanonicalJSON(payload)
 				if err != nil {
