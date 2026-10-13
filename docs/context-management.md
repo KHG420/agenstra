@@ -30,7 +30,7 @@ utf8.RuneCountInString(systemPrompt) + utf8.RuneCount(CanonicalJSON(packet))
     <= MaxContextCharacters
 ```
 
-`Step()` 在添加修复反馈、重复调用提醒和数组检查提示后再次分配预算。字符预算计入累计 packet 的 JSON 转义、Fact 来源、遗漏路径和遗漏说明，但不代表模型的 token 容量，也不包含模型输出预算。HTTP 适配器会额外呈现最近一次业务调用回执，并将旧检查历史移到独立的数据消息；`MeasureInput` 对实际发送的序列化请求计算 token 预算，包括这些消息及模型输出预留。
+`Step()` 在添加修复反馈、重复调用提醒和对象／数组检查提示后再次分配预算。字符预算计入累计 packet 的 JSON 转义、Fact 来源、遗漏路径和遗漏说明，但不代表模型的 token 容量，也不包含模型输出预算。HTTP 适配器会额外呈现最近一次业务调用回执，并将旧检查历史移到独立的数据消息；`MeasureInput` 对实际发送的序列化请求计算 token 预算，包括这些消息及模型输出预留。
 
 输入契约拒绝后的反馈最多保留四条诊断、1,000 个字符。根对象的 `anyOf`／`oneOf` 若由各分支必填且唯一的字符串 `const` 字段选择类型，框架优先反馈所选分支的参数错误；标签不属于当前能力时明确报告该能力不支持这个值，并按字典序列出已声明的字符串值，不回显被拒绝的输入。值列表最多占 400 个字符，超出时注明展示数量并要求检查完整 `input_schema`，不用第一条无关分支推断宿主缺少业务接口。模型须重新提交符合所选分支的参数；框架不替换标签、不自动执行被拒绝的调用。诊断选择仍保留根约束，缺少标签、重复标签和普通联合类型沿用完整校验器反馈；实际执行前始终校验原始完整契约，不因反馈而放宽授权或参数规则。这条反馈路径参考 [Pydantic AI 的校验错误重试消息](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/messages.py#L1808-L1853)，字符限制和已声明值的展示方式由 Agenstra 自行限定。
 
@@ -52,9 +52,9 @@ utf8.RuneCountInString(systemPrompt) + utf8.RuneCount(CanonicalJSON(packet))
 1. 暂时移出较旧的长技能，记录 `skill: NAME; read_skill to load again`。如果一段短技能比遗漏说明更小，直接保留。
 2. 为最新 Fact 的有界预览预留空间，从最旧观察开始省略参数，保持调用结果与错误码。完整参数仍在原状态与审计记录中。
 3. 若仍不足，按输入 schema 大小将能力目录改为名称、字段名和 `schema_requires_inspection` 标记。所有能力身份、描述、授权与执行元数据继续保留；当前检查出的完整 schema 不参与裁剪。
-4. 从最旧端省略检查历史条目，记录数量；仍不足时缩短观察窗口，保留最新一次结果。
-5. 若必需视图仍超限，减少可选的数组长度提示；每个 Fact 的 `omitted_paths` 继续保留。
-6. 目录缩略后，先从新到旧恢复能够容纳的原始观察参数，保留同一模块内不同操作的调用依据；继续预留最新结果的预览空间，只恢复进入本轮投影时可见的参数，不从完整状态找回已经省略的输入。再将剩余空间按 Fact 从新到旧分配预览。每个候选都测量整个包的实际序列化大小，包括遗漏路径的额外开销；候选超限时降低其预览预算。
+4. 先减少可选的对象字段数／数组长度提示，为近期结果保留预览空间；仍不足时从最旧端省略检查历史条目，记录数量，再缩短观察窗口，保留最新一次结果。
+5. 若必需视图仍超限，减少可选的对象字段数／数组长度提示；每个 Fact 的 `omitted_paths` 继续保留。
+6. 目录缩略后，先从新到旧恢复能够容纳的原始观察参数，保留同一模块内不同操作的调用依据；必要时继续减少可选数量提示，避免它们挤掉可恢复的调用参数。继续预留最新结果的预览空间，只恢复进入本轮投影时可见的参数，不从完整状态找回已经省略的输入。再将剩余空间按 Fact 从新到旧分配预览。每个候选都测量整个包的实际序列化大小，包括遗漏路径的额外开销；候选超限时降低其预览预算。
 7. 使用剩余空间重新放回较旧技能，并撤回已恢复技能的遗漏说明。
 
 预留近期预览是软目标。如果必需信息可以放下，但完整近期预览放不下，仍尝试提供更小的明确部分视图。原任务、用户补充、身份目录或当前检查内容等必需信息本身无法放下时，沿用 `context_too_large`，在增加模型轮次、调用模型之前失败。不能通过悄悄删除任务约束让请求看起来符合预算。
@@ -62,6 +62,8 @@ utf8.RuneCountInString(systemPrompt) + utf8.RuneCount(CanonicalJSON(packet))
 ## 3. Fact 预览与恢复语义
 
 Fact 预览计算对象和数组的结构开销以及标量替代值。整体能放下时保留原值；过大的数组保留最多 32 个原始位置的样本，遗漏的数组元素可用带路径标记的 `null` 占位；无法容纳的对象字段直接省略，避免被误认作真实的 `null` 或空值。其余缺失部分通过 `omitted_paths` 明示。过大的字符串不截成貌似完整的引文。
+
+遗漏说明从 `model_output` 获准查看的完整值计算对象的直接字段数和数组长度，共最多提供 12 条；现有数组长度优先保留，对象提示优先说明较浅的遗漏子树。不从隐藏字段计算数量，也不修改持久 Fact 或原遗漏路径。最新结果的对象提示在预算允许时说明“复制局部预览不能满足完整结果请求”，模型须通过原 Fact 路径补读所需缺失值。已有完整检查结果仍可复用，无需重复业务调用；只请求完整可见字段时可直接回答。这沿用 [OpenCode 保存完整工具结果并提示有界读取](https://github.com/anomalyco/opencode/blob/5d9cd9b259f0456522f318a7435501d03cfbee79/packages/opencode/src/tool/truncate.ts) 的取舍，字段计数和现有 Fact 检查是 Agenstra 的实现。提示本身不能保证模型完成所有字段，发布前仍保留完成校验。
 
 需要精确统计返回数组的元素数、且宿主没有提供同口径的数量字段时，通用提示要求检查该数组路径，并使用 `inspect_fact` 已有的 `array_length`；即使预览完整，也不让模型逐项估算。长度由框架从已获准给模型查看的完整数组计算，不重发业务查询，不新增字段或宿主接线。它只表示所检查数组的长度，不能替代分页 `total`、账单数量或其他业务统计。这个取舍沿用成熟 Agent 将精确计算交给工具执行的方式（例如 [smolagents 的代码执行结果](https://github.com/huggingface/smolagents/blob/c30b115286e000e98711fae5e85993547b73d826/src/smolagents/agents.py#L1714-L1734)），Agenstra 使用已有的受限事实检查，不引入代码执行器。提示有助于模型选择可信数量依据，最终是否符合任务仍需独立验收。
 
@@ -89,6 +91,8 @@ HTTP 模型适配器将已有的 `capability_search_query` 和 `capability_searc
 恢复 `request_input` 后，运行内核根据已有决策记录和 `followups` 明确提示最近询问的字段已获答复，继续原任务；答复本身不能证明业务操作完成。用户值仍只在原有补充数据中呈现，不复制进系统指令或增加权限。存在待答复问题、用户 steering 或无法匹配已保存字段时不推断答复状态；仍保留答复前后调用的顺序说明。JSON 内容与 `output_tools` 使用同一提示，计入字符和 token 预算，无需宿主改接线或数据库。此取舍参考 [LangGraph 恢复时复用已校验输入](https://github.com/langchain-ai/langgraph/blob/40a2e6d845054cc0cc17a6a169ca6e7394e5231c/libs/langgraph/langgraph/types.py#L1009-L1024) 和 [Pydantic AI 追加新用户输入](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_agent_graph.py#L760-L769)。Agenstra 保留自己的模型决策与输入校验路径，提示不能保证模型不再重问，仍须完成真实续接任务验收。
 
 `output_tools` 将最近一条参数完整的已保存业务调用呈现为历史 `submit_tool_call` 消息，并用相同的消息 ID 配对 `tool` 结果；模型可以据此继续任务，减少把已完成的前置读取再次当作起点的情况。消息 ID 只用于本次请求的历史呈现，不创建调用、增加授权或改变重放策略；`failed`、`unknown`、`accepted` 与 `succeeded` 及已获准查看的 Fact 预览保持原值。参数省略或缺失时保留普通历史数据消息，不编造可执行参数；收到 `steering:` 时沿用原有规则，不追加旧调用。JSON 内容输出和记忆提取保持原有协议，全部消息计入实际输入预算，无需宿主增加接线。此取舍参考 [OpenHands 的工具结果消息](https://github.com/OpenHands/software-agent-sdk/blob/0bb7b525c75f4a9a0606844fc4a2579106b08d32/openhands-sdk/openhands/sdk/event/llm_convertible/observation.py#L66-L72) 和 [LangGraph 的工具调用与结果配对](https://github.com/langchain-ai/langgraph/blob/40a2e6d845054cc0cc17a6a169ca6e7394e5231c/libs/prebuilt/langgraph/prebuilt/tool_node.py#L1005-L1012)。`deepseek_chat` 未明确设置 `thinking: disabled` 时保留普通历史数据消息，因为该协议的[思考模式工具调用](https://api-docs.deepseek.com/guides/thinking_mode#tool-calls)要求带回原始 `reasoning_content`，框架不会补造未保存的推理内容。该判断依据所声明的 API 协议与思考设置，不依据模型名称；其他兼容网关仍需实测历史工具消息，并以完整任务评估模型是否继续重复或遗漏操作。
+
+当前 `inspected_fact` 若已成功读取最新业务观察所引用的同一 Fact，适配器不在检查结果后重建该业务调用及其旧预览消息；观察、原预览和新检查值仍完整保留在累计 packet 中。这适用于全部决策输出模式，包含部分检查和真实 `null`。不同 Fact、检查失败或缺少 `preview.value` 时继续呈现原业务回执。检查必然发生在产生同一 Fact 的调用之后，较旧的截断预览不应再次成为最后呈现的结果；此取舍沿用上面工具调用与结果的顺序边界，不重放业务、不修改持久证据或授权。
 
 核对未知结果后，当前上下文和进度按稳定 `call_ref` 保留最新观察；同一调用的旧受理记录不会作为另一项动作展示。只有已验证的核对 Fact 同时匹配原命令 ID 和轮询能力时，才省略它所替代的旧轮询。其他调用、不同来源或未验证的结果不会互相替代。诊断接口从完整的已保存 Fact 恢复进度，沿用模型上下文的证据投影。原始观察与 Fact 历史保持不变，授权、审批及重放规则沿用原路径。稳定标识的更新取舍参考 [LangGraph 的 `add_messages`](https://github.com/langchain-ai/langgraph/blob/40a2e6d845054cc0cc17a6a169ca6e7394e5231c/libs/langgraph/langgraph/graph/message.py)；Agenstra 将其用于当前证据投影，不覆盖已保存的历史。
 

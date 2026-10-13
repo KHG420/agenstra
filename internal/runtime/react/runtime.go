@@ -309,24 +309,29 @@ func factView(f agentcontract.Fact, budget int) agentcontract.FactView {
 
 func arrayOmissions(facts []agentcontract.Fact, views []agentcontract.FactView) []string {
 	notes := []string{}
+	objectNotes := []string{}
 	seen := map[string]bool{}
 	hasOmissions := false
 	for i := len(facts) - 1; i >= 0; i-- {
 		hasOmissions = hasOmissions || len(views[i].OmittedPaths) > 0
-		for _, path := range views[i].OmittedPaths {
+		// Whole omitted subtrees describe completeness before their individual
+		// children consume the bounded hint list. Keep the original view untouched.
+		paths := slices.Clone(views[i].OmittedPaths)
+		sort.SliceStable(paths, func(i, j int) bool { return len(paths[i]) < len(paths[j]) })
+		for _, path := range paths {
 			selected, err := agentcontract.ValueAt(agentcontract.ModelFactValue(facts[i]), path)
 			if err != nil {
 				continue
 			}
 			var walk func(any, []any)
 			walk = func(v any, p []any) {
-				if len(notes) >= 12 {
+				if len(notes) >= 12 && len(objectNotes) >= 12 {
 					return
 				}
 				switch t := v.(type) {
 				case []any:
 					key := facts[i].FactID + fmt.Sprint(p)
-					if !seen[key] {
+					if !seen[key] && len(notes) < 12 {
 						seen[key] = true
 						raw, err := agentcontract.CanonicalJSON(p)
 						if err != nil {
@@ -338,6 +343,15 @@ func arrayOmissions(facts []agentcontract.Fact, views []agentcontract.FactView) 
 						walk(t[j], append(append([]any{}, p...), j))
 					}
 				case map[string]any:
+					key := facts[i].FactID + fmt.Sprint(p)
+					if !seen[key] && len(objectNotes) < 12 {
+						seen[key] = true
+						raw, err := agentcontract.CanonicalJSON(p)
+						if err != nil {
+							return
+						}
+						objectNotes = append(objectNotes, fmt.Sprintf("fact %s: object at %s has %d fields; preview may omit fields; inspect_fact before reporting full object coverage", facts[i].FactID, raw, len(t)))
+					}
 					keys := make([]string, 0, len(t))
 					for k := range t {
 						keys = append(keys, k)
@@ -351,6 +365,8 @@ func arrayOmissions(facts []agentcontract.Fact, views []agentcontract.FactView) 
 			walk(selected, path)
 		}
 	}
+	// Existing array lengths retain their priority within the shared note bound.
+	notes = append(notes, objectNotes[:min(len(objectNotes), 12-len(notes))]...)
 	if hasOmissions && len(notes) == 0 {
 		notes = append(notes, "fact omitted_paths are unknown/incomplete; inspect_fact before asserting null/empty values")
 	}
@@ -585,8 +601,22 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			}
 		}
 		for _, note := range packet.ContextOmissions {
-			if strings.HasPrefix(note, "fact ") && strings.Contains(note, "array at") {
+			if strings.HasPrefix(note, "fact ") && (strings.Contains(note, "array at") || strings.Contains(note, "object at")) {
 				extra := "\nAuthoritative full array lengths from stored Facts follow. A preview may show fewer items; inspect omitted indices before claiming coverage:\n" + note
+				if strings.Contains(note, "object at") {
+					// Repeating old object-size guidance after an unrelated result can
+					// displace its recorded reference arguments under a small budget.
+					if len(state.Facts) == 0 || !strings.HasPrefix(note, "fact "+state.Facts[len(state.Facts)-1].FactID+":") {
+						continue
+					}
+					extra = "\nAuthoritative full object size from stored Facts follows. A preview may show fewer fields; inspect omitted fields before claiming coverage:\n" + note
+					extra += "\nFact omitted_paths marks an incomplete evidence preview, not absent or empty business data. " +
+						"Visible object keys and array items may be only a subset of the stored result. " +
+						"Copying a partial preview does not satisfy a request for a complete object or collection. " +
+						"Before final, inspect requested omitted values from the existing stored Fact unless inspected_fact or visible inspection_history already provides them without relevant omissions. " +
+						"Use inspect_fact at a specific original Fact path, narrowing to omitted fields or indices when needed; do not replay successful business calls or invent hidden values. " +
+						"Unrelated omissions do not block an answer using only fully visible requested fields."
+				}
 				if contextCharacters(packet) <= r.MaxContextCharacters-utf8.RuneCountInString(prompt)-utf8.RuneCountInString(extra) {
 					prompt += extra
 				}

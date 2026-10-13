@@ -91,7 +91,15 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		if len(packet.Observations) > 0 {
 			last = packet.Observations[len(packet.Observations)-1]
 		}
-		if packet.CompletionReview == nil && !steered && last.CallRef != "" && last.Capability != "" && !strings.HasPrefix(last.Capability, "agent.") {
+		inspectedLatestFact := false
+		if last.FactID != nil && packet.InspectedFact["fact_id"] == *last.FactID && packet.InspectedFact["error_code"] == nil {
+			preview, _ := packet.InspectedFact["preview"].(map[string]any)
+			_, inspectedLatestFact = preview["value"]
+		}
+		// This inspection necessarily follows the call that produced its Fact.
+		// Keep both in the packet, without replaying the older preview after the
+		// inspected result and presenting incomplete data as the newest outcome.
+		if packet.CompletionReview == nil && !steered && !inspectedLatestFact && last.CallRef != "" && last.Capability != "" && !strings.HasPrefix(last.Capability, "agent.") {
 			var previous any = agentcontract.Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []agentcontract.ToolCall{{CallRef: last.CallRef, Capability: last.Capability, Arguments: last.Arguments, Reason: "Previously recorded call from saved runtime evidence."}}}
 			if last.ArgumentsOmitted {
 

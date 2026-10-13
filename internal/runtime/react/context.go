@@ -35,7 +35,7 @@ func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.Runt
 		}
 	}
 
-	// Array lengths describe the final preview, rather than an earlier projection.
+	// Collection sizes describe the final preview, rather than an earlier projection.
 	noteLimit := 12
 	withNotes := func(candidate agentcontract.ContextPacket, omissions []string) agentcontract.ContextPacket {
 		notes := arrayOmissions(state.Facts, candidate.Facts)
@@ -142,6 +142,13 @@ func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.Runt
 		}
 	}
 
+	// Size hints are optional. They must not displace recent evidence or recorded
+	// observations just because a new projection needs more collection hints.
+	for noteLimit > 0 && !fitsRecent(packet) && slices.ContainsFunc(packet.ContextOmissions, func(note string) bool { return strings.Contains(note, "object at") }) {
+		noteLimit--
+		packet = withNotes(packet, baseOmissions)
+	}
+
 	// The current inspection stays required. Older inspected results are useful
 	// evidence, but must not make an otherwise valid minimum packet oversized.
 	packet.InspectionHistory = slices.Clone(packet.InspectionHistory)
@@ -189,7 +196,7 @@ func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.Runt
 		}
 	}
 
-	// Detailed array-length hints are optional; omitted_paths remain on every Fact.
+	// Detailed collection-size hints are optional; omitted_paths remain on every Fact.
 	for noteLimit > 0 && contextCharacters(packet) > available {
 		noteLimit--
 		packet = withNotes(packet, baseOmissions)
@@ -235,6 +242,11 @@ func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.Runt
 			candidate.Observations = slices.Clone(packet.Observations)
 			candidate.Observations[i].Arguments = original.Arguments
 			candidate.Observations[i].ArgumentsOmitted = false
+			for noteLimit > 0 && !fitsRecent(candidate) && slices.ContainsFunc(candidate.ContextOmissions, func(note string) bool { return strings.Contains(note, "object at") }) {
+				noteLimit--
+				packet = withNotes(packet, baseOmissions)
+				candidate = withNotes(candidate, baseOmissions)
+			}
 			if fitsRecent(candidate) {
 				packet = candidate
 			}
