@@ -101,6 +101,8 @@ JSON 内容输出的首次决策说明与格式纠正说明都提供本地 `call
 
 业务决策遇到输出耗尽时，在现有每个决策或完成复核阶段最多两次模型请求（含首次请求）的范围内，提示模型缩短决策、分步处理并使用已有回执。恢复继续消耗原有轮次、累计 token 和时间预算，不自动提高配置的输出限制，不执行被截断的工具调用；完成复核仍只允许 final。每次失败与恢复请求分别保留用量，输出耗尽恢复不计作 `format_recovery_requests`。记忆抽取和控制台合成检查保留直接返回错误的行为。
 
+模型调用被请求上下文的期限终止时，业务决策与记忆抽取的用量记录均使用 `model_timeout`，保留原始 `context.DeadlineExceeded` 错误链供调用方处理；明确的安全错误码仍优先。未知错误继续归为 `model_unavailable`，取消不推断为超时，不暴露私有错误正文，也不增加重试或延长期限。单次请求与步骤总期限继续分别生效；步骤内的纠正和完成复核仍共享剩余时间。这与 [Pydantic AI 对请求、工具和整体期限的区分](https://ai.pydantic.dev/timeouts/) 一致。
+
 依据：[Roo Code 的推理及输出预算](https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/shared/api.ts#L99)、[Cline 的摘要预算调整及有界输出恢复](https://github.com/cline/cline/blob/faf05ef067dd4f5908c9e909dd757581089905ca/sdk/CHANGELOG.md#L72)。这些实现提供预算和恢复策略的参考，具体额度仍须通过部署方选定的模型验证。
 
 ## 指标与费用

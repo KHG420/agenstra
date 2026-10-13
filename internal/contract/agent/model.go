@@ -39,6 +39,9 @@ func ModelErrorCode(err error) string {
 	if errors.As(err, &registry) {
 		return registry.Code
 	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "model_timeout"
+	}
 
 	// Existing decision and projection validators return these fixed safe strings.
 	// Preserve their retry/budget behavior without exposing arbitrary error text.

@@ -75,7 +75,7 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet agentcontract
 	defer func() {
 		metrics.ElapsedMilliseconds = time.Since(started).Milliseconds()
 		if resultErr != nil {
-			metrics.ErrorCode = agentcontract.Strptr(agentcontract.ErrorCode(resultErr))
+			metrics.ErrorCode = agentcontract.Strptr(agentcontract.ModelErrorCode(resultErr))
 		}
 		decision.ModelCall = metrics
 	}()
