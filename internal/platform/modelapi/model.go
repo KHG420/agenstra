@@ -354,6 +354,15 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	if usesOutputTools {
 		raw, detail := decisionOutputToolBody(envelope.Choices[0].Message.ToolCalls, payload["tools"].([]any))
 		if detail != "" {
+			if usage := envelope.Usage; detail == "model_output_invalid_json" && outputLimit > 0 && usage != nil && usage.Output != nil && *usage.Output >= outputLimit && *usage.Output <= 1000000000 {
+				// Tool identity and count have already passed validation. A gateway
+				// can still report tool_calls after cutting its arguments at the cap.
+				var value json.RawMessage
+				arguments := envelope.Choices[0].Message.ToolCalls[0].Function.Arguments
+				if errors.Is(json.NewDecoder(strings.NewReader(arguments)).Decode(&value), io.ErrUnexpectedEOF) {
+					return nil, agentcontract.ModelDecisionError{Kind: "model_output_truncated"}
+				}
+			}
 			return nil, invalidModelOutput(ctx, detail)
 		}
 		return raw, nil

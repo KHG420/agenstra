@@ -181,7 +181,8 @@ func TestOutputToolsEmptyOutputAtEffectiveTokenLimit(t *testing.T) {
 			{name: "invalid usage", configured: 4096, output: 1000000001, want: "model_decision_invalid"},
 			{name: "complete tool at limit", configured: 4096, output: 4096, outputTool: true, arguments: `{"kind":"final","answer_markdown":"done","fact_ids":[]}`},
 			{name: "plain text at limit", configured: 4096, output: 4096, content: "done", want: "model_decision_invalid"},
-			{name: "malformed tool at limit", configured: 4096, output: 4096, outputTool: true, arguments: `{"answer_markdown":`, want: "model_decision_invalid"},
+			{name: "unfinished tool at limit", configured: 4096, output: 4096, outputTool: true, arguments: `{"answer_markdown":`, want: "model_output_truncated"},
+			{name: "malformed tool at limit", configured: 4096, output: 4096, outputTool: true, arguments: `{"answer_markdown":unquoted}`, want: "model_decision_invalid"},
 		} {
 			t.Run(field+"/"+tc.name, func(t *testing.T) {
 				requests := 0
