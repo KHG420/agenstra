@@ -79,7 +79,7 @@ func TestObjectOmissionsDoNotDisplaceArrayLengths(t *testing.T) {
 	fact := contextBudgetFact(agentcontract.JSON{"data": agentcontract.JSON{"entries": entries, "rows": []any{1, 2, 3}}})
 	view := agentcontract.FactView{Fact: fact, OmittedPaths: [][]any{{"data", "entries"}, {"data", "rows"}}}
 	notes := arrayOmissions([]agentcontract.Fact{fact}, []agentcontract.FactView{view})
-	if len(notes) != 12 || !strings.Contains(notes[0], `array at ["data","rows"] has 3 items`) ||
+	if len(notes) != 13 || !strings.Contains(notes[0], `array at ["data","rows"] has 3 items`) ||
 		!strings.Contains(notes[1], `object at ["data","entries"] has 20 fields`) {
 		t.Fatal("object hints displaced an existing array length or lost their shallow-path priority", notes)
 	}

@@ -29,6 +29,7 @@ func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.Runt
 		return packet
 	}
 	// Prior intent is useful history, but must not displace task or result evidence.
+	lastCallReason := packet.LastCallReason
 	packet.LastCallReason = ""
 	if contextCharacters(packet) <= available {
 		return packet
@@ -41,7 +42,7 @@ func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.Runt
 	}
 
 	// Collection sizes describe the final preview, rather than an earlier projection.
-	noteLimit := 12
+	noteLimit := 24
 	withNotes := func(candidate agentcontract.ContextPacket, omissions []string) agentcontract.ContextPacket {
 		notes := arrayOmissions(state.Facts, candidate.Facts)
 		notes = notes[:min(len(notes), noteLimit)]
@@ -282,6 +283,11 @@ func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.Runt
 		candidate := packet
 		candidate.Facts = candidateViews
 		candidate = withNotes(candidate, baseOmissions)
+		for noteLimit > 0 && !fitsRecent(candidate) && slices.ContainsFunc(candidate.ContextOmissions, func(note string) bool { return strings.Contains(note, "object at") }) {
+			noteLimit--
+			packet = withNotes(packet, baseOmissions)
+			candidate = withNotes(candidate, baseOmissions)
+		}
 		if fitsRecent(candidate) {
 			views, packet = candidateViews, candidate
 		}
@@ -322,6 +328,20 @@ func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.Runt
 		candidate = withNotes(candidate, omissions)
 		if contextCharacters(candidate) <= available {
 			packet, baseOmissions = candidate, omissions
+		}
+	}
+	// Schema deferral may leave room for the intent of the same visible call.
+	// Restore it after evidence, without recovering hidden arguments or displacing
+	// required information when the remaining budget is insufficient.
+	if lastCallReason != "" && len(originalObservations) > 0 && len(packet.Observations) > 0 {
+		original := originalObservations[len(originalObservations)-1]
+		last := packet.Observations[len(packet.Observations)-1]
+		if last.CallRef == original.CallRef && last.Capability == original.Capability && !last.ArgumentsOmitted && last.Arguments != nil {
+			candidate := packet
+			candidate.LastCallReason = lastCallReason
+			if contextCharacters(candidate) <= available {
+				packet = candidate
+			}
 		}
 	}
 	return packet

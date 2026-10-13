@@ -450,11 +450,9 @@ func TestContextBudgetMultiRoundInspectAndForwardCompleteValue(t *testing.T) {
 			if _, ok := packet.Observations[len(packet.Observations)-1].Arguments["payload"].(map[string]any); !ok {
 				t.Fatal("model did not receive original reference arguments")
 			}
-			ids := []string{}
-			for _, fact := range packet.Facts {
-				ids = append(ids, fact.FactID)
-			}
-			return agentcontract.Decision{Kind: "final", AnswerMarkdown: "Forwarded 9,000 characters", FactIDs: ids}, nil
+			// The complete forward receipt proves the requested result. The
+			// other saved read bodies are unrelated to this answer's claim.
+			return agentcontract.Decision{Kind: "final", AnswerMarkdown: "Forwarded 9,000 characters", FactIDs: []string{packet.Facts[4].FactID}}, nil
 		default:
 			t.Fatal("unexpected model round", rounds)
 			return agentcontract.Decision{}, nil
@@ -462,7 +460,7 @@ func TestContextBudgetMultiRoundInspectAndForwardCompleteValue(t *testing.T) {
 	})
 	runtime := &AgentRuntime{Provider: provider, Model: model, Grants: map[string]bool{"record.read": true, "record.forward": true}, MaxContextCharacters: budget}
 	result, err := runtime.Run(t.Context(), "Read records and forward the complete body of the first record")
-	if err != nil || result.Status != "completed" || rounds != 4 || len(result.Facts) != 5 || received != strings.Repeat("x", 9000) || result.Observations[4].Arguments["payload"] != received {
+	if err != nil || result.Status != "completed" || rounds != 4 || len(result.Facts) != 5 || len(result.Observations) != 5 || received != strings.Repeat("x", 9000) || result.Observations[4].Arguments["payload"] != received {
 		t.Fatal("multi-round run lost complete evidence", result, err)
 	}
 }

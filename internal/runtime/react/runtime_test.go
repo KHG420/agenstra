@@ -328,7 +328,12 @@ func TestCoreFactPreviewArrayLengthAndInspectPrompt(t *testing.T) {
 		results = append(results, agentcontract.JSON{"status": "partial", "audit": agentcontract.JSON{"trace": strings.Repeat("x", 12000)}})
 	}
 	fact := agentcontract.Fact{FactID: agentcontract.NewID(), SourceCapability: "monitor.batch", SourceVersion: "1", Value: agentcontract.JSON{"data": agentcontract.JSON{"results": results}}, Quality: "provider_reported", ObservedAt: time.Now().UTC(), ReferenceScope: "durable"}
-	model := &promptCaptureModel{decisions: []agentcontract.Decision{{Schema: "agenstra.decision.v1", Kind: "inspect_fact", FactID: fact.FactID, Path: []any{"data", "results"}}, {Schema: "agenstra.decision.v1", Kind: "inspect_fact", FactID: fact.FactID, Path: []any{"data", "results", 39, "status"}}, {Schema: "agenstra.decision.v1", Kind: "final", AnswerMarkdown: "Inspected", FactIDs: []string{fact.FactID}}}}
+	model := &promptCaptureModel{decisions: []agentcontract.Decision{
+		{Schema: "agenstra.decision.v1", Kind: "inspect_fact", FactID: fact.FactID, Path: []any{"data", "results"}},
+		{Schema: "agenstra.decision.v1", Kind: "inspect_fact", FactID: fact.FactID, Path: []any{"data", "results", 39, "status"}},
+		{Schema: "agenstra.decision.v1", Kind: "final", AnswerMarkdown: "Inspected", FactIDs: []string{fact.FactID}},
+		{Schema: "agenstra.decision.v1", Kind: "final", AnswerMarkdown: "Inspected", FactIDs: []string{fact.FactID}},
+	}}
 	runtime := &AgentRuntime{Provider: provider, Model: model}
 	state, err := runtime.NewState("Count every interval", "")
 	if err != nil {
@@ -356,7 +361,7 @@ func TestCoreFactPreviewArrayLengthAndInspectPrompt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if state.Status != "completed" || !strings.Contains(model.prompts[1], "has 40 items, but its preview shows only 32") || !strings.Contains(model.prompts[2], "Report the total as 40") {
+	if state.Status != "completed" || len(model.prompts) != 4 || !strings.Contains(model.prompts[1], "has 40 items, but its preview shows only 32") || !strings.Contains(model.prompts[2], "Report the total as 40") || !strings.Contains(model.prompts[3], "completion_feedback") || state.ModelCalls[3].Purpose != "completion_review" {
 		t.Fatalf("array reminders missing: %q status=%s", model.prompts, state.Status)
 	}
 }

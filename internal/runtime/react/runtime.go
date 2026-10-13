@@ -312,61 +312,95 @@ func arrayOmissions(facts []agentcontract.Fact, views []agentcontract.FactView) 
 	objectNotes := []string{}
 	seen := map[string]bool{}
 	hasOmissions := false
-	for i := len(facts) - 1; i >= 0; i-- {
-		hasOmissions = hasOmissions || len(views[i].OmittedPaths) > 0
-		// Whole omitted subtrees describe completeness before their individual
-		// children consume the bounded hint list. Keep the original view untouched.
-		paths := slices.Clone(views[i].OmittedPaths)
-		sort.SliceStable(paths, func(i, j int) bool { return len(paths[i]) < len(paths[j]) })
-		for _, path := range paths {
-			selected, err := agentcontract.ValueAt(agentcontract.ModelFactValue(facts[i]), path)
-			if err != nil {
-				continue
-			}
-			var walk func(any, []any)
-			walk = func(v any, p []any) {
-				if len(notes) >= 12 && len(objectNotes) >= 12 {
-					return
+	// Give every directly omitted object a chance before walking its children.
+	// Nested configuration objects in one recent result must not consume the
+	// entire object hint allowance before earlier omitted records are considered.
+	for _, directObjectsOnly := range []bool{true, false} {
+		for i := len(facts) - 1; i >= 0; i-- {
+			hasOmissions = hasOmissions || len(views[i].OmittedPaths) > 0
+			// Whole omitted subtrees describe completeness before their individual
+			// children consume the bounded hint list. Keep the original view untouched.
+			paths := slices.Clone(views[i].OmittedPaths)
+			sort.SliceStable(paths, func(i, j int) bool { return len(paths[i]) < len(paths[j]) })
+			for _, path := range paths {
+				selected, err := agentcontract.ValueAt(agentcontract.ModelFactValue(facts[i]), path)
+				if err != nil {
+					continue
 				}
-				switch t := v.(type) {
-				case []any:
-					key := facts[i].FactID + fmt.Sprint(p)
-					if !seen[key] && len(notes) < 12 {
-						seen[key] = true
-						raw, err := agentcontract.CanonicalJSON(p)
-						if err != nil {
+				var walk func(any, []any)
+				walk = func(v any, p []any) {
+					if len(notes) >= 12 && len(objectNotes) >= 12 {
+						return
+					}
+					if directObjectsOnly {
+						if _, ok := v.(map[string]any); !ok {
 							return
 						}
-						notes = append(notes, fmt.Sprintf("fact %s: array at %s has %d items; omitted null placeholders/empty previews unknown; inspect_fact", facts[i].FactID, raw, len(t)))
 					}
-					for j := 0; j < min(3, len(t)); j++ {
-						walk(t[j], append(append([]any{}, p...), j))
-					}
-				case map[string]any:
-					key := facts[i].FactID + fmt.Sprint(p)
-					if !seen[key] && len(objectNotes) < 12 {
-						seen[key] = true
-						raw, err := agentcontract.CanonicalJSON(p)
-						if err != nil {
+					switch t := v.(type) {
+					case []any:
+						key := facts[i].FactID + fmt.Sprint(p)
+						if !seen[key] && len(notes) < 12 {
+							seen[key] = true
+							raw, err := agentcontract.CanonicalJSON(p)
+							if err != nil {
+								return
+							}
+							notes = append(notes, fmt.Sprintf("fact %s: array at %s has %d items; omitted null placeholders/empty previews unknown; inspect_fact", facts[i].FactID, raw, len(t)))
+						}
+						for j := 0; j < min(3, len(t)); j++ {
+							walk(t[j], append(append([]any{}, p...), j))
+						}
+					case map[string]any:
+						keys := make([]string, 0, len(t))
+						for k := range t {
+							keys = append(keys, k)
+						}
+						sort.Strings(keys)
+						key := facts[i].FactID + fmt.Sprint(p)
+						if !seen[key] && len(objectNotes) < 12 {
+							seen[key] = true
+							raw, err := agentcontract.CanonicalJSON(p)
+							if err != nil {
+								return
+							}
+							note := fmt.Sprintf("fact %s: object at %s has %d fields; preview may omit fields; inspect_fact before reporting full object coverage", facts[i].FactID, raw, len(t))
+							var visible map[string]any
+							if preview, err := agentcontract.ValueAt(views[i].Value, p); err == nil {
+								visible, _ = preview.(map[string]any)
+							}
+							missing := []string{}
+							for _, name := range keys {
+								if _, present := visible[name]; present {
+									continue
+								}
+								candidate := append(slices.Clone(missing), name)
+								if len(candidate) <= 32 && contextCharacters(candidate) <= 1024 {
+									missing = candidate
+								}
+							}
+							if len(missing) > 0 {
+								if names, err := agentcontract.CanonicalJSON(missing); err == nil {
+									note += fmt.Sprintf("; stored but omitted field names: %s; these named fields exist in the authorized stored result, values unknown in this preview; inspect_fact to read their values (bounded key-name subset)", names)
+								}
+							}
+							objectNotes = append(objectNotes, note)
+						}
+						if directObjectsOnly {
 							return
 						}
-						objectNotes = append(objectNotes, fmt.Sprintf("fact %s: object at %s has %d fields; preview may omit fields; inspect_fact before reporting full object coverage", facts[i].FactID, raw, len(t)))
-					}
-					keys := make([]string, 0, len(t))
-					for k := range t {
-						keys = append(keys, k)
-					}
-					sort.Strings(keys)
-					for _, k := range keys {
-						walk(t[k], append(append([]any{}, p...), k))
+						for _, k := range keys {
+							walk(t[k], append(append([]any{}, p...), k))
+						}
 					}
 				}
+				walk(selected, path)
 			}
-			walk(selected, path)
 		}
 	}
-	// Existing array lengths retain their priority within the shared note bound.
-	notes = append(notes, objectNotes[:min(len(objectNotes), 12-len(notes))]...)
+	// Keep each existing array hint before bounded object hints. Many nested
+	// arrays must not hide an omitted object's known field presence.
+	notes = append(notes, objectNotes...)
 	if hasOmissions && len(notes) == 0 {
 		notes = append(notes, "fact omitted_paths are unknown/incomplete; inspect_fact before asserting null/empty values")
 	}
@@ -607,7 +641,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		}
 		if review != nil {
 			purpose = "completion_review"
-			prompt += "\n" + completionReviewPrompt
+			prompt += "\n" + completionReviewPrompt + "\n" + omittedFieldPresenceReviewPrompt
 		}
 		if packet.Progress != nil {
 			prompt += "\n" + progressUsagePrompt
@@ -838,7 +872,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 				Reject(state, "final", "agent.final", "completion_incomplete", agentcontract.JSON{"feedback": d.CompletionFeedback}, "")
 				return nil
 			}
-			if review == nil && d.Kind == "final" && len(packet.ActionOutcomes) > 0 {
+			if review == nil && d.Kind == "final" && completionNeedsReview(d, packet) {
 				// Do not spend a review request on a proposal already known to
 				// violate publication rules. Ordinary correction retains evidence.
 				if _, code, feedback := validateFinalEvidence(d, facts, r.ConnectionID); code != "" {
