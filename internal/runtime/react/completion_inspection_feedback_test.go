@@ -80,9 +80,16 @@ func TestCompletionFeedbackInspectsSavedEvidenceWithoutReplayingWrite(t *testing
 	if !ok || len(value) != 80 || !omittedOK || len(omitted) != 0 || len(restored.Pending) != 0 {
 		t.Fatal("saved inspection did not retain the complete authorized object", restored.InspectedFact)
 	}
-	r.Model = decisionModelFunc(func(_ context.Context, packet agentcontract.ContextPacket, _ string) (agentcontract.Decision, error) {
+	r.Model = decisionModelFunc(func(_ context.Context, packet agentcontract.ContextPacket, prompt string) (agentcontract.Decision, error) {
 		if packet.InspectedFact == nil {
 			t.Fatal("the complete evidence did not reach the model")
+		}
+		if packet.CompletionReview == nil {
+			if !strings.Contains(prompt, "Completed stored-evidence inspection") || !strings.Contains(prompt, factID) || !strings.Contains(prompt, `"path":["data","entries"]`) {
+				t.Fatal("the completed inspection was still presented as unfinished evidence", prompt)
+			}
+		} else if strings.Contains(prompt, "Completed stored-evidence inspection") {
+			t.Fatal("normal inspection feedback entered a final-only review")
 		}
 		return agentcontract.Decision{Kind: "final", AnswerMarkdown: "All 80 entries were returned.", FactIDs: []string{factID}}, nil
 	})

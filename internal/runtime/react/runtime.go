@@ -646,6 +646,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			}
 		}
 		if state.InspectedFact != nil {
+			if review == nil && len(state.Decisions) > 0 && state.Decisions[len(state.Decisions)-1]["kind"] == "inspect_fact" {
+				if usage := inspectionUsagePrompt(packet.InspectedFact); usage != "" {
+					prompt += "\n" + usage
+				}
+			}
 			if arrayLength, ok := jsonvalue.Index(state.InspectedFact["array_length"]); ok {
 				if preview, ok := state.InspectedFact["preview"].(map[string]any); ok {
 					if shown, ok := preview["value"].([]any); ok && len(shown) < arrayLength {
