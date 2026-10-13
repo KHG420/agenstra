@@ -130,6 +130,7 @@ func decisionOutputToolPrompt(prompt string, completionReview bool) string {
 		line = strings.ReplaceAll(line, "Each call_ref must be new.", "The adapter assigns fresh local call references.")
 		line = strings.ReplaceAll(line, `Example: {"schema":"agenstra.decision.v1",`, `Example submit_decision arguments: {`)
 		line = strings.ReplaceAll(line, "no tools or other decision kinds", "no capability calls or other decision kinds")
+		line = strings.ReplaceAll(line, "No tools or other decision kinds", "No capability calls or other decision kinds")
 		line = strings.ReplaceAll(line, "tools and other decision kinds are not allowed", "capability calls and other decision kinds are not allowed")
 		line = strings.ReplaceAll(line, "propose any tool call", "propose any capability call")
 		retained = append(retained, line)
