@@ -19,6 +19,13 @@ func TestModelEmptyOutputAtEffectiveTokenLimit(t *testing.T) {
 	}{
 		{name: "reasoning consumed limit", configured: 4096, output: 4096, finish: "stop", want: "model_output_truncated"},
 		{name: "whitespace at limit", configured: 4096, output: 4096, content: " \n\t", finish: "stop", want: "model_output_truncated"},
+		{name: "incomplete string at limit", configured: 4096, output: 4096, content: `{"kind":"final","answer_markdown":"partial`, finish: "stop", want: "model_output_truncated"},
+		{name: "incomplete object at packet limit", configured: 4096, packetLimit: 256, output: 256, content: `{"kind":"final","answer_markdown":"reply",`, finish: "stop", want: "model_output_truncated"},
+		{name: "incomplete below limit", configured: 4096, output: 4095, content: `{"kind":"final","answer_markdown":"partial`, finish: "stop", want: "model_decision_invalid"},
+		{name: "broken syntax at limit", configured: 4096, output: 4096, content: `{"kind":"final","answer_markdown":unquoted}`, finish: "stop", want: "model_decision_invalid"},
+		{name: "incomplete with unknown limit", output: 4096, content: `{"kind":"final","answer_markdown":"partial`, finish: "stop", want: "model_decision_invalid"},
+		{name: "incomplete with missing usage", configured: 4096, omitUsage: true, content: `{"kind":"final","answer_markdown":"partial`, finish: "stop", want: "model_decision_invalid"},
+		{name: "complete business object at limit", configured: 4096, output: 4096, content: `{"count":0}`, finish: "stop", want: "model_decision_invalid"},
 		{name: "packet limit", configured: 4096, packetLimit: 256, output: 256, finish: "stop", want: "model_output_truncated"},
 		{name: "remaining run budget", configured: 4096, remaining: 100, output: 90, finish: "stop", want: "model_output_truncated"},
 		{name: "empty below limit", configured: 4096, output: 4095, finish: "stop", want: "model_decision_invalid"},
@@ -90,6 +97,69 @@ func TestMemoryOutputExhaustionRetainsUsageWithoutRecovery(t *testing.T) {
 	proposals, metrics, err := model.ExtractMemoriesMeasured(t.Context(), agentcontract.MemoryExtractionRequest{Text: "Use Chinese in reports.", MaxOutputTokens: 8192})
 	if agentcontract.ErrorCode(err) != "model_output_truncated" || len(proposals) != 0 || requests != 1 || metrics.Attempts != 1 || metrics.OutputTokens != 8192 || metrics.ReasoningOutputTokens == nil || *metrics.ReasoningOutputTokens != 8192 || metrics.FormatError != "" || metrics.FormatRecovery {
 		t.Fatalf("memory exhaustion: error=%v proposals=%v requests=%d metrics=%+v", err, proposals, requests, metrics)
+	}
+}
+
+func TestNonemptyOutputLimitClassificationForNativeAndMemoryJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, want string
+		memory              bool
+	}{
+		{name: "native incomplete", content: `{"schema":"agenstra.decision.v1","kind":"final","answer_markdown":"partial`, want: "model_output_truncated"},
+		{name: "native complete", content: `{"schema":"agenstra.decision.v1","kind":"final","answer_markdown":"done","fact_ids":[]}`},
+		{name: "native syntax error", content: `{"kind":unquoted}`, want: "model_decision_invalid"},
+		{name: "memory incomplete", memory: true, content: `{"proposals":[`, want: "model_output_truncated"},
+		{name: "memory complete", memory: true, content: `{"proposals":[]}`},
+		{name: "memory syntax error", memory: true, content: `{"proposals":unquoted}`, want: "memory_extraction_invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				var request agentcontract.JSON
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+				}
+				format := request["response_format"].(map[string]any)["type"]
+				wantFormat := "json_schema"
+				if tc.memory {
+					wantFormat = "json_object"
+				}
+				if request["max_tokens"] != float64(2048) || format != wantFormat {
+					t.Errorf("request budget or format changed: %v %v", request["max_tokens"], format)
+				}
+				reply := agentcontract.JSON{"choices": []any{agentcontract.JSON{"finish_reason": "stop", "message": agentcontract.JSON{"content": tc.content}}}, "usage": agentcontract.JSON{"prompt_tokens": 10, "completion_tokens": 2048}}
+				if err := json.NewEncoder(w).Encode(reply); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			model, err := NewHTTPJSONDecisionModel("test", server.URL, "test-key", time.Second, server.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			model.DecisionOutputMode, model.MaxOutputTokens = "json_schema", 4096
+			var metrics *agentcontract.ModelCallMetrics
+			if tc.memory {
+				var proposals []agentcontract.MemoryProposal
+				var measured agentcontract.ModelCallMetrics
+				proposals, measured, err = model.ExtractMemoriesMeasured(t.Context(), agentcontract.MemoryExtractionRequest{Text: "Use Chinese.", MaxOutputTokens: 2048})
+				metrics = &measured
+				if err != nil && len(proposals) != 0 {
+					t.Fatal("failed memory output produced proposals", proposals)
+				}
+			} else {
+				var decision agentcontract.Decision
+				decision, err = model.Decide(t.Context(), agentcontract.ContextPacket{Schema: "agenstra.context.v1", MaxModelOutputTokens: 2048}, "Return one decision.")
+				metrics = decision.ModelCall
+			}
+			if agentcontract.ErrorCode(err) != tc.want || requests != 1 || metrics == nil || metrics.OutputTokens != 2048 || metrics.FinishReason != "stop" {
+				t.Fatalf("error=%v requests=%d metrics=%+v", err, requests, metrics)
+			}
+			if tc.want == "model_output_truncated" && (metrics.FormatError != "" || metrics.FormatRecovery) {
+				t.Fatal("output exhaustion became format recovery", metrics)
+			}
+		})
 	}
 }
 

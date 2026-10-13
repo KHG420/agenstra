@@ -362,6 +362,15 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		return nil, invalidModelOutput(ctx, "model_output_empty")
 	}
 	body = unwrapModelJSON([]byte(envelope.Choices[0].Message.Content))
+	if usage := envelope.Usage; outputLimit > 0 && usage != nil && usage.Output != nil && *usage.Output >= outputLimit && *usage.Output <= 1000000000 {
+		// Compatible gateways may also label a nonempty cut-off JSON response as
+		// stop. Infer exhaustion only for an unfinished JSON value at the known
+		// request limit; complete values and other syntax errors keep their checks.
+		var value json.RawMessage
+		if errors.Is(json.NewDecoder(bytes.NewReader(body)).Decode(&value), io.ErrUnexpectedEOF) {
+			return nil, agentcontract.ModelDecisionError{Kind: "model_output_truncated"}
+		}
+	}
 	if format := payload["response_format"].(agentcontract.JSON); format["type"] == "json_schema" {
 		if len(envelope.Choices[0].Message.ToolCalls) != 0 {
 			return nil, invalidModelOutput(ctx, "model_output_tool_calls_invalid")
