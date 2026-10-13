@@ -254,9 +254,40 @@ func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.Runt
 		}
 	}
 
-	// Allocate remaining space to recent evidence first, counting provenance and
+	// Keep small complete receipts before spending the rest on partial large
+	// previews. Only authorized values count, and the recent preview still keeps
+	// its reserve. Equal-sized receipts retain the existing newest-first order.
+	complete := []int{}
+	completeSizes := make(map[int]int, len(views))
+	for i := len(views) - 2; i >= 0; i-- {
+		size := contextCharacters(agentcontract.ModelFactValue(state.Facts[i]))
+		if size <= 6000 {
+			complete = append(complete, i)
+			completeSizes[i] = size
+		}
+	}
+	sort.SliceStable(complete, func(i, j int) bool {
+		return completeSizes[complete[i]] < completeSizes[complete[j]]
+	})
+	for _, i := range complete {
+		preview := factView(state.Facts[i], 6000)
+		preview.ReferenceAvailable = views[i].ReferenceAvailable
+		candidateViews := slices.Clone(views)
+		candidateViews[i] = preview
+		candidate := packet
+		candidate.Facts = candidateViews
+		candidate = withNotes(candidate, baseOmissions)
+		if fitsRecent(candidate) {
+			views, packet = candidateViews, candidate
+		}
+	}
+
+	// Allocate remaining space to recent partial evidence, counting provenance and
 	// omission metadata as part of each complete candidate packet.
 	for i := len(views) - 1; i >= 0; i-- {
+		if len(views[i].OmittedPaths) == 0 {
+			continue
+		}
 		budget := min(6000, available-contextCharacters(packet)+2)
 		for budget > 2 {
 			preview := factView(state.Facts[i], budget)
