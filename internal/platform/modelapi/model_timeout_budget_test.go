@@ -15,15 +15,22 @@ func TestBoundedModelBudgetCannotReplayTimedOutRequest(t *testing.T) {
 		name     string
 		limit    int64
 		attempts int64
+		headers  bool
 	}{
 		{name: "bounded", limit: 10000, attempts: 1},
 		{name: "unbounded", attempts: 3},
+		{name: "bounded body", limit: 10000, attempts: 1, headers: true},
+		{name: "unbounded body", attempts: 3, headers: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests atomic.Int64
 			release := make(chan struct{})
-			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 				requests.Add(1)
+				if tc.headers {
+					writer.WriteHeader(http.StatusOK)
+					writer.(http.Flusher).Flush()
+				}
 				<-release
 			}))
 			defer func() { close(release); server.Close() }()

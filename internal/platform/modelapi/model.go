@@ -237,6 +237,10 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 				body, requestErr = io.ReadAll(io.LimitReader(res.Body, (8<<20)+1))
 				if requestErr != nil {
 					code, retry = "model_unavailable", true
+					var timeout net.Error
+					if errors.As(requestErr, &timeout) && timeout.Timeout() {
+						code = "model_timeout"
+					}
 				} else if len(body) > 8<<20 {
 					code = "model_response_too_large"
 				}
