@@ -200,7 +200,11 @@ func validateRestEndpoint(e agentcontract.RestEndpoint, headers map[string]strin
 	if !strings.HasPrefix(e.Path, "/") || strings.ContainsAny(e.Path, "?\\#%") || strings.Contains(e.Path, "//") {
 		return errors.New("REST path contains unsafe syntax")
 	}
-	for _, seg := range strings.Split(e.Path[1:], "/") {
+	segments := strings.Split(e.Path[1:], "/")
+	for index, seg := range segments {
+		if seg == "" && index == len(segments)-1 {
+			continue
+		}
 		if seg == "" || seg == "." || seg == ".." {
 			return errors.New("REST path contains empty or traversal segment")
 		}
