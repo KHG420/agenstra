@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/KHG420/agenstra/internal/base/jsonvalue"
@@ -91,7 +92,7 @@ func (h *AgentHost) extractRunMemories(ctx context.Context, run agentcontract.St
 	}
 	if err != nil {
 		metrics.ErrorCode = agentcontract.Strptr(agentcontract.ModelErrorCode(err))
-		if remaining > 0 && (*metrics.ErrorCode == "model_timeout" || *metrics.ErrorCode == "model_outcome_unknown") && !metrics.UsageAvailable && metrics.Attempts > 0 {
+		if remaining > 0 && (*metrics.ErrorCode == "model_timeout" || *metrics.ErrorCode == "model_outcome_unknown" || (*metrics.ErrorCode == "model_unavailable" && errors.Is(err, context.Canceled))) && !metrics.UsageAvailable && metrics.Attempts > 0 {
 			// Interrupted transport does not settle the upstream output cost.
 			metrics.Reservation = true
 			metrics.EstimatedInputTokens = reservation.EstimatedInputTokens

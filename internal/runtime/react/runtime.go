@@ -839,7 +839,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		}
 		if err != nil {
 			metrics.ErrorCode = agentcontract.Strptr(agentcontract.ModelErrorCode(err))
-			if r.MaxModelTokens > 0 && (*metrics.ErrorCode == "model_timeout" || *metrics.ErrorCode == "model_outcome_unknown") && !metrics.UsageAvailable && metrics.Attempts > 0 {
+			if r.MaxModelTokens > 0 && (*metrics.ErrorCode == "model_timeout" || *metrics.ErrorCode == "model_outcome_unknown" || (*metrics.ErrorCode == "model_unavailable" && errors.Is(err, context.Canceled))) && !metrics.UsageAvailable && metrics.Attempts > 0 {
 				// Interrupted transport cannot release a bounded allowance already dispatched.
 				metrics.Reservation = true
 				metrics.EstimatedInputTokens = reservation.EstimatedInputTokens
