@@ -789,8 +789,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			c.TokenUtilization = &ratio
 			c.OverLimit = c.OverLimit || measurement.Tokens > *tokenLimit
 		}
-		raw, err := agentcontract.CanonicalJSON(packet)
-		if err != nil {
+		if _, err := agentcontract.CanonicalJSON(packet); err != nil {
 			state.Status = "failed"
 			state.ErrorCode = agentcontract.Strptr("run_state_invalid")
 			return nil
@@ -810,7 +809,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			return nil
 		}
 		state.RoundsUsed++
-		reservation := agentcontract.ModelCallMetrics{Purpose: purpose, Reservation: true, Round: state.RoundsUsed, Attempts: 1, EstimatedInputTokens: int64(len(raw) + len(prompt) + 128), EstimatedOutputTokens: int64(r.MaxModelOutputTokens), ErrorCode: agentcontract.Strptr("model_outcome_unknown")}
+		reservation := agentcontract.ModelCallMetrics{Purpose: purpose, Reservation: true, Round: state.RoundsUsed, Attempts: 1, EstimatedInputTokens: measurement.Tokens, EstimatedOutputTokens: int64(r.MaxModelOutputTokens), ErrorCode: agentcontract.Strptr("model_outcome_unknown")}
 		if r.MaxModelTokens > 0 {
 			reservation.EstimatedInputTokens = r.MaxModelTokens - state.ModelUsage.BudgetTokens
 			reservation.EstimatedOutputTokens = 0
@@ -826,7 +825,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		}
 		started := time.Now()
 		d, err := r.Model.Decide(ctx, modelPacket, prompt)
-		metrics := agentcontract.ModelCallMetrics{Attempts: 1, EstimatedInputTokens: int64(len(raw) + len(prompt) + 128), ElapsedMilliseconds: time.Since(started).Milliseconds()}
+		metrics := agentcontract.ModelCallMetrics{Attempts: 1, EstimatedInputTokens: measurement.Tokens, ElapsedMilliseconds: time.Since(started).Milliseconds()}
 		if d.ModelCall != nil {
 			metrics = *d.ModelCall
 		}
