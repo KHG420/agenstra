@@ -193,7 +193,7 @@ Web 导出的是包含 `manifest` 与 `skills` 正文的 JSON 文件，可从 We
 
 ## REST 数组结果的模型字段投影
 
-`model_output.paths` 相对于能力结果 `data`，沿用最多 64 条、每条最多 16 段的上限。对象字段保持原义；当当前 `output_schema` 节点是带统一 `items` 的数组时，`"*"` 对该数组的每一项应用余下路径。例如 REST 原响应的 `data` 是分组数组，可使用 `response_path: ["data"]` 和 `response_mode: "wrap"` 将它保留为 `{"result": [...]}`，再声明：
+`model_output.paths` 相对于能力结果 `data`，最多 128 条、每条最多 16 段的上限。对象字段保持原义；当当前 `output_schema` 节点是带统一 `items` 的数组时，`"*"` 对该数组的每一项应用余下路径。例如 REST 原响应的 `data` 是分组数组，可使用 `response_path: ["data"]` 和 `response_mode: "wrap"` 将它保留为 `{"result": [...]}`，再声明：
 
 ```json
 {"model_output":{"paths":[["result","*","id"],["result","*","name"],["result","*","platform"],["result","*","status"]]}}
