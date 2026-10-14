@@ -28,9 +28,9 @@ func requiresArrayModelProjection(value any, path []string) bool {
 	return false
 }
 
-// A present null ancestor is a business value, distinct from an absent field.
-// Leaf nulls already follow the ordinary object projection path.
-func hasNullModelContainer(value any, path []string) bool {
+// A present null or empty object ancestor is distinct from an absent field.
+// Leaf values already follow the ordinary object projection path.
+func hasPreservedModelContainer(value any, path []string) bool {
 	for _, field := range path {
 		if value == nil {
 			return true
@@ -38,6 +38,9 @@ func hasNullModelContainer(value any, path []string) bool {
 		object, ok := value.(map[string]any)
 		if !ok {
 			return false
+		}
+		if len(object) == 0 {
+			return true
 		}
 		child, exists := object[field]
 		if !exists {
@@ -87,6 +90,9 @@ func modelProjectionPath(value any, path []string) (any, bool) {
 	}
 	switch data := value.(type) {
 	case map[string]any:
+		if len(data) == 0 {
+			return JSON{}, true
+		}
 		child, exists := data[path[0]]
 		if !exists {
 			return nil, false

@@ -76,3 +76,38 @@ func TestNullableModelOutputRequiresPathInEveryNonNullBranch(t *testing.T) {
 		t.Fatalf("shared branch path rejected: %v", err)
 	}
 }
+
+func TestModelFactValuePreservesEmptyObjects(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		data JSON
+		path []string
+		want string
+	}{
+		{"empty object", JSON{"optional": JSON{}}, []string{"optional", "id"}, `{"data":{"optional":{}}}`},
+		{"nested empty object", JSON{"optional": JSON{"child": JSON{}}}, []string{"optional", "child", "id"}, `{"data":{"optional":{"child":{}}}}`},
+		{"null object", JSON{"optional": nil}, []string{"optional", "id"}, `{"data":{"optional":null}}`},
+		{"absent object", JSON{}, []string{"optional", "id"}, `{"data":{}}`},
+		{"private-only object", JSON{"optional": JSON{"secret": "hidden"}}, []string{"optional", "id"}, `{"data":{}}`},
+		{"empty array member", JSON{"items": []any{JSON{"optional": JSON{}}}}, []string{"items", "*", "optional", "id"}, `{"data":{"items":[{"optional":{}}]}}`},
+		{"missing array member field", JSON{"items": []any{JSON{}}}, []string{"items", "*", "optional", "id"}, `{"data":{"items":[{}]}}`},
+		{"null array member field", JSON{"items": []any{JSON{"optional": nil}}}, []string{"items", "*", "optional", "id"}, `{"data":{"items":[{"optional":null}]}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fact := Fact{Value: JSON{"data": test.data}, ModelOutput: &ModelOutput{Paths: [][]string{test.path}}}
+			before, err := CanonicalJSON(fact.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			visible := ModelFactValue(fact)
+			actual, err := CanonicalJSON(visible)
+			if err != nil || string(actual) != test.want {
+				t.Fatalf("projected evidence: %s want %s error %v", actual, test.want, err)
+			}
+			after, err := CanonicalJSON(fact.Value)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("complete private evidence changed: %s error %v", after, err)
+			}
+		})
+	}
+}

@@ -470,7 +470,7 @@ func projectedModelData(data JSON, output *ModelOutput) JSON {
 		}
 	}
 	for _, path := range output.Paths {
-		if hasNullModelContainer(data, path) {
+		if hasPreservedModelContainer(data, path) {
 			return projectedContainerModelData(data, output)
 		}
 	}
