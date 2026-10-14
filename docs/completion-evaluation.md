@@ -119,3 +119,5 @@ AGENSTRA_LIVE_EVAL=1 go test -run TestLiveWriteCompletionConsistencyReplay -v -c
 [快速接入指南](quick-integration.md)提供 `agenstra-evaluate` 的案例格式和运行命令。它分别验证状态、成功能力、禁止能力与最新被引用的字段值，生成带诊断和预算的 JSON 报告；不自动批准写操作。`run_id` 可用于在用户处理审批或追问后只读复验同一任务。
 
 评测 CLI 对完成任务的字段断言会按运行快照中的 `artifact_ids`，通过带用户认证的 `/runs/{run_id}/artifacts/{id}` 读取完整 Fact，再交给 `EvaluateRun`。产物读取失败或 Fact ID 不匹配会使评测失败。嵌入式直接调用 `EvaluateRun` 时，调用方须提供含完整 Facts 的运行快照；该函数不拥有 Store，也不会自行访问数据库。
+
+最后一条决策为合法的 `approve_completion` 时，字段验收沿用紧邻的 `final` 草稿引用，并核对该草稿正文与实际发布回答完全一致。中间插入其他决策、批准记录携带替换字段、旧证据被较新证据推翻或未引用所需 Fact 时仍然失败；批准标记本身不提供业务证据。这沿用既有决策记录，不增加第二份完成状态。与 [LangSmith 代码验收器](https://github.com/langchain-ai/docs/blob/main/src/langsmith/code-evaluator-sdk.mdx)区分应用输出和执行轨迹的原则一致，具体批准和引用规则以 Agenstra 的冻结草稿契约为准。

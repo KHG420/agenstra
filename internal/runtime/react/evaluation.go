@@ -62,13 +62,29 @@ func EvaluateRun(ctx context.Context, run agentcontract.StoredRun, c agentcontra
 		add("forbidden_capability", name, !attempted[name], "forbidden_capability_attempted")
 	}
 	var citations []string
-	if len(state.Decisions) > 0 {
-		last, err := json.Marshal(state.Decisions[len(state.Decisions)-1])
+	index := len(state.Decisions) - 1
+	approved := false
+	if index >= 0 && state.Decisions[index]["kind"] == "approve_completion" {
+		raw, err := json.Marshal(state.Decisions[index])
+		if err != nil {
+			return result, agentcontract.NewHostError("run_state_invalid")
+		}
+		// A compact verdict approves only its immediately preceding frozen draft.
+		// Never borrow citations across a later action or from a replaced answer.
+		if _, err := agentcontract.StrictDecision(raw); err == nil {
+			index--
+			approved = true
+		} else {
+			index = -1
+		}
+	}
+	if index >= 0 {
+		last, err := json.Marshal(state.Decisions[index])
 		if err != nil {
 			return result, agentcontract.NewHostError("run_state_invalid")
 		}
 		var decision agentcontract.Decision
-		if json.Unmarshal(last, &decision) == nil && decision.Kind == "final" {
+		if json.Unmarshal(last, &decision) == nil && decision.Kind == "final" && (!approved || decision.AnswerMarkdown == state.AnswerMarkdown) {
 			citations = decision.FactIDs
 		}
 	}
