@@ -11,12 +11,14 @@ import (
 )
 
 type capabilityMatch struct {
-	name  string
-	score int
-	exact bool
+	name      string
+	score     int
+	exact     bool
+	exactName bool
 }
 
 var qualifiedCapabilityQueryPattern = regexp.MustCompile(`[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)+`)
+var projectCapabilityQueryPattern = regexp.MustCompile(`[a-z][a-z0-9_.-]*::[a-z_][a-z0-9_-]*(?:\.[a-z_][a-z0-9_-]*)*`)
 
 // Han text has no space-delimited words. Overlapping short phrases retain
 // natural-language matches without a dictionary, model request or business IO.
@@ -27,6 +29,11 @@ func capabilityQueryTerms(query string, significantOnly bool) []string {
 			seen[term] = true
 			terms = append(terms, term)
 		}
+	}
+	// Preserve the complete routed identity before word splitting separates the
+	// project delimiter or hyphens. A local operation alone cannot select a source.
+	for _, name := range projectCapabilityQueryPattern.FindAllString(strings.ToLower(query), -1) {
+		add(name)
 	}
 	for _, part := range strings.FieldsFunc(strings.ToLower(query), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '.' }) {
 		runes := []rune(part)
@@ -156,7 +163,9 @@ func searchAuthorizedCapabilities(caps map[string]agentcontract.CapabilityDescri
 		nameText, description, fields, qualifiedOperations := capabilitySearchText(cap)
 		score := 0
 		exact := false
+		exactName := false
 		for _, term := range terms {
+			exactName = exactName || nameText == term
 			exact = exact || nameText == term || agentcontract.ContainsString(qualifiedOperations, term)
 			switch {
 			case nameText == term:
@@ -173,10 +182,15 @@ func searchAuthorizedCapabilities(caps map[string]agentcontract.CapabilityDescri
 			}
 		}
 		if score > 0 {
-			matches = append(matches, capabilityMatch{name: name, score: score, exact: exact})
+			matches = append(matches, capabilityMatch{name: name, score: score, exact: exact, exactName: exactName})
 		}
 	}
 	sort.Slice(matches, func(i, j int) bool {
+		// An explicit capability identity outranks an operation mentioned inside
+		// another capability's contract, even when both describe the same action.
+		if matches[i].exactName != matches[j].exactName {
+			return matches[i].exactName
+		}
 
 		// A fully qualified operation in the pinned contract identifies its
 		// capability more precisely than shared module names or field words.

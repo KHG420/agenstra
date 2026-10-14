@@ -91,6 +91,8 @@ Fact 预览计算对象和数组的结构开销以及标量替代值。整体能
 
 启用 `max_context_capabilities` 后，运行先选择数量受限的授权能力，优先提供这些能力的完整输入 Schema；整份上下文预算不足时才缩略契约并保留 `schema_requires_inspection` 标记。`search_capabilities(query)` 在当前固定版本及实时授权范围内检索名称、描述和完整输入 Schema 中的字段、`const` / `enum` 字符串及参数说明，包括联合分支和嵌套参数。它只读取目录，不调用业务接口；命中能力进入下一轮目录，仍被缩略的契约通过 `inspect_capability` 展开。宿主应在模块描述中保留可执行操作名和业务词汇，避免大 Schema 延迟展开后只剩“修改”等笼统说明。空搜索结果只表示当前查询没有授权匹配，不能推断宿主不支持该操作或用户没有权限；历史回答也不能覆盖当前目录。未启用目录数量限制时，沿用原有 `ModelView` 的 2,000 字符缩略规则。
 
+任务或搜索查询中明确指定完整能力名时，先匹配这个能力身份，再考虑其他能力契约中的同名操作和普通词法相关性。跨项目的 `pack::capability` 保留项目命名空间，包括项目名中的点、下划线和连字符；相同的本地操作名不会替代明确指定的来源。匹配仍限于实时授权目录，不授予权限或强制执行。此取舍参考 [OpenAI Agents SDK 对命名空间与工具名的完整身份处理](https://github.com/openai/openai-agents-python/blob/adeafad8f3d692237748113bb64de527ff55df1e/src/agents/_tool_identity.py#L176-L187)。
+
 这个取舍参考了 [OpenAI Tool Search](https://developers.openai.com/api/docs/guides/tools-tool-search)、[Anthropic Tool Search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool) 和 [Pydantic AI Tool Search](https://pydantic.dev/docs/ai/capabilities/tool-search/) 的按需发现机制。框架沿用已有 JSON 决策与本地搜索，不要求供应商原生工具搜索；相比 [LangChain LLM Tool Selector](https://docs.langchain.com/oss/python/langchain/middleware/built-in#llm-tool-selector)，这里无需每轮增加一次模型筛选请求。词法搜索的召回取决于宿主描述和查询词，仍须在实际模型上验收，不能把单次无匹配当成完整能力审计。
 
 多主题任务按已有决策记录保留近期查看过的能力和历史搜索的首个匹配，避免后一主题的搜索立即覆盖前一主题的工具。最新搜索的首个结果优先进入目录；其余位置先给当前检查和近期发现，再按最新搜索及原任务补充，全部遵守 `max_context_capabilities` 和实时授权。框架从固定发布版本重新解析这些契约，不保存第二份工具目录；字符和 token 预算仍可缩略非当前检查的 Schema。这个取舍对应成熟系统保留已发现工具引用的做法，使用现有决策状态，无需新增模型请求或宿主接线。

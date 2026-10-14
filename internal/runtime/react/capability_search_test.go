@@ -332,3 +332,53 @@ func TestCapabilitySearchPrioritizesExactQualifiedOperation(t *testing.T) {
 		t.Fatal("exact operation match exposed a revoked capability", got)
 	}
 }
+
+func TestCapabilitySearchPreservesExactProjectCapability(t *testing.T) {
+	for _, target := range []string{"ledger-east::records.getSummary", "ledger.east::records-read", "ledger_east::lookup"} {
+		t.Run(target, func(t *testing.T) {
+			testExactProjectCapability(t, target)
+		})
+	}
+}
+
+func testExactProjectCapability(t *testing.T, target string) {
+	t.Helper()
+	local := strings.SplitN(target, "::", 2)[1]
+	other := "ledger-west::" + local
+	caps := map[string]agentcontract.CapabilityDescription{
+		target: {Name: target, Description: "Read summary"},
+		other:  {Name: other, Description: "Read summary"},
+		"ui.records_read": {Name: "ui.records_read", InputSchema: agentcontract.JSON{
+			"type": "object", "properties": agentcontract.JSON{"operation": agentcontract.JSON{"const": local}},
+		}},
+	}
+	grants := map[string]bool{}
+	for name := range caps {
+		grants[name] = true
+	}
+	for _, query := range []string{
+		target,
+		"仅调用" + target + "一次",
+		"Only use `" + strings.ToUpper(target) + "`; preserve the result.",
+		"Only use " + target + ".",
+	} {
+		got := searchAuthorizedCapabilities(caps, grants, query, 1)
+		if len(got) != 1 || got[0] != target {
+			t.Fatalf("exact project capability %q displaced by a local operation: %v", query, got)
+		}
+		names, total, _ := selectedCapabilityNames(caps, grants, query, &agentcontract.RuntimeState{}, 1)
+		if len(names) != 1 || names[0] != target || total != len(caps) {
+			t.Fatalf("initial bounded catalog lost exact project capability %q: %v (total %d)", query, names, total)
+		}
+	}
+	if terms := capabilityQueryTerms(target+"Suffix", false); agentcontract.ContainsString(terms, strings.ToLower(target)) {
+		t.Fatal("partial project capability incorrectly treated as an exact identity", terms)
+	}
+	if got := searchAuthorizedCapabilities(caps, grants, other, 1); len(got) != 1 || got[0] != other {
+		t.Fatal("another source with the same local operation lost its namespace", got)
+	}
+	grants[target] = false
+	if got := searchAuthorizedCapabilities(caps, grants, target, 8); agentcontract.ContainsString(got, target) {
+		t.Fatal("explicit project name exposed a revoked capability", got)
+	}
+}
