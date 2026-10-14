@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/KHG420/agenstra/internal/base/jsonvalue"
@@ -113,7 +115,8 @@ func Draft(doc map[string]any, name, baseURLEnv string, operations []string, eff
 			}
 			byLocation := map[string]map[string]any{"path": {}, "query": {}}
 			required := map[string][]any{"path": {}, "query": {}}
-			for _, p := range parameterMap {
+			for _, parameterKey := range slices.Sorted(maps.Keys(parameterMap)) {
+				p := parameterMap[parameterKey]
 				location, _ := p["in"].(string)
 				key, _ := p["name"].(string)
 				if key == "" || (location != "path" && location != "query") {
