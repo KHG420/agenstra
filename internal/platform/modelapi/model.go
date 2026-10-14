@@ -240,6 +240,8 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 					var timeout net.Error
 					if errors.As(requestErr, &timeout) && timeout.Timeout() {
 						code = "model_timeout"
+					} else if packetTokenBudget(ctx) > 0 {
+						code = "model_outcome_unknown"
 					}
 				} else if len(body) > 8<<20 {
 					code = "model_response_too_large"
@@ -252,9 +254,9 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		if code == "" {
 			break
 		}
-		// A timed-out request may still consume its allowance upstream. A bounded
+		// An interrupted request may still consume its allowance upstream. A bounded
 		// run cannot safely replay that request without a settled usage receipt.
-		if code == "model_timeout" && packetTokenBudget(ctx) > 0 {
+		if (code == "model_timeout" || code == "model_outcome_unknown") && packetTokenBudget(ctx) > 0 {
 			retry = false
 		}
 		wait := max(delay, retryAfter)
