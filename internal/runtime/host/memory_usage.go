@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 	reactcore "github.com/KHG420/agenstra/internal/runtime/react"
 )
@@ -17,19 +18,39 @@ func (h *AgentHost) extractRunMemories(ctx context.Context, run agentcontract.St
 	if err != nil {
 		return run, nil, err
 	}
+	s := h.runSettings(run)
+	request.MaxOutputTokens = s.MaxModelOutputTokens
+	if s.ModelOutputReserveTokens > 0 && (request.MaxOutputTokens == 0 || s.ModelOutputReserveTokens < request.MaxOutputTokens) {
+		request.MaxOutputTokens = s.ModelOutputReserveTokens
+	}
+	request.ContextWindowTokens = s.ModelContextWindowTokens
+	request.MaxInputTokens = s.MaxModelInputTokens
+	request.ProtocolReserveTokens = s.ModelProtocolReserveTokens
 	input, err := agentcontract.MemoryExtractionInput(&request)
 	if err != nil {
 		return run, nil, err
 	}
-	s := h.runSettings(run)
+	inputTokens := int64(len(input) + len(agentcontract.MemoryExtractionPrompt) + 128)
+	if measurer, ok := runModel.(agentcontract.MemoryInputMeasurer); ok {
+		measuredRequest := request
+		measuredRequest.Existing, err = jsonvalue.Clone(request.Existing)
+		if err != nil {
+			return run, nil, agentcontract.NewHostError("run_state_invalid")
+		}
+		measurement, err := measurer.MeasureMemoryInput(measuredRequest)
+		if err != nil {
+			return run, nil, err
+		}
+		inputTokens = measurement.Tokens
+	}
 	remaining := int64(0)
 	if s.MaxModelTokens > 0 {
 		remaining = max(int64(0), s.MaxModelTokens-state.ModelUsage.BudgetTokens)
-		if remaining <= int64(len(input)+len(agentcontract.MemoryExtractionPrompt)+128) {
+		if remaining <= inputTokens {
 			return run, nil, agentcontract.NewHostError("model_token_budget_exhausted")
 		}
 	}
-	reservation := agentcontract.ModelCallMetrics{Purpose: "memory_extraction", SourceID: sourceID, Reservation: true, Attempts: 1, EstimatedInputTokens: int64(len(input) + len(agentcontract.MemoryExtractionPrompt) + 128), EstimatedOutputTokens: int64(s.MaxModelOutputTokens), ErrorCode: agentcontract.Strptr("model_outcome_unknown")}
+	reservation := agentcontract.ModelCallMetrics{Purpose: "memory_extraction", SourceID: sourceID, Reservation: true, Attempts: 1, EstimatedInputTokens: inputTokens, EstimatedOutputTokens: int64(s.MaxModelOutputTokens), ErrorCode: agentcontract.Strptr("model_outcome_unknown")}
 	if remaining > 0 {
 		reservation.EstimatedInputTokens = remaining
 		reservation.EstimatedOutputTokens = 0
@@ -44,13 +65,6 @@ func (h *AgentHost) extractRunMemories(ctx context.Context, run agentcontract.St
 		return run, nil, err
 	}
 	request.ModelTokensRemaining = remaining
-	request.MaxOutputTokens = s.MaxModelOutputTokens
-	if s.ModelOutputReserveTokens > 0 && (request.MaxOutputTokens == 0 || s.ModelOutputReserveTokens < request.MaxOutputTokens) {
-		request.MaxOutputTokens = s.ModelOutputReserveTokens
-	}
-	request.ContextWindowTokens = s.ModelContextWindowTokens
-	request.MaxInputTokens = s.MaxModelInputTokens
-	request.ProtocolReserveTokens = s.ModelProtocolReserveTokens
 	extractCtx, cancel := context.WithTimeout(ctx, time.Duration(s.ModelTimeoutSeconds*1e9))
 	defer cancel()
 	extractCtx = agentcontract.WithModelRequestObserver(extractCtx, func(progress agentcontract.ModelRequestProgress) error {
@@ -60,7 +74,7 @@ func (h *AgentHost) extractRunMemories(ctx context.Context, run agentcontract.St
 	})
 	started := time.Now()
 	var proposals []agentcontract.MemoryProposal
-	metrics := agentcontract.ModelCallMetrics{Attempts: 1, EstimatedInputTokens: int64(len(input) + len(agentcontract.MemoryExtractionPrompt) + 128)}
+	metrics := agentcontract.ModelCallMetrics{Attempts: 1, EstimatedInputTokens: inputTokens}
 	if measured, ok := runModel.(agentcontract.MeasuredMemoryExtractor); ok {
 		proposals, metrics, err = measured.ExtractMemoriesMeasured(extractCtx, request)
 	} else {

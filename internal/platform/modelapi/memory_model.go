@@ -29,17 +29,7 @@ func (m *HTTPJSONDecisionModel) ExtractMemoriesMeasured(ctx context.Context, req
 	if err != nil {
 		return nil, metrics, err
 	}
-	model := *m
-	if request.ContextWindowTokens > 0 && (model.ContextWindowTokens == 0 || request.ContextWindowTokens < model.ContextWindowTokens) {
-		model.ContextWindowTokens = request.ContextWindowTokens
-	}
-	if request.MaxInputTokens > 0 && (model.MaxInputTokens == 0 || request.MaxInputTokens < model.MaxInputTokens) {
-		model.MaxInputTokens = request.MaxInputTokens
-	}
-	model.ProtocolReserveTokens = max(model.ProtocolReserveTokens, request.ProtocolReserveTokens)
-	if request.MaxOutputTokens > 0 && (model.MaxOutputTokens <= 0 || request.MaxOutputTokens < model.MaxOutputTokens) {
-		model.MaxOutputTokens = request.MaxOutputTokens
-	}
+	model := m.memoryRequestModel(request)
 	raw, err := model.requestJSON(ctx, input, agentcontract.MemoryExtractionPrompt)
 	if err != nil {
 		return nil, metrics, err
@@ -59,4 +49,38 @@ func (m *HTTPJSONDecisionModel) ExtractMemoriesMeasured(ctx context.Context, req
 		return nil, metrics, err
 	}
 	return response.Proposals, metrics, nil
+}
+
+// MeasureMemoryInput measures the same bounded request used by extraction,
+// including the model parameters and message envelope, without sending it.
+func (m *HTTPJSONDecisionModel) MeasureMemoryInput(request agentcontract.MemoryExtractionRequest) (agentcontract.InputMeasurement, error) {
+	input, err := agentcontract.MemoryExtractionInput(&request)
+	if err != nil {
+		return agentcontract.InputMeasurement{}, err
+	}
+	model := m.memoryRequestModel(request)
+	payload, err := model.requestPayload(input, agentcontract.MemoryExtractionPrompt)
+	if err != nil {
+		return agentcontract.InputMeasurement{}, err
+	}
+	raw, err := agentcontract.CanonicalJSON(payload)
+	if err != nil {
+		return agentcontract.InputMeasurement{}, err
+	}
+	return model.measurePayload(raw)
+}
+
+func (m *HTTPJSONDecisionModel) memoryRequestModel(request agentcontract.MemoryExtractionRequest) HTTPJSONDecisionModel {
+	model := *m
+	if request.ContextWindowTokens > 0 && (model.ContextWindowTokens == 0 || request.ContextWindowTokens < model.ContextWindowTokens) {
+		model.ContextWindowTokens = request.ContextWindowTokens
+	}
+	if request.MaxInputTokens > 0 && (model.MaxInputTokens == 0 || request.MaxInputTokens < model.MaxInputTokens) {
+		model.MaxInputTokens = request.MaxInputTokens
+	}
+	model.ProtocolReserveTokens = max(model.ProtocolReserveTokens, request.ProtocolReserveTokens)
+	if request.MaxOutputTokens > 0 && (model.MaxOutputTokens <= 0 || request.MaxOutputTokens < model.MaxOutputTokens) {
+		model.MaxOutputTokens = request.MaxOutputTokens
+	}
+	return model
 }

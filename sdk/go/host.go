@@ -82,6 +82,10 @@ type MemoryExtractor = agent.MemoryExtractor
 // MeasuredMemoryExtractor is optional; existing custom extractors still work.
 type MeasuredMemoryExtractor = agent.MeasuredMemoryExtractor
 
+// MemoryInputMeasurer optionally measures the complete extraction request before
+// dispatch. Implementations treat the supplied request as read-only.
+type MemoryInputMeasurer = agent.MemoryInputMeasurer
+
 // ReconciliationContext gives a verifier a detached copy of the original uncertain invocation and trusted identity.
 type ReconciliationContext = agent.ReconciliationContext
 

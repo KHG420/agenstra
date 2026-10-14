@@ -174,6 +174,11 @@ func (s *selectedModels) ExtractMemoriesMeasured(ctx context.Context, r agentcon
 	return s.memory.ExtractMemoriesMeasured(ctx, r)
 }
 
+// MeasureMemoryInput uses the memory profile frozen for this run.
+func (s *selectedModels) MeasureMemoryInput(r agentcontract.MemoryExtractionRequest) (agentcontract.InputMeasurement, error) {
+	return s.memory.MeasureMemoryInput(r)
+}
+
 // Decide uses the current selected decision profile; durable runs use their pinned selection.
 func (m *ModelManager) Decide(ctx context.Context, p agentcontract.ContextPacket, prompt string) (agentcontract.Decision, error) {
 	s, err := m.selectedModel(m.Snapshot().Config)
@@ -214,6 +219,15 @@ func (m *ModelManager) ExtractMemoriesMeasured(ctx context.Context, r agentcontr
 		return nil, agentcontract.ModelCallMetrics{}, err
 	}
 	return s.ExtractMemoriesMeasured(ctx, r)
+}
+
+// MeasureMemoryInput measures the currently selected extraction profile.
+func (m *ModelManager) MeasureMemoryInput(r agentcontract.MemoryExtractionRequest) (agentcontract.InputMeasurement, error) {
+	s, err := m.selectedModel(m.Snapshot().Config)
+	if err != nil {
+		return agentcontract.InputMeasurement{}, err
+	}
+	return s.MeasureMemoryInput(r)
 }
 
 // Close is a no-op because model adapters have no owned persistent connection.
