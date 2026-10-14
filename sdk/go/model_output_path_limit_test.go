@@ -11,7 +11,7 @@ import (
 )
 
 func TestSDKModelOutputWideDeclaredProjectionKeepsBoundedFields(t *testing.T) {
-	for _, count := range []int{65, 111, 128, 129} {
+	for _, count := range []int{65, 111, 128, 129, 307, 311, 512, 513} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
 			properties := agenstra.JSON{}
 			data := agenstra.JSON{"secret": "must-remain-private"}
@@ -37,7 +37,7 @@ func TestSDKModelOutputWideDeclaredProjectionKeepsBoundedFields(t *testing.T) {
 				t.Fatal(err)
 			}
 			pack, err := agenstra.LoadRestPack(path, map[string]string{"API_URL": "http://localhost:1"}, nil)
-			if count > 128 {
+			if count > 512 {
 				if err == nil {
 					if err := pack.Close(); err != nil {
 						t.Error(err)
@@ -66,8 +66,16 @@ func TestSDKModelOutputWideDeclaredProjectionKeepsBoundedFields(t *testing.T) {
 				t.Fatal("missing projected fact")
 			}
 			visible := packet.Facts[0].Value["data"].(map[string]any)
-			if len(visible) != count {
+			if count <= 311 && len(visible) != count {
 				t.Fatalf("selected fields lost: %d want %d", len(visible), count)
+			}
+			if count > 311 && (len(visible) == 0 || len(visible) >= count || len(packet.Facts[0].OmittedPaths) == 0) {
+				t.Fatal("large authorized record lost its bounded preview and omission evidence")
+			}
+			for name, value := range visible {
+				if value != data[name] {
+					t.Fatalf("visible business field changed: %s", name)
+				}
 			}
 			if _, exists := visible["secret"]; exists {
 				t.Fatal("unselected private field exposed")

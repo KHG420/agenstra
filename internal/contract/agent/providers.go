@@ -325,8 +325,8 @@ func ValidateModelOutput(output *ModelOutput) error {
 	if output == nil {
 		return nil
 	}
-	if output.Paths == nil || len(output.Paths) > 128 {
-		return fmt.Errorf("model_output paths must be an array of at most 128 paths")
+	if output.Paths == nil || len(output.Paths) > 512 {
+		return fmt.Errorf("model_output paths must be an array of at most 512 paths")
 	}
 	seen := map[string]bool{}
 	for _, path := range output.Paths {

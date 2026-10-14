@@ -195,7 +195,7 @@ Web 导出的是包含 `manifest` 与 `skills` 正文的 JSON 文件，可从 We
 
 ## REST 数组结果的模型字段投影
 
-`model_output.paths` 相对于能力结果 `data`，最多 128 条、每条最多 16 段的上限。对象字段保持原义；当当前 `output_schema` 节点是带统一 `items` 的数组时，`"*"` 对该数组的每一项应用余下路径。例如 REST 原响应的 `data` 是分组数组，可使用 `response_path: ["data"]` 和 `response_mode: "wrap"` 将它保留为 `{"result": [...]}`，再声明：
+`model_output.paths` 相对于能力结果 `data`，最多 512 条、每条最多 16 段，每个字段名最多 128 字节；所有路径必须不同并存在于当前输出 Schema。这个上限支持宽业务记录的逐字段授权，不增加预览、上下文或产物大小预算。大结果仍保存完整获准证据、返回带明确遗漏标记的有界预览，并通过 `inspect_fact` 按需查看；取舍参考 [OpenCode 按结果字节数限制预览并保存完整输出](https://github.com/anomalyco/opencode/blob/5d9cd9b259f0456522f318a7435501d03cfbee79/packages/opencode/src/tool/truncate.ts)。对象字段保持原义；当当前 `output_schema` 节点是带统一 `items` 的数组时，`"*"` 对该数组的每一项应用余下路径。例如 REST 原响应的 `data` 是分组数组，可使用 `response_path: ["data"]` 和 `response_mode: "wrap"` 将它保留为 `{"result": [...]}`，再声明：
 
 ```json
 {"model_output":{"paths":[["result","*","id"],["result","*","name"],["result","*","platform"],["result","*","status"]]}}
