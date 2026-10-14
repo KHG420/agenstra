@@ -2,6 +2,7 @@ package agenstra_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -44,8 +45,8 @@ func TestSDKCancellationBeforeModelHeadersKeepsUnknownBudget(t *testing.T) {
 	runtime := &agenstra.AgentRuntime{Provider: &recordProvider{}, Model: model, MaxModelTokens: 200000, MaxModelOutputTokens: 64}
 	result, err := runtime.Run(ctx, "Hello; respond briefly without invoking business capabilities.")
 	<-stopped
-	if err != nil || result.Status != "failed" || result.ErrorCode == nil || *result.ErrorCode != "model_unavailable" {
-		t.Fatalf("cancellation error behavior changed: status=%s code=%v err=%v", result.Status, result.ErrorCode, err)
+	if !errors.Is(err, context.Canceled) || result.Status != "failed" || result.ErrorCode == nil || *result.ErrorCode != "model_unavailable" {
+		t.Fatalf("caller cancellation was not propagated: status=%s code=%v err=%v", result.Status, result.ErrorCode, err)
 	}
 	if requests.Load() != 1 || len(result.ModelCalls) != 1 || result.ModelCalls[0].Attempts != 1 || !result.ModelCalls[0].Reservation || result.ModelUsage.BudgetTokens != 200000 || result.ModelUsage.InputTokens != 0 || result.ModelUsage.OutputTokens != 0 {
 		t.Fatalf("dispatched cancellation incorrectly settled unknown output: requests=%d calls=%+v usage=%+v", requests.Load(), result.ModelCalls, result.ModelUsage)

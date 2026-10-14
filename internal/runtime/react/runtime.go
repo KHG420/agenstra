@@ -1139,7 +1139,15 @@ func (r *AgentRuntime) Run(ctx context.Context, instruction string) (agentcontra
 		return agentcontract.RunResult{}, err
 	}
 	for state.Status == "queued" || state.Status == "running" {
+		if err := ctx.Err(); err != nil {
+			return r.Result(state), err
+		}
 		if err := r.Step(ctx, state, nil); err != nil {
+			return r.Result(state), err
+		}
+		// Step retains model diagnostics and budget before consuming coded errors.
+		// Caller cancellation must still reach the transient SDK boundary.
+		if err := ctx.Err(); err != nil {
 			return r.Result(state), err
 		}
 		if len(state.Pending) > 0 {
@@ -1187,6 +1195,9 @@ func (r *AgentRuntime) Run(ctx context.Context, instruction string) (agentcontra
 				if outcome.ErrorCode == "provider_outcome_unknown" || ((outcome.ErrorCode == "upstream_response_invalid" || outcome.ErrorCode == "upstream_unavailable") && ok && cap.Effect != "read") {
 					state.Status = "needs_reconciliation"
 					state.ErrorCode = agentcontract.Strptr("provider_outcome_unknown")
+				}
+				if err := ctx.Err(); err != nil {
+					return r.Result(state), err
 				}
 			}
 			state.Pending = []agentcontract.Invocation{}
