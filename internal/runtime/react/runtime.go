@@ -918,6 +918,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		}
 		formatRecovery = code == "model_decision_invalid"
 		var oversized agentcontract.DecisionTooManyCallsError
+		var inspectionRange agentcontract.DecisionInspectionRangeError
 		if code == "model_output_truncated" {
 			feedback = "\nYour previous response reached the output token limit. Return one concise, complete agenstra.decision.v1 JSON decision within the same output budget. Split large work across separate decisions and use retained Facts and action_outcomes. Never repeat a successful write."
 			if review != nil {
@@ -925,6 +926,8 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			}
 		} else if review != nil {
 			feedback = "\nYour previous review was invalid. Return exactly one final agenstra.decision.v1 JSON decision with completion_feedback as a string: identify missing originally requested execution, or use an empty string when work is handled or concretely blocked. No tools or other decision kinds are allowed during completion review."
+		} else if errors.As(err, &inspectionRange) {
+			feedback = "\nYour previous inspect_fact range was invalid. offset must be an integer in 0..1000000000 and limit must be an integer in 1..32. Use limit=32 and successive next_offset values, combining completed saved pages from inspection_history. Never request all remaining array items as one oversized page or replay a successful business call. Return the inspection through the current declared decision output channel."
 		} else if errors.As(err, &oversized) {
 			feedback = "\nYour previous decision was invalid: tool_batch.calls has at most 4 items. Return one valid agenstra.decision.v1 JSON decision with no more than 4 calls."
 		} else {
@@ -951,7 +954,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		state.CapabilitySearchQuery = decision.Query
 		state.CapabilitySearchResults = searchAuthorizedCapabilities(r.Provider.Capabilities(), r.Grants, decision.Query, r.MaxContextCapabilities)
 	case "inspect_fact":
-		view, err := inspectionView(facts, decision.FactID, decision.Path)
+		view, err := inspectionView(facts, decision.FactID, decision.Path, decision.Offset, decision.Limit)
 		if err != nil {
 			state.InspectedFact = agentcontract.JSON{"error_code": err.Error()}
 			break
@@ -961,7 +964,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		if key == "" {
 			key = progressKey(fact.Value)
 		}
-		recordInspection(state, agentcontract.JSON{"fact": key, "path": decision.Path})
+		inspection := agentcontract.JSON{"fact": key, "path": decision.Path}
+		if decision.Offset != nil || decision.Limit != nil {
+			inspection["offset"], inspection["limit"] = view["offset"], view["limit"]
+		}
+		recordInspection(state, inspection)
 		state.InspectedFact = view
 	case "inspect_capability":
 		state.InspectedCapability = nil

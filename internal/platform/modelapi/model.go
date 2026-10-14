@@ -101,6 +101,10 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet agentcontract
 	decision, err = agentcontract.StrictDecision(body)
 	if err != nil {
 		metrics.FormatError = modelContentError(body)
+		var inspectionRange agentcontract.DecisionInspectionRangeError
+		if errors.As(err, &inspectionRange) {
+			return agentcontract.Decision{}, inspectionRange
+		}
 		var oversized agentcontract.DecisionTooManyCallsError
 		if errors.As(err, &oversized) {
 			return agentcontract.Decision{}, oversized
@@ -403,7 +407,17 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		}
 		descriptor := format["json_schema"].(agentcontract.JSON)
 		if detail := validateNativeDecisionOutput(body, descriptor["schema"].(agentcontract.JSON)); detail != "" {
-			return nil, invalidModelOutput(ctx, detail)
+			invalid := invalidModelOutput(ctx, detail)
+			// Keep recognized fixed range constraints through native-schema validation;
+			// the response remains rejected, with no data repair or parameter clamping.
+			if detail == "model_decision_schema_invalid" && modelJSONFormatError(body) == "" {
+				_, err := agentcontract.StrictDecision(body)
+				var inspectionRange agentcontract.DecisionInspectionRangeError
+				if errors.As(err, &inspectionRange) {
+					return nil, inspectionRange
+				}
+			}
+			return nil, invalid
 		}
 	}
 	return body, nil

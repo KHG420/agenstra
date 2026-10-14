@@ -10,6 +10,11 @@ import (
 // Keep the complete inspected subtree once, omitting its older partial copy.
 // Other fields, array positions, provenance and the caller's evidence stay intact.
 func completeInspectionInput(packet agentcontract.ContextPacket) ([]byte, error) {
+	// A complete page covers only a range, not the whole subtree at path.
+	// Removing that subtree would hide other already-visible array positions.
+	if _, ranged := packet.InspectedFact["offset"]; ranged {
+		return nil, nil
+	}
 	path, pathOK := packet.InspectedFact["path"].([]any)
 	omitted, omissionOK := packet.InspectedFact["omitted_paths"].([]any)
 	if !pathOK || !omissionOK || len(omitted) != 0 {

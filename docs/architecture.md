@@ -133,7 +133,7 @@ Host 在使用方定义最小的运行模型选择接口：读取独立 `Snapsho
 | `tool_batch` | 发起一批互相独立的能力调用。依赖前一步结果的调用要等到下轮观察。 |
 | `read_skill` | 按需读取能力包中已固定哈希的使用说明。 |
 | `inspect_capability` | 查看一个能力的完整输入/输出契约。 |
-| `inspect_fact` | 从持久 Fact 的指定路径读取有界视图，避免仅凭截断预览猜测。 |
+| `inspect_fact` | 从持久 Fact 的指定路径读取有界视图；数组可选 offset/limit 区间，并从已有检查历史组合结果。 |
 | `request_input` | 缺必要信息时暂停并向用户追问。 |
 | `final` | 给出回答并引用本次运行真实存在的 Fact。 |
 

@@ -12,7 +12,7 @@ import (
 
 func TestCompleteInspectionIsNotMixedWithItsPartialPreview(t *testing.T) {
 	for _, mode := range []string{"", "json_object", "json_schema", "output_tools"} {
-		for _, kind := range []string{"object", "array", "root", "null", "partial_inspection", "different_fact", "failed", "unknown_completeness", "unrelated_omission", "cheap_array"} {
+		for _, kind := range []string{"object", "array", "root", "null", "partial_inspection", "different_fact", "failed", "unknown_completeness", "unrelated_omission", "cheap_array", "array_page"} {
 			t.Run(mode+"/"+kind, func(t *testing.T) {
 				id := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 				partial := agentcontract.JSON{"id": 23, "body": strings.Repeat("x", 500)}
@@ -22,13 +22,18 @@ func TestCompleteInspectionIsNotMixedWithItsPartialPreview(t *testing.T) {
 				var inspected any = complete
 				omit := true
 				switch kind {
-				case "array", "cheap_array":
+				case "array", "cheap_array", "array_page":
 					path = []any{"data", "rows", 0}
 					if kind == "cheap_array" {
 						partial = agentcontract.JSON{"id": 23}
 						omit = false
 					}
 					value = agentcontract.JSON{"data": agentcontract.JSON{"rows": []any{partial, false}, "untouched": 0}}
+					if kind == "array_page" {
+						path = []any{"data", "rows"}
+						inspected = []any{complete}
+						omit = false
+					}
 				case "root":
 					path = []any{}
 					inspected = agentcontract.JSON{"data": agentcontract.JSON{"entry": complete, "untouched": 0}}
@@ -38,9 +43,14 @@ func TestCompleteInspectionIsNotMixedWithItsPartialPreview(t *testing.T) {
 					omit = false
 				}
 				missing := append(append([]any{}, path...), "label")
+				if kind == "array_page" {
+					missing = []any{"data", "rows", 0, "label"}
+				}
 				inspection := agentcontract.JSON{"fact_id": id, "path": path, "preview": agentcontract.JSON{"value": inspected}, "omitted_paths": []any{}}
 				fact := agentcontract.FactView{Fact: agentcontract.Fact{FactID: id, Value: value}, OmittedPaths: [][]any{missing}, ReferenceAvailable: false}
 				switch kind {
+				case "array_page":
+					inspection["offset"], inspection["limit"], inspection["array_length"], inspection["returned_count"], inspection["next_offset"] = 0, 1, 2, 1, 1
 				case "partial_inspection":
 					inspection["omitted_paths"] = []any{[]any{"value", "other"}}
 				case "different_fact":

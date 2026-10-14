@@ -151,7 +151,10 @@ type Decision struct {
 	Name               string                `json:"name,omitempty"`
 	FactID             string                `json:"fact_id,omitempty"`
 	Path               []any                 `json:"path,omitempty"`
-	ModelCall          *ModelCallMetrics     `json:"-"`
+	// Offset and Limit select an optional bounded array range of saved evidence.
+	Offset    *int              `json:"offset,omitempty"`
+	Limit     *int              `json:"limit,omitempty"`
+	ModelCall *ModelCallMetrics `json:"-"`
 }
 
 // DecisionTooManyCallsError rejects a batch larger than the protocol permits.
@@ -165,6 +168,18 @@ func (DecisionTooManyCallsError) Error() string {
 // Code exposes the stable identifier used by framework error handling.
 func (DecisionTooManyCallsError) Code() string { return "model_decision_invalid" }
 
+// DecisionInspectionRangeError identifies only fixed, public range constraints.
+// It carries no model-supplied values, evidence or credentials.
+type DecisionInspectionRangeError struct{}
+
+// Error describes the allowed inspect_fact range.
+func (DecisionInspectionRangeError) Error() string {
+	return "model_decision_invalid: inspect_fact offset must be an integer in 0..1000000000 and limit must be an integer in 1..32"
+}
+
+// Code preserves the ordinary invalid-decision error classification.
+func (DecisionInspectionRangeError) Code() string { return "model_decision_invalid" }
+
 // Validate checks the decision kind, field bounds and JSON serializability.
 // Human-readable text limits count Unicode code points, as JSON Schema does.
 func (d Decision) Validate() error {
@@ -173,6 +188,12 @@ func (d Decision) Validate() error {
 	}
 	if utf8.RuneCountInString(d.CompletionFeedback) > 2000 || (d.CompletionFeedback != "" && d.Kind != "final") {
 		return errors.New("model_decision_invalid")
+	}
+	if (d.Offset != nil || d.Limit != nil) && d.Kind != "inspect_fact" {
+		return errors.New("model_decision_invalid")
+	}
+	if d.Offset != nil && (*d.Offset < 0 || *d.Offset > 1000000000) || d.Limit != nil && (*d.Limit < 1 || *d.Limit > 32) {
+		return DecisionInspectionRangeError{}
 	}
 	switch d.Kind {
 	case "tool_batch":
@@ -270,7 +291,7 @@ func StrictDecision(raw []byte) (Decision, error) {
 	if _, ok := obj["schema"]; !ok {
 		d.Schema = "agenstra.decision.v1"
 	}
-	allowed := map[string]map[string]bool{"tool_batch": {"schema": true, "kind": true, "calls": true}, "final": {"schema": true, "kind": true, "answer_markdown": true, "fact_ids": true, "result_refs": true, "completion_feedback": true}, "request_input": {"schema": true, "kind": true, "field": true, "prompt": true, "input_schema": true}, "search_capabilities": {"schema": true, "kind": true, "query": true}, "read_skill": {"schema": true, "kind": true, "name": true}, "inspect_capability": {"schema": true, "kind": true, "name": true}, "inspect_fact": {"schema": true, "kind": true, "fact_id": true, "path": true}}
+	allowed := map[string]map[string]bool{"tool_batch": {"schema": true, "kind": true, "calls": true}, "final": {"schema": true, "kind": true, "answer_markdown": true, "fact_ids": true, "result_refs": true, "completion_feedback": true}, "request_input": {"schema": true, "kind": true, "field": true, "prompt": true, "input_schema": true}, "search_capabilities": {"schema": true, "kind": true, "query": true}, "read_skill": {"schema": true, "kind": true, "name": true}, "inspect_capability": {"schema": true, "kind": true, "name": true}, "inspect_fact": {"schema": true, "kind": true, "fact_id": true, "path": true, "offset": true, "limit": true}}
 	keys := allowed[d.Kind]
 	if keys == nil {
 		return d, errors.New("model_decision_invalid")

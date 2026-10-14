@@ -82,7 +82,7 @@ func TestInspectionFeedbackTargetsMissingOriginalPathsAfterRestore(t *testing.T)
 
 func TestInspectionFeedbackKeepsNullAndErrorViewsDistinct(t *testing.T) {
 	fact := agentcontract.Fact{FactID: agentcontract.NewID(), Value: agentcontract.JSON{"data": nil}, ReferenceScope: "durable"}
-	view, err := inspectionView(map[string]agentcontract.Fact{fact.FactID: fact}, fact.FactID, []any{"data"})
+	view, err := inspectionView(map[string]agentcontract.Fact{fact.FactID: fact}, fact.FactID, []any{"data"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

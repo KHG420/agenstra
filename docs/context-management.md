@@ -75,7 +75,10 @@ Fact 预览计算对象和数组的结构开销以及标量替代值。整体能
 
 完整恢复沿用已有决策：
 
-- `inspect_fact(fact_id, path)` 从完整 Fact 中选取路径，再提供有界检查视图；遗漏路径相对于检查视图的 `value` 包装。
+- `inspect_fact(fact_id, path)` 从完整 Fact 中选取路径，再提供有界检查视图；遗漏路径相对于检查视图的 `value` 包装。数组可选 `offset`（从 0 开始）和 `limit`（1～32，指定 offset 时默认为 32）；先应用既有模型字段投影，再选取保存数组的区间，不重发业务查询。非数组或越界 offset 返回原路径错误，不把它变成空数据。offset 等于长度时可返回空区间。
+
+区间检查中的 `array_length` 是完整获准数组长度，`offset`、`limit` 与 `returned_count` 描述选取区间，`next_offset` 为下一起点，末尾为 null。`returned_count` 不证明全部区间值都进入预览；仍须检查 `omitted_paths`，缺失位置换算为原数组下标。当前检查、历史去重和进展识别均包含区间；恢复后按原 Fact 和范围重建，并继续核对模型可见权限。历史数量和上下文预算保持原上限。完整页不表示完整集合；完整结果请求须合并全部无相关遗漏的页，不能只输出前 32 项。这参考 [OpenCode 保存结果后的 offset/limit 读取与续接提示](https://github.com/anomalyco/opencode/blob/5d9cd9b259f0456522f318a7435501d03cfbee79/packages/opencode/src/tool/read.ts#L264-L295)；32 项是 Agenstra 沿用的有界预览选择，没有照搬上游文件行数。越界的区间决策仍按原预算拒绝并纠正，反馈仅包含固定字段约束，不携带模型原值或回执；不夹断参数或放宽页大小。
+
 - `$fact_value` 在执行工具调用前解析完整原始值，因此传参不受模型预览裁剪影响。
 - `inspect_capability(name)` 获取完整契约，`read_skill(name)` 重新加载技能。
 - `reference_available=false` 表示引用不可继续使用；历史证据保留不等于恢复连接内 ID 或过期引用的有效性。

@@ -71,7 +71,10 @@ func decisionOutputTools(completionReview bool) []any {
 	for _, kind := range []string{"read_skill", "inspect_capability"} {
 		add(kind, agentcontract.JSON{"name": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 330}}, "name")
 	}
-	add("inspect_fact", agentcontract.JSON{"fact_id": uuid, "path": path}, "fact_id", "path")
+	add("inspect_fact", agentcontract.JSON{"fact_id": uuid, "path": path,
+		"offset": agentcontract.JSON{"type": "integer", "minimum": 0, "maximum": 1000000000, "description": "Optional zero-based start for an already-authorized saved array; omit for objects and scalar values."},
+		"limit":  agentcontract.JSON{"type": "integer", "minimum": 1, "maximum": 32, "description": "Optional selected-array range size, default 32 when offset is supplied. Combine ranges from saved history using next_offset; do not replay the business call."},
+	}, "fact_id", "path")
 	return tools
 }
 
