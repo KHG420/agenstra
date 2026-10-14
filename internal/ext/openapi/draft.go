@@ -159,6 +159,14 @@ func Draft(doc map[string]any, name, baseURLEnv string, operations []string, eff
 						return nil, errors.New("query arrays require scalar items")
 					}
 				}
+				if description, ok := p["description"].(string); ok && description != "" && schema["description"] == nil {
+					schema = maps.Clone(schema)
+					if _, referenced := schema["$ref"]; referenced {
+						schema = map[string]any{"allOf": []any{schema}, "description": description}
+					} else {
+						schema["description"] = description
+					}
+				}
 				byLocation[location][key] = schema
 				if p["required"] == true || location == "path" {
 					required[location] = append(required[location], key)
