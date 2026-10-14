@@ -281,9 +281,10 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		} `json:"usage"`
 		Choices []struct {
 			Message struct {
-				Content   string                   `json:"content"`
-				ToolCalls []decisionOutputToolCall `json:"tool_calls"`
-				Refusal   string                   `json:"refusal"`
+				Content          string                   `json:"content"`
+				ReasoningContent string                   `json:"reasoning_content"`
+				ToolCalls        []decisionOutputToolCall `json:"tool_calls"`
+				Refusal          string                   `json:"refusal"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
@@ -302,7 +303,9 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		if len(metrics.FinishReason) > 32 {
 			metrics.FinishReason = "unknown"
 		}
-		metrics.EstimatedOutputTokens = int64(len(envelope.Choices[0].Message.Content))
+		// Include returned reasoning in the byte estimate without retaining its text
+		// in the decision or treating it as provider-reported reasoning tokens.
+		metrics.EstimatedOutputTokens = int64(len(envelope.Choices[0].Message.Content) + len(envelope.Choices[0].Message.ReasoningContent))
 		for _, call := range envelope.Choices[0].Message.ToolCalls {
 			metrics.EstimatedOutputTokens += int64(len(call.Function.Arguments))
 		}
