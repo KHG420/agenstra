@@ -91,6 +91,12 @@ func (h *AgentHost) extractRunMemories(ctx context.Context, run agentcontract.St
 	}
 	if err != nil {
 		metrics.ErrorCode = agentcontract.Strptr(agentcontract.ModelErrorCode(err))
+		if remaining > 0 && *metrics.ErrorCode == "model_timeout" && !metrics.UsageAvailable && metrics.Attempts > 0 {
+			// The transport timeout does not settle the upstream output cost.
+			metrics.Reservation = true
+			metrics.EstimatedInputTokens = reservation.EstimatedInputTokens
+			metrics.EstimatedOutputTokens = reservation.EstimatedOutputTokens
+		}
 	}
 	state.ModelCalls[index] = metrics
 	reactcore.RebuildModelUsage(state)

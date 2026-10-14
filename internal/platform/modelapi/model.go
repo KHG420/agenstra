@@ -248,6 +248,11 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		if code == "" {
 			break
 		}
+		// A timed-out request may still consume its allowance upstream. A bounded
+		// run cannot safely replay that request without a settled usage receipt.
+		if code == "model_timeout" && packetTokenBudget(ctx) > 0 {
+			retry = false
+		}
 		wait := max(delay, retryAfter)
 
 		// Do not retry earlier than the server requested or exceed our wait bound.

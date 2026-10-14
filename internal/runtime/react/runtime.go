@@ -839,6 +839,12 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		}
 		if err != nil {
 			metrics.ErrorCode = agentcontract.Strptr(agentcontract.ModelErrorCode(err))
+			if r.MaxModelTokens > 0 && *metrics.ErrorCode == "model_timeout" && !metrics.UsageAvailable && metrics.Attempts > 0 {
+				// A timeout cannot release a bounded allowance already dispatched.
+				metrics.Reservation = true
+				metrics.EstimatedInputTokens = reservation.EstimatedInputTokens
+				metrics.EstimatedOutputTokens = reservation.EstimatedOutputTokens
+			}
 		}
 		state.ModelCalls[callIndex] = metrics
 		RebuildModelUsage(state)
