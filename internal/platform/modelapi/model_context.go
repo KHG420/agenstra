@@ -251,7 +251,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 			name := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)["name"].(string)
 			// Review can reject publication, but cannot propose calls or user input.
 			// Offer only the decision kind that the runtime accepts in this stage.
-			if packet.CompletionReview != nil && name != "submit_final" {
+			if packet.CompletionReview != nil && name != "submit_final" && name != "submit_approve_completion" {
 				unavailable[name] = true
 			}
 			if !unavailable[name] {
@@ -291,9 +291,9 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 }
 
 func jsonCompletionReviewPrompt(prompt string) string {
-	// Ordinary decision examples contradict this phase's final-only contract.
+	// Ordinary decision examples contradict this phase's completion-only contract.
 	// Keep host usage and evidence rules; replace only framework protocol examples.
-	prompt = strings.ReplaceAll(prompt, "Choose one JSON decision at a time: tool_batch, read_skill, inspect_capability, inspect_fact, final, or request_input.", "This is completion review: final is the only available decision kind.")
+	prompt = strings.ReplaceAll(prompt, "Choose one JSON decision at a time: tool_batch, read_skill, inspect_capability, inspect_fact, final, or request_input.", "This is completion review: final and approve_completion are the only available decision kinds.")
 	lines := strings.Split(prompt, "\n")
 	retained := lines[:0]
 	for _, line := range lines {
@@ -305,7 +305,7 @@ func jsonCompletionReviewPrompt(prompt string) string {
 		retained = append(retained, line)
 	}
 	return strings.Join(retained, "\n") + `
-Available JSON decision for completion review: final only. Return exactly one raw JSON object with literal fields {"schema":"agenstra.decision.v1","kind":"final","answer_markdown":"unpublished draft or corrected answer","fact_ids":[],"completion_feedback":""}; optional result_refs keeps its existing contract. completion_feedback is REQUIRED and must be a string. Check each explicitly requested operation against the recorded calls, including a separately requested read after a write. If original work is missing, describe only that missing work in nonempty completion_feedback; the runtime will reject publication and return this feedback to a normal authorized decision step. A write receipt is not a separately executed read. Otherwise return an empty string and report only verified outcomes and concrete blockers. Do not choose tool_batch, read_skill, inspect_capability, inspect_fact, search_capabilities or request_input during review. Do not perform, propose or replay any call here; feedback is not permission. Never add requirements beyond the original request.`
+Available JSON decisions for completion review: final or approve_completion only. If the ENTIRE frozen proposal is verified and needs no correction, return exactly {"schema":"agenstra.decision.v1","kind":"approve_completion"} without any other fields; do not reproduce the proposed answer or references. Otherwise return exactly one raw JSON object with literal fields {"schema":"agenstra.decision.v1","kind":"final","answer_markdown":"unpublished draft or corrected answer","fact_ids":[],"completion_feedback":""}; optional result_refs keeps its existing contract. For final, completion_feedback is REQUIRED and must be a string. Check each explicitly requested operation against the recorded calls, including a separately requested read after a write. If original work is missing, describe only that missing work in nonempty completion_feedback; the runtime will reject publication and return this feedback to a normal authorized decision step. A write receipt is not a separately executed read. Otherwise return an empty string and report only verified outcomes and concrete blockers. Do not choose tool_batch, read_skill, inspect_capability, inspect_fact, search_capabilities or request_input during review. Do not perform, propose or replay any call here; feedback is not permission. Never add requirements beyond the original request.`
 }
 
 func jsonDecisionPromptWithoutSkills(prompt string) string {

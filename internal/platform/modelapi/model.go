@@ -111,7 +111,11 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet agentcontract
 		}
 		return agentcontract.Decision{}, agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
 	}
-	if packet.CompletionReview != nil {
+	if decision.Kind == "approve_completion" && packet.CompletionReview == nil {
+		metrics.FormatError = "model_decision_schema_invalid"
+		return agentcontract.Decision{}, agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
+	}
+	if packet.CompletionReview != nil && decision.Kind != "approve_completion" {
 		var review struct {
 			Feedback *string `json:"completion_feedback"`
 		}

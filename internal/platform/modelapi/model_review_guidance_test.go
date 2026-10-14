@@ -29,13 +29,13 @@ func TestOutputToolsReviewGuidanceMatchesFinalOnlyStage(t *testing.T) {
 		strings.Contains(got, "Available JSON decision for completion review:") {
 		t.Fatal("review guidance contradicts the final-only output-tool contract")
 	}
-	for _, rule := range []string{hostRule, "final is the only available decision kind", "Call submit_decision exactly once", "completion_feedback", "apply to final.answer_markdown only"} {
+	for _, rule := range []string{hostRule, "final and approve_completion are the only available decision kinds", "Call submit_decision exactly once", "completion_feedback", "apply to final.answer_markdown only"} {
 		if !strings.Contains(got, rule) {
 			t.Fatalf("review lost a required host or output rule: %s", rule)
 		}
 	}
 	schemas := outputDecisionSchemas(t, payload)
-	if len(schemas) != 1 || schemas["final"] == nil {
+	if len(schemas) != 2 || schemas["final"] == nil || schemas["approve_completion"] == nil {
 		t.Fatal("review offered an execution decision")
 	}
 	assertSingleDecisionOutputRequest(t, payload)

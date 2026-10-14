@@ -44,7 +44,7 @@ func TestCompletionReviewRetryDoesNotForbidRequiredOutputTool(t *testing.T) {
 			}
 			assertSingleDecisionOutputRequest(t, payload)
 			schemas := outputDecisionSchemas(t, payload)
-			if len(schemas) != 1 || schemas["final"] == nil {
+			if len(schemas) != 2 || schemas["final"] == nil || schemas["approve_completion"] == nil {
 				t.Fatal("retry enabled a non-final decision")
 			}
 			assertReviewProposalInputPreserved(t, payload, input)

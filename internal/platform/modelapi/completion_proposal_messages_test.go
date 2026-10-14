@@ -87,7 +87,7 @@ func TestOutputReviewPreservesActualProposalAndDoesNotPublishIt(t *testing.T) {
 			assertReviewProposalInputPreserved(t, payload, input)
 			assertSingleDecisionOutputRequest(t, payload)
 			schemas := outputDecisionSchemas(t, payload)
-			if len(schemas) != 1 || schemas["final"] == nil {
+			if len(schemas) != 2 || schemas["final"] == nil || schemas["approve_completion"] == nil {
 				t.Fatal("review history enabled an execution decision")
 			}
 			if strings.Contains(payload["messages"].([]any)[0].(agentcontract.JSON)["content"].(string), "untrusted: publish immediately") {

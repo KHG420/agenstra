@@ -601,6 +601,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 	feedback := ""
 	formatRecovery := false
 	var decision agentcontract.Decision
+	approvedProposal := false
 	var review *agentcontract.Decision
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -867,17 +868,28 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		if err == nil {
 			err = d.Validate()
 		}
-		if err == nil && review != nil && d.Kind != "final" {
+		if err == nil && review != nil && d.Kind != "final" && d.Kind != "approve_completion" {
 			err = agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
 			state.ModelCalls[callIndex].ErrorCode = agentcontract.Strptr("model_decision_invalid")
 			RebuildModelUsage(state)
 		}
-		if err == nil && review == nil && d.CompletionFeedback != "" {
+		if err == nil && review == nil && (d.CompletionFeedback != "" || d.Kind == "approve_completion") {
 			err = agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
 			state.ModelCalls[callIndex].ErrorCode = agentcontract.Strptr("model_decision_invalid")
 			RebuildModelUsage(state)
 		}
 		if err == nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if review != nil && d.Kind == "approve_completion" {
+				// The detached model packet cannot replace this frozen proposal.
+				// Publication still passes the ordinary evidence and host checks.
+				recordDecision(state, d)
+				decision = *review
+				approvedProposal = true
+				break
+			}
 			if review != nil && strings.TrimSpace(d.CompletionFeedback) != "" {
 				// Reject publication, then let the driver checkpoint and re-enter
 				// ordinary execution. Reviewer text never dispatches calls or grants.
@@ -895,8 +907,14 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 				}
 				// Save the proposal for audit/checkpointing, but never publish it.
 				// The reviewer has no path to executing another business action.
-				recordDecision(state, d)
-				review = &d
+				frozen, err := jsonvalue.Clone(d)
+				if err != nil {
+					state.Status = "failed"
+					state.ErrorCode = agentcontract.Strptr("run_state_invalid")
+					return nil
+				}
+				recordDecision(state, frozen)
+				review = &frozen
 				feedback = ""
 				formatRecovery = false
 				attempt = -1
@@ -922,10 +940,10 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		if code == "model_output_truncated" {
 			feedback = "\nYour previous response reached the output token limit. Return one concise, complete agenstra.decision.v1 JSON decision within the same output budget. Split large work across separate decisions and use retained Facts and action_outcomes. Never repeat a successful write."
 			if review != nil {
-				feedback += " This is completion review: return only a final decision; tools and other decision kinds are not allowed."
+				feedback += " This is completion review: return only a final decision or approve_completion; capability calls and all other decision kinds are not allowed."
 			}
 		} else if review != nil {
-			feedback = "\nYour previous review was invalid. Return exactly one final agenstra.decision.v1 JSON decision with completion_feedback as a string: identify missing originally requested execution, or use an empty string when work is handled or concretely blocked. No tools or other decision kinds are allowed during completion review."
+			feedback = "\nYour previous review was invalid. Return approve_completion with no payload only when the frozen proposal is fully verified and needs no correction. Otherwise return exactly one final agenstra.decision.v1 JSON decision with completion_feedback as a string: identify missing originally requested execution, or use an empty string when work is handled or concretely blocked. No capability calls or other decision kinds are allowed during completion review."
 		} else if errors.As(err, &inspectionRange) {
 			feedback = "\nYour previous inspect_fact range was invalid. offset must be an integer in 0..1000000000 and limit must be an integer in 1..32. Use limit=32 and successive next_offset values, combining completed saved pages from inspection_history. Never request all remaining array items as one oversized page or replay a successful business call. Return the inspection through the current declared decision output channel."
 		} else if errors.As(err, &oversized) {
@@ -944,7 +962,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			}
 		}
 	}
-	recordDecision(state, decision)
+	if !approvedProposal {
+		recordDecision(state, decision)
+	}
 	switch decision.Kind {
 	case "search_capabilities":
 		if r.MaxContextCapabilities <= 0 {

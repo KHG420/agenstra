@@ -208,6 +208,11 @@ func (d Decision) Validate() error {
 				return errors.New("model_decision_invalid")
 			}
 		}
+	case "approve_completion":
+		// A verdict can only select the runtime-frozen proposal, never replace it.
+		if len(d.Calls) != 0 || d.AnswerMarkdown != "" || len(d.FactIDs) != 0 || len(d.ResultRefs) != 0 || d.CompletionFeedback != "" || d.Field != "" || d.Prompt != "" || d.InputSchema != nil || d.Query != "" || d.Name != "" || d.FactID != "" || len(d.Path) != 0 {
+			return errors.New("model_decision_invalid")
+		}
 	case "final":
 		if len(d.AnswerMarkdown) < 1 || utf8.RuneCountInString(d.AnswerMarkdown) > 30000 || len(d.FactIDs) > 50 || len(d.ResultRefs) > 20 {
 			return errors.New("model_decision_invalid")
@@ -291,7 +296,7 @@ func StrictDecision(raw []byte) (Decision, error) {
 	if _, ok := obj["schema"]; !ok {
 		d.Schema = "agenstra.decision.v1"
 	}
-	allowed := map[string]map[string]bool{"tool_batch": {"schema": true, "kind": true, "calls": true}, "final": {"schema": true, "kind": true, "answer_markdown": true, "fact_ids": true, "result_refs": true, "completion_feedback": true}, "request_input": {"schema": true, "kind": true, "field": true, "prompt": true, "input_schema": true}, "search_capabilities": {"schema": true, "kind": true, "query": true}, "read_skill": {"schema": true, "kind": true, "name": true}, "inspect_capability": {"schema": true, "kind": true, "name": true}, "inspect_fact": {"schema": true, "kind": true, "fact_id": true, "path": true, "offset": true, "limit": true}}
+	allowed := map[string]map[string]bool{"approve_completion": {"schema": true, "kind": true}, "tool_batch": {"schema": true, "kind": true, "calls": true}, "final": {"schema": true, "kind": true, "answer_markdown": true, "fact_ids": true, "result_refs": true, "completion_feedback": true}, "request_input": {"schema": true, "kind": true, "field": true, "prompt": true, "input_schema": true}, "search_capabilities": {"schema": true, "kind": true, "query": true}, "read_skill": {"schema": true, "kind": true, "name": true}, "inspect_capability": {"schema": true, "kind": true, "name": true}, "inspect_fact": {"schema": true, "kind": true, "fact_id": true, "path": true, "offset": true, "limit": true}}
 	keys := allowed[d.Kind]
 	if keys == nil {
 		return d, errors.New("model_decision_invalid")

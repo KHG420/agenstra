@@ -12,15 +12,15 @@
 
 只读或计算任务的最终回答引用了带 `omitted_paths` 的 Fact 预览时，也进入同一复核阶段。预览省略的字段可能仍存在于已保存回执中，不能把只输出可见字段当成已经完整回答。复核结合原请求、草稿和已有检查结果判断：请求的字段确实仍被省略时，返回缺失证据检查的反馈；只要求已经可见的字段时，其他省略不阻止完成。已有省略提示中的键名可以证明字段存在，但不能证明值；复核逐项核对请求字段，不能把局部预览的键集当作完整返回字段清单。证据不足时返回具体原 Fact 路径和缺失字段，保留简短未发布草稿，避免反复复制不完整的大答案。后续通过普通 `inspect_fact` 读取原回执，不重放业务请求。未被引用的截断证据和完整的只读证据不会触发额外复核。这沿用 [smolagents 发布最终结果前运行校验、失败后返回原循环](https://github.com/huggingface/smolagents/blob/227ef5e49ddd82339295939072f0223249aa8d38/src/smolagents/agents.py#L582-L618) 的模式，使用 Agenstra 已有的预算和反馈路径；模型复核仍可能漏检语义，不能代替独立字段验收。
 
-复核只能返回 `final`，不能执行或重新提交业务操作。`final` 新增可选字符串 `completion_feedback`（最多 2,000 个 Unicode 码点），供复核拒绝提前完成：发现原请求中仍有未执行的工作时，返回具体缺项；框架保存草稿和复核决策，将 `completion_incomplete` 反馈写入现有观察，保持任务运行并回到普通决策阶段。后续操作继续经过当前授权、审批、前置校验和回执路径，复核文字本身不能授权或派发调用，也不会自动重放已成功的写入。所有请求消耗原有预算，没有新增无限重试。
+复核可返回 `final` 或仅含决策身份的 `approve_completion`，不能执行或重新提交业务操作。`final` 新增可选字符串 `completion_feedback`（最多 2,000 个 Unicode 码点），供复核拒绝提前完成：发现原请求中仍有未执行的工作时，返回具体缺项；框架保存草稿和复核决策，将 `completion_incomplete` 反馈写入现有观察，保持任务运行并回到普通决策阶段。后续操作继续经过当前授权、审批、前置校验和回执路径，复核文字本身不能授权或派发调用，也不会自动重放已成功的写入。所有请求消耗原有预算，没有新增无限重试。
 
-已处理所有请求，或有明确缺失前提、审批拒绝或不确定操作阻止推进时，复核返回空字符串并如实说明结果和限制；不能凭空增加验收要求。旧的自定义 `DecisionModel` 可省略该字段；内置 HTTP 模型适配器在两种输出模式下都要求复核显式返回该字符串，缺失字段或返回其他决策种类时拒绝响应，沿用原格式纠正预算。普通决策阶段不能提交非空复核反馈。例：写入后用户明确要求独立读回，但本轮只有写入回执时，复核返回 `{"kind":"final","answer_markdown":"尚未发布的草稿","fact_ids":["真实证据 UUID"],"completion_feedback":"缺少原请求要求的独立读回。"}`，下一轮再由模型通过正常能力调用补做读回。
+已处理所有请求，或有明确缺失前提、审批拒绝或不确定操作阻止推进时，复核返回空字符串并如实说明结果和限制；不能凭空增加验收要求。旧的自定义 `DecisionModel` 可省略该字段；内置 HTTP 模型适配器在 JSON 正文、JSON Schema 和输出工具模式下都要求复核的 `final` 显式返回该字符串，缺失字段或返回其他决策种类时拒绝响应，沿用原格式纠正预算。普通决策阶段不能提交非空复核反馈或 `approve_completion`。例：写入后用户明确要求独立读回，但本轮只有写入回执时，复核返回 `{"kind":"final","answer_markdown":"尚未发布的草稿","fact_ids":["真实证据 UUID"],"completion_feedback":"缺少原请求要求的独立读回。"}`，下一轮再由模型通过正常能力调用补做读回。
 
 草稿和复核结果都进入现有决策审计。框架先检查草稿的 Fact 引用、标量业务对象引用及正文中的内部 Fact ID；这些本地规则已能确定无效的草稿直接返回普通决策纠正，保留原错误码、执行证据和预算，不发送无效草稿进行模型复核。有效草稿仍须复核，复核结果再次通过同一组本地规则和已有 `CompletionValidator` 检查后才发布。宿主完成校验不在草稿阶段执行。先验证输出再处理有效输出的顺序参考 [Pydantic AI 输出工具处理](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/tool_manager.py#L968-L982)。
 
 没有写操作、也没有引用截断证据的只读、计算和对话运行不增加复核请求。正常复核增加一次模型请求；格式错误最多使用现有的一次格式纠正，并始终受轮次、Token、输入上下文、超时和费用统计约束。复核无法完成时，任务保持未完成、草稿不发布，已有业务回执继续保留。该反馈方式参考 [Pydantic AI 将输出校验失败反馈回模型循环](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_agent_graph.py#L2393-L2399)。
 
-使用 `output_tools` 时，复核请求只提供 `submit_decision` 的 `final` 分支及上述反馈字段，通过明确的 `tool_choice` 选择该函数，保持单个输出决策限制；内置复核工具 Schema 要求显式提供 `completion_feedback`。业务调用、追问、搜索和检查工具不作为此阶段的可选输出。普通决策工具不暴露复核反馈。已保存调用及结果仍作为历史证据呈现，输入测量与实际请求一致。该限制依据框架已有的复核阶段，不按模型名称分支；JSON 正文复核使用同一反馈语义，记忆提取不变。此取舍参考 [Pydantic AI 按可选工具限制模型请求](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/models/openai.py#L1583-L1616)。筛选输出工具使模型请求与运行内核一致，不能保证最终回答不混用字段来源或遗漏用户要求的数据。
+使用 `output_tools` 时，复核请求只提供 `submit_decision` 的 `final` 和 `approve_completion` 分支，`final` 保留上述反馈字段，通过明确的 `tool_choice` 选择该函数，保持单个输出决策限制；内置复核工具 Schema 要求显式提供 `completion_feedback`。业务调用、追问、搜索和检查工具不作为此阶段的可选输出。普通决策工具不暴露复核反馈。已保存调用及结果仍作为历史证据呈现，输入测量与实际请求一致。该限制依据框架已有的复核阶段，不按模型名称分支；JSON 正文复核使用同一反馈语义，记忆提取不变。此取舍参考 [Pydantic AI 按可选工具限制模型请求](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/models/openai.py#L1583-L1616)。筛选输出工具使模型请求与运行内核一致，不能保证最终回答不混用字段来源或遗漏用户要求的数据。
 
 JSON 正文复核同样只宣告 `final`：移除框架普通决策的种类列表和调用示例，保留宿主规则与证据，并明确复核字段及阶段限制。网关声明支持 JSON 或工具 Schema 不能代替本地检查；适配器会再次校验复核的决策种类和反馈字段，缺失字段不能当作“通过复核”。
 
@@ -28,7 +28,9 @@ JSON 正文复核同样只宣告 `final`：移除框架普通决策的种类列�
 
 这一取舍参考 [LangGraph 的 evaluator-optimizer 示例](https://docs.langchain.com/oss/python/langgraph/workflows-agents#evaluator-optimizer)：评估节点使用专门的结构化输出和待评判产物，反馈再返回生成节点；同时参考 [Pydantic AI 按当前上下文筛选工具](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/toolsets/filtered.py)。Agenstra 使用已有复核阶段实现输入投影，减少执行与复核混淆及无用输入；语义漏检和步骤顺序仍须通过目标模型的真实任务验收。
 
-工具输出复核把本轮实际最终草稿表示为历史 `submit_decision` 调用，并配对“尚未发布、需要复核”的框架反馈。任务、补充输入、观察和 Fact 保持原值；草稿只在历史调用参数中提供一次，不加入系统指令，也不表示任何业务操作成功。复核仍只能返回 `final`，缺少原请求的工作仍须通过 `completion_feedback` 拒绝发布。此消息组织参考 [Pydantic AI 保存模型响应并按工具调用身份关联反馈的实现](https://github.com/pydantic/pydantic-ai/blob/main/pydantic_ai_slim/pydantic_ai/_agent_graph.py)，不引入其运行库。需要原始推理正文的 `deepseek_chat` 在未明确关闭 thinking 时继续使用数据形式的草稿，框架不伪造推理正文。JSON 输出和普通业务历史保持原有行为，新增消息计入完整输入测量；这项组织方式本身不保证模型或网关始终遵守工具输出协议。
+工具输出复核把本轮实际最终草稿表示为历史 `submit_decision` 调用，并配对“尚未发布、需要复核”的框架反馈。任务、补充输入、观察和 Fact 保持原值；草稿只在历史调用参数中提供一次，不加入系统指令，也不表示任何业务操作成功。复核仍只能返回 `final` 或 `approve_completion`，缺少原请求的工作仍须通过 `completion_feedback` 拒绝发布。此消息组织参考 [Pydantic AI 保存模型响应并按工具调用身份关联反馈的实现](https://github.com/pydantic/pydantic-ai/blob/main/pydantic_ai_slim/pydantic_ai/_agent_graph.py)，不引入其运行库。需要原始推理正文的 `deepseek_chat` 在未明确关闭 thinking 时继续使用数据形式的草稿，框架不伪造推理正文。JSON 输出和普通业务历史保持原有行为，新增消息计入完整输入测量；这项组织方式本身不保证模型或网关始终遵守工具输出协议。
+
+复核确认整份草稿正确、证据完整、业务结果与用户要求一致时，可返回 `{"schema":"agenstra.decision.v1","kind":"approve_completion"}`。该决策不接受答案、引用、反馈或调用参数；普通阶段不能使用它。框架只复用当前复核开始前冻结的原草稿，继续执行 Fact 引用、内部标识过滤、结果引用和宿主 `CompletionValidator`，不从模型输入中取回替换值。取消、检查点失败、租约和原模型预算仍生效；恢复后重新冻结并复核本轮草稿，不自动批准历史草稿。需要修正答案或拒绝完成时沿用 `final` 和 `completion_feedback`。这样避免为批准正确的大答案而再次生成整份正文，输入证据和完整审查不减少。设计参考 [OpenHands API critic 的结论与迭代反馈分离](https://github.com/OpenHands/software-agent-sdk/blob/0bb7b525c75f4a9a0606844fc4a2579106b08d32/openhands-sdk/openhands/sdk/critic/impl/api/critic.py)，不采用其评分规则或任务特定完成条件。
 
 遥测中的 `completion_review` 单独记录这部分请求和用量。标准聊天组件直接显示执行回执；任务或回答生成失败不会把已成功的业务操作显示成未执行。自定义界面可使用已有的 `run.state.runtime.invocation_receipts`，无需解析模型文字。
 

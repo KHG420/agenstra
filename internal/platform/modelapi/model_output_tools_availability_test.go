@@ -117,7 +117,7 @@ func TestCompletionReviewOffersOnlyFinalOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	schemas := outputDecisionSchemas(t, payload)
-	if len(schemas) != 1 || schemas["final"] == nil {
+	if len(schemas) != 2 || schemas["final"] == nil || schemas["approve_completion"] == nil {
 		t.Fatal("completion review offered decisions that runtime cannot accept")
 	}
 	properties := schemas["final"]["properties"].(agentcontract.JSON)
@@ -157,7 +157,7 @@ func TestCompletionReviewOffersOnlyFinalOutput(t *testing.T) {
 		t.Fatal("review transport changed content-only JSON")
 	}
 	jsonPrompt := legacy["messages"].([]any)[0].(agentcontract.JSON)["content"].(string)
-	if !strings.Contains(jsonPrompt, "final only") || !strings.Contains(jsonPrompt, "completion_feedback is REQUIRED") {
+	if !strings.Contains(jsonPrompt, "final or approve_completion only") || !strings.Contains(jsonPrompt, "completion_feedback is REQUIRED") {
 		t.Fatal("JSON review did not advertise its actual stage contract", jsonPrompt)
 	}
 }
