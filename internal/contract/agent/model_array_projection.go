@@ -5,6 +5,29 @@ import (
 	"encoding/json"
 )
 
+// A literal object field named * does not opt existing SDK data into JSON
+// normalization. Only a path that reaches an actual JSON array needs it.
+func requiresArrayModelProjection(value any, path []string) bool {
+	for _, field := range path {
+		if object, ok := value.(map[string]any); ok {
+			child, exists := object[field]
+			if !exists {
+				return false
+			}
+			value = child
+			continue
+		}
+		if field == "*" {
+			// Use JSON meaning here so typed SDK slices are recognized while
+			// JSON string values such as []byte are not treated as arrays.
+			raw, err := CanonicalJSON(value)
+			return err == nil && len(raw) > 0 && raw[0] == '['
+		}
+		return false
+	}
+	return false
+}
+
 // projectedArrayModelData projects the JSON meaning of array paths. Normalizing
 // this opt-in shape also accepts typed SDK slices without walking opaque Go state.
 // Ordinary object paths retain their existing projection behavior.

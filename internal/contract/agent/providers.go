@@ -402,10 +402,8 @@ func projectedModelData(data JSON, output *ModelOutput) JSON {
 		return visible
 	}
 	for _, path := range output.Paths {
-		for _, field := range path {
-			if field == "*" {
-				return projectedArrayModelData(data, output)
-			}
+		if requiresArrayModelProjection(data, path) {
+			return projectedArrayModelData(data, output)
 		}
 	}
 	for _, path := range output.Paths {
