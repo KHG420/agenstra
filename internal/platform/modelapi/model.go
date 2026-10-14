@@ -208,6 +208,9 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 				return nil, err
 			}
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		request := req.Clone(ctx)
 		if metrics := modelMetrics(ctx); metrics != nil {
 			metrics.Attempts++
