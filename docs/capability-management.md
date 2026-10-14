@@ -203,6 +203,8 @@ Web 导出的是包含 `manifest` 与 `skills` 正文的 JSON 文件，可从 We
 
 模型预览、`inspect_fact`、参数引用和最终结构化引用均通过同一获准投影读取；完整回执继续保存，隐藏字段不进入模型。若另有路径明确授权整个数组或父对象，该较大授权仍生效。`model_output` 省略时的完整结果行为与空 `paths` 的不透明行为保持原义。宿主凭据与业务权限仍由连接和原接口核验；投影不会授予权限。
 
+可空对象和数组可使用 `anyOf`、`oneOf` 或 `type: ["array", "null"]` / `type: ["object", "null"]` 声明。选定路径须存在于每个非 null 分支；仅有 null 分支、混合标量分支或某个非 null 分支缺少字段时，清单加载拒绝该路径。沿路径遇到原数据中明确存在的 null 容器时，保留该位置的 null；字段缺省时仍不输出。比如 `model_pricing` 声明为可空数组，选择 `["result", "*", "model_pricing", "*", "input_price"]` 后，原值 null 和空数组分别保留为 null 和 `[]`，不会互相替代。对象路径不改变 Go SDK 已有的数字类型；只有遍历实际 JSON 数组时才按 JSON 意义规范化数据。
+
 逐项字段选择参考 [Pydantic v2.12.3 的列表 include/exclude](https://github.com/pydantic/pydantic/blob/1a8850d101e67d2744ba8c6286e1172d7cd89d0b/docs/concepts/serialization.md)：它以 `__all__` 应用成员字段选择。Agenstra 沿用自己的有界路径和 Schema 校验，不采用 Pydantic 的索引或 include 语法。
 
 打开本地能力清单时，已确认的 JSON、清单种类或 REST 契约校验失败以 `capability_contract_invalid` 保存到运行和诊断中，归类为契约问题，在模型或业务调用前停止。原始校验错误仍保留在 Go 错误链中供开发者排查；宿主运行诊断只提供安全错误码和固定说明，不返回原始清单正文。文件读取失败和外部服务不可用保持原有处理，开发者草稿的 `ValidatePackManifest` 仍返回具体校验信息。修正清单后创建新的验收任务，历史失败不会被改写成成功。

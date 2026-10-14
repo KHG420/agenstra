@@ -350,47 +350,110 @@ func ValidateModelOutput(output *ModelOutput) error {
 
 // ValidateModelOutputSchema ensures every projected path exists in the declared schema.
 func ValidateModelOutputSchema(output *ModelOutput, schema JSON) error {
-	if output == nil {
+	if output == nil || len(output.Paths) == 0 {
 		return nil
 	}
+	// Normalize SDK-declared typed slices into the same JSON schema meaning
+	// used by the ordinary schema compiler, without mutating the declaration.
+	raw, err := CanonicalJSON(schema)
+	if err != nil {
+		return fmt.Errorf("model_output requires a finite output_schema: %w", err)
+	}
+	var root JSON
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&root); err != nil {
+		return fmt.Errorf("model_output requires an object output_schema: %w", err)
+	}
 	for _, path := range output.Paths {
-		var current JSON = schema
-		for _, field := range path {
-			for depth := 0; depth < 16; depth++ {
-				ref, ok := current["$ref"].(string)
-				if !ok {
-					break
-				}
-				if !strings.HasPrefix(ref, "#/$defs/") {
-					return fmt.Errorf("model_output path requires a local object schema")
-				}
-				defs, _ := schema["$defs"].(map[string]any)
-				current, _ = defs[strings.TrimPrefix(ref, "#/$defs/")].(map[string]any)
-				if current == nil {
-					return fmt.Errorf("model_output path has an unresolved schema reference")
-				}
-			}
-			if current["type"] == "array" {
-				if field != "*" || current["prefixItems"] != nil {
-					return fmt.Errorf("model_output array path requires a uniform items schema and *")
-				}
-				current, _ = current["items"].(map[string]any)
-				if current == nil {
-					return fmt.Errorf("model_output array path requires a declared items schema")
-				}
-				continue
-			}
-			if current["type"] != "object" {
-				return fmt.Errorf("model_output path may only traverse declared object fields or arrays")
-			}
-			properties, _ := current["properties"].(map[string]any)
-			current, _ = properties[field].(map[string]any)
-			if current == nil {
-				return fmt.Errorf("model_output path is not declared in output_schema")
-			}
+		if err := validateModelOutputPath(root, root, path, 0); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// A selected field must be declared by every possible non-null branch. Null
+// carries no child fields; the projection retains it at its original location.
+func validateModelOutputPath(root, current JSON, path []string, branchDepth int) error {
+	if len(path) == 0 {
+		return nil
+	}
+	if branchDepth > 16 {
+		return fmt.Errorf("model_output schema branch nesting is too deep")
+	}
+	for depth := 0; depth < 16; depth++ {
+		ref, ok := current["$ref"].(string)
+		if !ok {
+			break
+		}
+		if !strings.HasPrefix(ref, "#/$defs/") {
+			return fmt.Errorf("model_output path requires a local object schema")
+		}
+		defs, _ := root["$defs"].(map[string]any)
+		current, _ = defs[strings.TrimPrefix(ref, "#/$defs/")].(map[string]any)
+		if current == nil {
+			return fmt.Errorf("model_output path has an unresolved schema reference")
+		}
+	}
+	for _, keyword := range []string{"anyOf", "oneOf"} {
+		if branches, ok := current[keyword].([]any); ok {
+			nonNull := 0
+			for _, value := range branches {
+				branch, ok := value.(map[string]any)
+				if !ok {
+					return fmt.Errorf("model_output path requires declared schema branches")
+				}
+				if branch["type"] == "null" {
+					continue
+				}
+				nonNull++
+				if err := validateModelOutputPath(root, branch, path, branchDepth+1); err != nil {
+					return err
+				}
+			}
+			if nonNull == 0 {
+				return fmt.Errorf("model_output path has no non-null container branch")
+			}
+			return nil
+		}
+	}
+	typeName, _ := current["type"].(string)
+	if types, ok := current["type"].([]any); ok {
+		for _, value := range types {
+			name, ok := value.(string)
+			if !ok {
+				return fmt.Errorf("model_output path requires declared container types")
+			}
+			if name == "null" {
+				continue
+			}
+			if typeName != "" && typeName != name {
+				return fmt.Errorf("model_output path requires one non-null container type")
+			}
+			typeName = name
+		}
+	}
+	field := path[0]
+	if typeName == "array" {
+		if field != "*" || current["prefixItems"] != nil {
+			return fmt.Errorf("model_output array path requires a uniform items schema and *")
+		}
+		items, _ := current["items"].(map[string]any)
+		if items == nil {
+			return fmt.Errorf("model_output array path requires a declared items schema")
+		}
+		return validateModelOutputPath(root, items, path[1:], 0)
+	}
+	if typeName != "object" {
+		return fmt.Errorf("model_output path may only traverse declared object fields or arrays")
+	}
+	properties, _ := current["properties"].(map[string]any)
+	child, _ := properties[field].(map[string]any)
+	if child == nil {
+		return fmt.Errorf("model_output path is not declared in output_schema")
+	}
+	return validateModelOutputPath(root, child, path[1:], 0)
 }
 
 func projectedModelData(data JSON, output *ModelOutput) JSON {
@@ -404,6 +467,11 @@ func projectedModelData(data JSON, output *ModelOutput) JSON {
 	for _, path := range output.Paths {
 		if requiresArrayModelProjection(data, path) {
 			return projectedArrayModelData(data, output)
+		}
+	}
+	for _, path := range output.Paths {
+		if hasNullModelContainer(data, path) {
+			return projectedContainerModelData(data, output)
 		}
 	}
 	for _, path := range output.Paths {

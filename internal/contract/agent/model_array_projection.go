@@ -28,6 +28,26 @@ func requiresArrayModelProjection(value any, path []string) bool {
 	return false
 }
 
+// A present null ancestor is a business value, distinct from an absent field.
+// Leaf nulls already follow the ordinary object projection path.
+func hasNullModelContainer(value any, path []string) bool {
+	for _, field := range path {
+		if value == nil {
+			return true
+		}
+		object, ok := value.(map[string]any)
+		if !ok {
+			return false
+		}
+		child, exists := object[field]
+		if !exists {
+			return false
+		}
+		value = child
+	}
+	return false
+}
+
 // projectedArrayModelData projects the JSON meaning of array paths. Normalizing
 // this opt-in shape also accepts typed SDK slices without walking opaque Go state.
 // Ordinary object paths retain their existing projection behavior.
@@ -42,9 +62,15 @@ func projectedArrayModelData(data JSON, output *ModelOutput) JSON {
 	if decoder.Decode(&normalized) != nil {
 		return JSON{}
 	}
+	return projectedContainerModelData(normalized, output)
+}
+
+// Object-only nullable paths preserve existing SDK Go scalar values. Array
+// paths call this with normalized JSON so typed slices have JSON semantics.
+func projectedContainerModelData(data JSON, output *ModelOutput) JSON {
 	visible := JSON{}
 	for _, path := range output.Paths {
-		selected, ok := modelProjectionPath(normalized, path)
+		selected, ok := modelProjectionPath(data, path)
 		if ok {
 			visible = mergeModelProjection(visible, selected).(map[string]any)
 		}
@@ -55,6 +81,9 @@ func projectedArrayModelData(data JSON, output *ModelOutput) JSON {
 func modelProjectionPath(value any, path []string) (any, bool) {
 	if len(path) == 0 {
 		return value, true
+	}
+	if value == nil {
+		return nil, true
 	}
 	switch data := value.(type) {
 	case map[string]any:
