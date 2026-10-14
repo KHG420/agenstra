@@ -603,6 +603,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 	var decision agentcontract.Decision
 	var review *agentcontract.Decision
 	for attempt := 0; attempt < 2; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if state.RoundsUsed >= r.MaxModelRounds {
 			state.Status = "failed"
 			state.ErrorCode = agentcontract.Strptr("model_round_budget_exhausted")
@@ -822,6 +825,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 				RebuildModelUsage(state)
 				return err
 			}
+		}
+		if err := ctx.Err(); err != nil {
+			state.ModelCalls[callIndex].Attempts = 0
+			RebuildModelUsage(state)
+			return err
 		}
 		started := time.Now()
 		d, err := r.Model.Decide(ctx, modelPacket, prompt)
