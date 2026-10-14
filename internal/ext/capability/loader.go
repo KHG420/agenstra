@@ -17,9 +17,18 @@ import (
 func validateRawManifest(raw []byte, skills map[string]string) error {
 	var manifest map[string]any
 	if err := jsonvalue.DecodeStrict(raw, &manifest); err != nil {
-		return err
+		return manifestContractError(err)
 	}
-	return ValidatePackManifest(manifest, skills)
+	if err := ValidatePackManifest(manifest, skills); err != nil {
+		return manifestContractError(err)
+	}
+	return nil
+}
+
+// Runtime opening retains a stable public code and the developer's original
+// validation cause. Host persists the code; authoring validation stays detailed.
+func manifestContractError(cause error) error {
+	return fmt.Errorf("%w: %w", agentcontract.NewHostError("capability_contract_invalid"), cause)
 }
 
 // OpenPack selects the declared provider from a trusted manifest.
@@ -33,7 +42,7 @@ func OpenPack(ctx context.Context, path string, environment map[string]string) (
 		Schema string `json:"schema"`
 	}
 	if err := json.Unmarshal(raw, &header); err != nil {
-		return nil, err
+		return nil, manifestContractError(err)
 	}
 	switch header.Schema {
 	case "agenstra.capability-pack.v1":
@@ -44,9 +53,9 @@ func OpenPack(ctx context.Context, path string, environment map[string]string) (
 		return OpenMCPPack(ctx, path, environment)
 	default:
 		if header.Schema == "" {
-			return nil, errors.New("unsupported capability pack schema: <missing>")
+			return nil, manifestContractError(errors.New("unsupported capability pack schema: <missing>"))
 		}
-		return nil, fmt.Errorf("unsupported capability pack schema: %s", header.Schema)
+		return nil, manifestContractError(fmt.Errorf("unsupported capability pack schema: %s", header.Schema))
 	}
 }
 

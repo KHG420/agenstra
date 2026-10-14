@@ -330,10 +330,10 @@ func LoadRestPack(path string, environment map[string]string, client *http.Clien
 	}
 	var manifest agentcontract.RestManifest
 	if err := jsonvalue.DecodeStrict(raw, &manifest); err != nil {
-		return nil, err
+		return nil, manifestContractError(err)
 	}
 	if manifest.Schema != "agenstra.rest-pack.v2" || manifest.Name == "" || manifest.Version == "" || manifest.Guidance == "" || len(manifest.Capabilities) == 0 || !EnvPattern.MatchString(manifest.BaseURLEnv) {
-		return nil, errors.New("invalid REST pack manifest")
+		return nil, manifestContractError(errors.New("invalid REST pack manifest"))
 	}
 	skills, err := LoadSkillFiles(manifest.Skills, filepath.Dir(path))
 	if err != nil {

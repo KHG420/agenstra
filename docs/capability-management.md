@@ -204,3 +204,5 @@ Web 导出的是包含 `manifest` 与 `skills` 正文的 JSON 文件，可从 We
 模型预览、`inspect_fact`、参数引用和最终结构化引用均通过同一获准投影读取；完整回执继续保存，隐藏字段不进入模型。若另有路径明确授权整个数组或父对象，该较大授权仍生效。`model_output` 省略时的完整结果行为与空 `paths` 的不透明行为保持原义。宿主凭据与业务权限仍由连接和原接口核验；投影不会授予权限。
 
 逐项字段选择参考 [Pydantic v2.12.3 的列表 include/exclude](https://github.com/pydantic/pydantic/blob/1a8850d101e67d2744ba8c6286e1172d7cd89d0b/docs/concepts/serialization.md)：它以 `__all__` 应用成员字段选择。Agenstra 沿用自己的有界路径和 Schema 校验，不采用 Pydantic 的索引或 include 语法。
+
+打开本地能力清单时，已确认的 JSON、清单种类或 REST 契约校验失败以 `capability_contract_invalid` 保存到运行和诊断中，归类为契约问题，在模型或业务调用前停止。原始校验错误仍保留在 Go 错误链中供开发者排查；宿主运行诊断只提供安全错误码和固定说明，不返回原始清单正文。文件读取失败和外部服务不可用保持原有处理，开发者草稿的 `ValidatePackManifest` 仍返回具体校验信息。修正清单后创建新的验收任务，历史失败不会被改写成成功。
