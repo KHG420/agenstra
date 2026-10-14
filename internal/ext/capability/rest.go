@@ -510,6 +510,21 @@ func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any,
 		request.Header.Set(k, v)
 	}
 	client := *p.Client
+	if p.capabilities[name].Replay == "never" {
+		transport := client.Transport
+		if transport == nil {
+			transport = http.DefaultTransport
+		}
+		if standard, ok := transport.(*http.Transport); ok {
+			// Transport retries GET after a lost response on reused connections,
+			// even when this capability has already performed a business write.
+			// Use an invocation-owned pool without changing the caller's transport.
+			owned := standard.Clone()
+			owned.DisableKeepAlives = true
+			client.Transport = owned
+			defer owned.CloseIdleConnections()
+		}
+	}
 	if endpoint.TimeoutSeconds <= 0 {
 		endpoint.TimeoutSeconds = 20
 	}
