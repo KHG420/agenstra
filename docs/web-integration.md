@@ -233,6 +233,8 @@ await client.send("查询待处理订单", { clientId: client.id() });
 
 默认 `sessionStorage` 保存所选会话 ID、tab 绑定和执行回执，不保存 Agent 会话上下文；可传 `storage: null`。禁用存储后仍可通过会话列表手动恢复，服务端仍阻止重复认领；上述销毁并重建 client 的自动浏览器恢复需要保留存储。
 
+可选聊天组件的 `mountAgenstraChat` 接受 `getSources: () => RunSource[] | Promise<RunSource[]>`。宿主可从自己的可信登录与配置接口读取当前消息选定的后端来源，返回现有 `sources` 结构。组件只在新消息首次提交前调用该函数，并复制来源数组；响应丢失后的重试保留原 `clientId` 和相同来源范围，不重新选择。读取失败时不提交消息，读取过程中切换 client 时丢弃迟到结果。未配置此函数时保持当前 integration 的原有行为。该选择不授予权限：服务端仍按委派上限、目标连接、当前身份权限和消息范围取交集。
+
 `listConversations()` 返回当前 integration 下该用户最近的最多 100 个会话。`selectConversation(id)` 验证会话归属和 integration，立即发布所选会话的历史及状态。切换失败保留此前选择；旧会话的迟到轮询不会覆盖新会话。选择和创建按调用顺序串行化。未显式选择时，`getConversation()` 恢复已保存的会话 ID；没有可用会话时自动创建。切换不取消、不迁移旧任务的浏览器绑定。浏览器连接受阻时，仍可读取、选择和创建会话、查看任务状态以及调用 `cancelMessage`；这些操作成功不代表浏览器已连接。`watchConversation` 同时尝试浏览器连接和聊天轮询，连接错误不阻止历史显示。启用控制桥的 `send` 和 `run` 必须先完成浏览器连接。
 
 handler 在连接前注册，返回符合 output Schema 的结果；实际业务写入须在后端再次校验权限，可用 `commandId` 作为业务幂等键。`getPageObservation` 返回当前页面、筛选、选中项等数据，排除 cookie、token 和无关敏感数据；手动改变页面后调用 `updatePageObservation`。这些接口只能更新页面观察数据，不影响聊天历史、运行检查点或 Agent 上下文选择。

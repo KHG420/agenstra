@@ -165,7 +165,13 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
         const { run, runtime } = this.awaitingInput;
         await client.supplyInput(run.run_id, runtime.input_field, text, run.revision);
       } else {
-        if (!this.pendingSend || this.pendingSend.text !== text) this.pendingSend = { text, clientId: this.client.id() };
+        if (!this.pendingSend || this.pendingSend.text !== text) {
+          const sources = this.getSources ? JSON.parse(JSON.stringify(await this.getSources())) : undefined;
+          if (epoch !== this.epoch || client !== this.client) return;
+          // Freeze the selected scope with its identity before dispatch. A lost
+          // response must retry the same message, not newly selected sources.
+          this.pendingSend = { text, clientId: client.id(), ...(sources === undefined ? {} : { sources }) };
+        }
         await client.send(text, this.pendingSend);
       }
       const snapshot = await client.snapshot();
@@ -339,13 +345,14 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
   }
 }
 if (globalThis.customElements && !customElements.get("agenstra-chat")) customElements.define("agenstra-chat", AgenstraChat);
-export function mountAgenstraChat(container, { client, title, locale = "zh-CN", subtitle, emptyTitle, emptyHint, placeholder }) {
+export function mountAgenstraChat(container, { client, title, locale = "zh-CN", subtitle, emptyTitle, emptyHint, placeholder, getSources }) {
   const element = document.createElement("agenstra-chat");
   element.setAttribute("lang", locale);
   if (title) element.setAttribute("title", title);
   for (const [name, value] of Object.entries({ subtitle, "empty-title": emptyTitle, "empty-hint": emptyHint, placeholder })) {
     if (value !== undefined) element.setAttribute(name, value);
   }
+  element.getSources = getSources;
   element.client = client;container.append(element);
   return { element, unmount: () => element.remove() };
 }
