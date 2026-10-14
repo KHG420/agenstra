@@ -312,6 +312,8 @@ type MCPDiscoveredTool struct {
 
 // ModelOutput limits which fields of a provider result may enter model context
 // or be read through a Fact reference. Paths are relative to the result data.
+// A "*" segment traverses all members of a schema-declared uniform array;
+// object segments, including a literal "*" property, keep their field meaning.
 // A nil ModelOutput keeps the existing full-result behavior; an empty Paths
 // list makes the result opaque to the model.
 type ModelOutput struct {
@@ -346,7 +348,7 @@ func ValidateModelOutput(output *ModelOutput) error {
 	return nil
 }
 
-// ValidateModelOutputSchema ensures every projected path exists in the declared object schema.
+// ValidateModelOutputSchema ensures every projected path exists in the declared schema.
 func ValidateModelOutputSchema(output *ModelOutput, schema JSON) error {
 	if output == nil {
 		return nil
@@ -368,8 +370,18 @@ func ValidateModelOutputSchema(output *ModelOutput, schema JSON) error {
 					return fmt.Errorf("model_output path has an unresolved schema reference")
 				}
 			}
+			if current["type"] == "array" {
+				if field != "*" || current["prefixItems"] != nil {
+					return fmt.Errorf("model_output array path requires a uniform items schema and *")
+				}
+				current, _ = current["items"].(map[string]any)
+				if current == nil {
+					return fmt.Errorf("model_output array path requires a declared items schema")
+				}
+				continue
+			}
 			if current["type"] != "object" {
-				return fmt.Errorf("model_output path may only traverse object fields")
+				return fmt.Errorf("model_output path may only traverse declared object fields or arrays")
 			}
 			properties, _ := current["properties"].(map[string]any)
 			current, _ = properties[field].(map[string]any)
@@ -388,6 +400,13 @@ func projectedModelData(data JSON, output *ModelOutput) JSON {
 	visible := JSON{}
 	if ValidateModelOutput(output) != nil {
 		return visible
+	}
+	for _, path := range output.Paths {
+		for _, field := range path {
+			if field == "*" {
+				return projectedArrayModelData(data, output)
+			}
+		}
 	}
 	for _, path := range output.Paths {
 		var value any = data

@@ -190,3 +190,17 @@ Web 导出的是包含 `manifest` 与 `skills` 正文的 JSON 文件，可从 We
 | `POST /admin/api/drafts/{id}/publish` | 发布指定修订，完整校验失败返回 422 与 `issues`；发布成功不启用、不授权。 |
 
 `PATCH` 的 `section` 支持 `basic`、`connection`（通过 `value` 对象更新字段），`capabilities`、`skills`（通过 `items` 数组和 `conflict` 合并，技能正文放在 `skills` 对象中），`import`（`value` 为同类型清单），`openapi`（`value` 含 `spec`、`operations` 和可选 `effects`），以及 `remove_capability` / `remove_skill`（通过 `name` 指定）。导入和合并在一次修订更新中完成。备份管理数据库时也会备份草稿；仍需同时备份运行数据库、发布目录和密钥管理配置。
+
+## REST 数组结果的模型字段投影
+
+`model_output.paths` 相对于能力结果 `data`，沿用最多 64 条、每条最多 16 段的上限。对象字段保持原义；当当前 `output_schema` 节点是带统一 `items` 的数组时，`"*"` 对该数组的每一项应用余下路径。例如 REST 原响应的 `data` 是分组数组，可使用 `response_path: ["data"]` 和 `response_mode: "wrap"` 将它保留为 `{"result": [...]}`，再声明：
+
+```json
+{"model_output":{"paths":[["result","*","id"],["result","*","name"],["result","*","platform"],["result","*","status"]]}}
+```
+
+`output_schema` 仍须声明 `result` 的数组、统一的对象 `items` 和选定字段。数字下标、未声明字段和 `prefixItems` 元组不能用于此投影；对象中名为 `"*"` 的真实属性仍是普通字段。数组顺序、长度、空数组和嵌套数组保持不变；一个对象没有选定字段时，其位置保留为空对象，不把缺省字段填成 `null`。明确返回的 `null`、`false` 和 `0` 保留原值。
+
+模型预览、`inspect_fact`、参数引用和最终结构化引用均通过同一获准投影读取；完整回执继续保存，隐藏字段不进入模型。若另有路径明确授权整个数组或父对象，该较大授权仍生效。`model_output` 省略时的完整结果行为与空 `paths` 的不透明行为保持原义。宿主凭据与业务权限仍由连接和原接口核验；投影不会授予权限。
+
+逐项字段选择参考 [Pydantic v2.12.3 的列表 include/exclude](https://github.com/pydantic/pydantic/blob/1a8850d101e67d2744ba8c6286e1172d7cd89d0b/docs/concepts/serialization.md)：它以 `__all__` 应用成员字段选择。Agenstra 沿用自己的有界路径和 Schema 校验，不采用 Pydantic 的索引或 include 语法。

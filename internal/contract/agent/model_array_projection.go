@@ -1,0 +1,93 @@
+package agent
+
+import (
+	"bytes"
+	"encoding/json"
+)
+
+// projectedArrayModelData projects the JSON meaning of array paths. Normalizing
+// this opt-in shape also accepts typed SDK slices without walking opaque Go state.
+// Ordinary object paths retain their existing projection behavior.
+func projectedArrayModelData(data JSON, output *ModelOutput) JSON {
+	raw, err := CanonicalJSON(data)
+	if err != nil {
+		return JSON{}
+	}
+	var normalized JSON
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if decoder.Decode(&normalized) != nil {
+		return JSON{}
+	}
+	visible := JSON{}
+	for _, path := range output.Paths {
+		selected, ok := modelProjectionPath(normalized, path)
+		if ok {
+			visible = mergeModelProjection(visible, selected).(map[string]any)
+		}
+	}
+	return visible
+}
+
+func modelProjectionPath(value any, path []string) (any, bool) {
+	if len(path) == 0 {
+		return value, true
+	}
+	switch data := value.(type) {
+	case map[string]any:
+		child, exists := data[path[0]]
+		if !exists {
+			return nil, false
+		}
+		selected, ok := modelProjectionPath(child, path[1:])
+		if !ok {
+			return nil, false
+		}
+		return JSON{path[0]: selected}, true
+	case []any:
+		if path[0] != "*" {
+			return nil, false
+		}
+		items := make([]any, len(data))
+		for i, child := range data {
+			selected, ok := modelProjectionPath(child, path[1:])
+			if ok {
+				items[i] = selected
+			} else if child == nil {
+				// Preserve an explicit null member, never invent one for a missing field.
+				items[i] = nil
+			} else {
+				items[i] = JSON{}
+			}
+		}
+		return items, true
+	default:
+		return nil, false
+	}
+}
+
+// mergeModelProjection combines paths selected from the same source. Matching
+// array positions retain all authorized fields, including explicit parent grants.
+func mergeModelProjection(left, right any) any {
+	switch target := left.(type) {
+	case map[string]any:
+		if selected, ok := right.(map[string]any); ok {
+			for key, value := range selected {
+				if previous, exists := target[key]; exists {
+					target[key] = mergeModelProjection(previous, value)
+				} else {
+					target[key] = value
+				}
+			}
+			return target
+		}
+	case []any:
+		if selected, ok := right.([]any); ok && len(target) == len(selected) {
+			for i, value := range selected {
+				target[i] = mergeModelProjection(target[i], value)
+			}
+			return target
+		}
+	}
+	return right
+}
