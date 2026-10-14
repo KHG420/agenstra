@@ -1,6 +1,6 @@
 // Export the integration SDK into a host's bundler without a runtime dependency.
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,7 +21,9 @@ export async function exportClient(destination) {
   return files;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// An imported tool may receive a non-file argv[1], such as node --eval arguments.
+const invokedFile = process.argv[1] ? await realpath(resolve(process.argv[1])).catch(() => null) : null;
+if (invokedFile === fileURLToPath(import.meta.url)) {
   if (process.argv.length !== 3) throw new Error('Usage: node sdk/web/export-client.mjs <host-vendor-directory>');
   await exportClient(resolve(process.argv[2]));
   console.log('Exported Agenstra integration SDK, license and SHA-256 manifest.');
