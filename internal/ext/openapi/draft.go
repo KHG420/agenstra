@@ -11,7 +11,7 @@ import (
 	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 )
 
-var slotPattern = regexp.MustCompile(`\{([a-zA-Z][a-zA-Z0-9_]*)\}`)
+var slotPattern = regexp.MustCompile(`\{([a-zA-Z][a-zA-Z0-9_-]*)\}`)
 
 // Draft validates selected operations and returns a REST manifest draft for review.
 func Draft(doc map[string]any, name, baseURLEnv string, operations []string, effects map[string]string, tokenEnv string) (map[string]any, error) {

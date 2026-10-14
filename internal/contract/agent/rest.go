@@ -13,7 +13,7 @@ import (
 var SafeCodePattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,120}$`)
 
 // SlotPattern matches declared REST path placeholders.
-var SlotPattern = regexp.MustCompile(`\{([a-zA-Z][a-zA-Z0-9_]*)\}`)
+var SlotPattern = regexp.MustCompile(`\{([a-zA-Z][a-zA-Z0-9_-]*)\}`)
 
 // ScalarValue formats a finite scalar for REST path, query or header binding.
 func ScalarValue(v any) (string, error) {
