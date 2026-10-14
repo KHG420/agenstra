@@ -418,6 +418,15 @@ func validateModelOutputPath(root, current JSON, path []string, branchDepth int)
 			return nil
 		}
 	}
+	if branches, ok := current["allOf"].([]any); ok && len(branches) == 1 {
+		// OpenAPI wraps referenced fields in a single allOf to attach metadata.
+		// Follow that declared schema without rewriting output validation.
+		branch, ok := branches[0].(map[string]any)
+		if !ok {
+			return fmt.Errorf("model_output path requires declared schema branches")
+		}
+		return validateModelOutputPath(root, branch, path, branchDepth+1)
+	}
 	typeName, _ := current["type"].(string)
 	if types, ok := current["type"].([]any); ok {
 		for _, value := range types {
