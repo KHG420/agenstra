@@ -43,7 +43,7 @@ type RestEndpoint struct {
 	ModelOutput         *ModelOutput       `json:"model_output,omitempty"`
 	Effect              string             `json:"effect"`
 	ResponsePath        []any              `json:"response_path"`
-	ResponseMode        string             `json:"response_mode,omitempty"`
+	ResponseMode        string             `json:"response_mode,omitempty"` // Empty: JSON object; wrap: result; redirect: declared Location receipt.
 	AllowEmptySuccess   bool               `json:"allow_empty_success,omitempty"`
 	BusinessSuccess     *RestBusinessCheck `json:"business_success,omitempty"`
 	ResponseSchemas     map[string]JSON    `json:"response_schemas"`

@@ -261,13 +261,23 @@ func validateRestEndpoint(e agentcontract.RestEndpoint, headers map[string]strin
 	if len(e.ResponsePath) > 16 {
 		return errors.New("REST response_path is too long")
 	}
-	if e.ResponseMode != "" && e.ResponseMode != "wrap" {
-		return errors.New("REST response_mode must be wrap")
+	if e.ResponseMode != "" && e.ResponseMode != "wrap" && e.ResponseMode != "redirect" {
+		return errors.New("REST response_mode must be wrap or redirect")
 	}
 	if e.ResponseMode == "wrap" {
 		props, _ := e.OutputSchema["properties"].(map[string]any)
 		if e.OutputSchema["type"] != "object" || props["result"] == nil || !requiredProperty(e.OutputSchema, "result") {
 			return errors.New("REST wrapped output_schema must require result")
+		}
+	}
+	if e.ResponseMode == "redirect" {
+		if e.Method != "GET" || e.Effect != "read" || len(e.ResponsePath) > 0 || e.AllowEmptySuccess || e.BusinessSuccess != nil || e.Operation != nil {
+			return errors.New("REST redirect requires GET/read without response_path, empty success, business_success or operation")
+		}
+		props, _ := e.OutputSchema["properties"].(map[string]any)
+		location, _ := props["location"].(map[string]any)
+		if e.OutputSchema["type"] != "object" || location["type"] != "string" || !requiredProperty(e.OutputSchema, "location") || len(e.ResponseSchemas) == 0 {
+			return errors.New("REST redirect requires a string location output and declared redirect response_schemas")
 		}
 	}
 	if e.AllowEmptySuccess {
@@ -342,7 +352,11 @@ func validateRestEndpoint(e agentcontract.RestEndpoint, headers map[string]strin
 		}
 	}
 	for status := range e.ResponseSchemas {
-		if len(status) != 3 || status[0] != '2' {
+		if e.ResponseMode == "redirect" {
+			if status != "301" && status != "302" && status != "303" && status != "307" && status != "308" {
+				return errors.New("REST redirect response_schemas must use 301, 302, 303, 307 or 308")
+			}
+		} else if len(status) != 3 || status[0] != '2' {
 			return errors.New("response_schemas must use successful HTTP statuses")
 		}
 	}
@@ -660,7 +674,8 @@ func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any,
 		}
 	}()
 	status := strconv.Itoa(response.StatusCode)
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
+	redirect := endpoint.ResponseMode == "redirect" && p.statuses[name][status] != nil
+	if (response.StatusCode < 200 || response.StatusCode >= 300) && !redirect {
 		if response.StatusCode >= 500 && endpoint.Effect != "read" {
 			return agentcontract.CapabilityResult{ErrorCode: "provider_outcome_unknown"}, nil
 		}
@@ -673,18 +688,27 @@ func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any,
 	if len(endpoint.ResponseSchemas) > 0 && p.statuses[name][status] == nil {
 		return agentcontract.CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
 	}
-	raw, e := io.ReadAll(io.LimitReader(response.Body, (16<<20)+1))
-	if e != nil || len(raw) > 16<<20 {
-		return agentcontract.CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
-	}
 	var data any
-	if response.StatusCode == http.StatusNoContent && len(raw) == 0 && endpoint.AllowEmptySuccess {
-		data = agentcontract.JSON{}
-	} else {
-		dec := json.NewDecoder(bytes.NewReader(raw))
-		dec.UseNumber()
-		if !json.Valid(raw) || dec.Decode(&data) != nil {
+	if redirect {
+		location := response.Header.Get("Location")
+		if strings.TrimSpace(location) == "" {
 			return agentcontract.CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
+		}
+		// Preserve the receipt verbatim. Never resolve or request the destination.
+		data = agentcontract.JSON{"location": location}
+	} else {
+		raw, err := io.ReadAll(io.LimitReader(response.Body, (16<<20)+1))
+		if err != nil || len(raw) > 16<<20 {
+			return agentcontract.CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
+		}
+		if response.StatusCode == http.StatusNoContent && len(raw) == 0 && endpoint.AllowEmptySuccess {
+			data = agentcontract.JSON{}
+		} else {
+			dec := json.NewDecoder(bytes.NewReader(raw))
+			dec.UseNumber()
+			if !json.Valid(raw) || dec.Decode(&data) != nil {
+				return agentcontract.CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
+			}
 		}
 	}
 	if check := endpoint.BusinessSuccess; check != nil {

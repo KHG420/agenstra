@@ -54,6 +54,27 @@ REST 和 OpenAPI 的路径占位符支持以字母开头、后续包含字母、
 
 REST 路径保留声明中的尾斜杠，例如 `/api/v1/users/me/`；根路径 `/` 也可使用。校验仍拒绝重复斜杠、目录跳转及查询或片段分隔符，不通过去掉尾斜杠或跟随重定向改变目标接口。
 
+原接口以重定向提供下载地址时，可显式声明 `response_mode: "redirect"`。该模式仅允许 `GET` / `effect: "read"`，`response_schemas` 必须明确列出允许的状态，且只能使用 301、302、303、307、308；未列出的状态不会成为成功回执。例如：
+
+```json
+{
+  "method": "GET",
+  "effect": "read",
+  "response_mode": "redirect",
+  "output_schema": {
+    "type": "object",
+    "properties": {"location": {"type": "string"}},
+    "required": ["location"],
+    "additionalProperties": false
+  },
+  "response_schemas": {"302": {"type": "object"}}
+}
+```
+
+这是端点的响应配置片段，其余名称、路径和输入契约照常声明。框架将原始 `Location` 保存为 `data.location`，包括相对地址及原查询编码，不解析为绝对地址、不跟随跳转、不向目标发送请求或凭据，也不返回其他响应头或响应体。缺失或空白的 Location 返回 `upstream_response_invalid`。`output_schema` 必须要求字符串 `location`；输出和对应状态的 Schema 仍同时校验，完整 Fact 与模型数据授权沿用原路径。该模式不能组合 `response_path`、`allow_empty_success`、`business_success` 或异步 `operation`。
+
+取得 Location 仅证明接口返回了地址，不证明文件已下载或已保存到用户电脑。签名下载地址属于获授权的业务数据，宿主按原有数据边界处理。默认模式和 `wrap` 仍只接收原有 2xx 响应；OpenAPI 导入不会自动选择 redirect，需接入方核对原路由后显式配置。
+
 REST 的路径、查询及动态请求头将数学上为整数的数值编码为普通十进制整数，例如 JSON 数值 `2.0`、`2e0` 编码为 `2`，浮点整数 `1000000` 编码为 `1000000`，避免原生整数解析器拒绝指数或小数写法。JSON 数值按十进制数字精确处理，大整数 ID 不经过 float64 舍入；字符串仍按原文编码，输入 Schema 继续校验类型和范围。查询数组继续使用重复键。该边界参考 [Pydantic AI 在执行工具前使用类型验证后的参数](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/tool_manager.py#L376-L399)，不采用其超出当前 Schema 的字符串或布尔数值转换。
 
 JSON 请求体也将嵌套对象和数组内数学上为整数的数值编码为普通十进制整数，使 `{"ids":[2.0,2e0]}` 可被原生整数数组解码器读取。请求体使用标准 Go JSON 表示，支持带 JSON 标签的结构体、类型化 map/slice 和 `json.Marshaler`；已有 `json.Number` 的小数与大整数精度保留，字符串、布尔值和 null 不转成数值。编码使用独立数据和稳定的对象键排序，同一参数生成相同请求体；不修改调用方参数、审批参数哈希、回执或已保存的操作标识。此编码同时用于 REST v2 与 legacy POST 请求体，不改变已有重放和幂等契约。
