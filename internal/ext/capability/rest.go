@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -66,8 +67,71 @@ func EnvironmentOrOS(env map[string]string) map[string]string {
 	return result
 }
 
+// restScalarValue keeps numeric HTTP parameters compatible with integer parsers.
+// It does not change opaque string values or persisted operation identifiers.
+func restScalarValue(v any) (string, error) {
+	switch n := v.(type) {
+	case float64:
+		if math.IsNaN(n) || math.IsInf(n, 0) {
+			return "", errors.New("parameter must be finite")
+		}
+		if math.Trunc(n) == n {
+			return strconv.FormatFloat(n, 'f', -1, 64), nil
+		}
+	case json.Number:
+		if _, err := json.Marshal(n); err != nil {
+			return "", err
+		}
+		if _, err := n.Float64(); err != nil {
+			return "", err
+		}
+		return integralParameterSpelling(string(n)), nil
+	}
+	return agentcontract.ScalarValue(v)
+}
+
+// integralParameterSpelling changes only mathematically integral JSON numbers.
+// Work on decimal digits so IDs beyond float64's exact range are not rounded.
+func integralParameterSpelling(raw string) string {
+	mantissa, exponentText, hasExponent := strings.Cut(strings.ToLower(raw), "e")
+	negative := strings.HasPrefix(mantissa, "-")
+	mantissa = strings.TrimPrefix(mantissa, "-")
+	fractionDigits := 0
+	if point := strings.IndexByte(mantissa, '.'); point >= 0 {
+		fractionDigits = len(mantissa) - point - 1
+		mantissa = mantissa[:point] + mantissa[point+1:]
+	}
+	digits := strings.TrimLeft(mantissa, "0")
+	if digits == "" {
+		return "0"
+	}
+	var exponent int64
+	if hasExponent {
+		var err error
+		exponent, err = strconv.ParseInt(exponentText, 10, 64)
+		if err != nil || exponent < -int64(len(digits)) {
+			return raw
+		}
+	}
+	scale := exponent - int64(fractionDigits)
+	if scale >= 0 {
+		// The caller checked finite float64 range, bounding positive expansion.
+		digits += strings.Repeat("0", int(scale))
+	} else {
+		end := int64(len(digits)) + scale
+		if end <= 0 || strings.Trim(digits[end:], "0") != "" {
+			return raw
+		}
+		digits = digits[:end]
+	}
+	if negative {
+		return "-" + digits
+	}
+	return digits
+}
+
 func restPathValue(v any) (string, error) {
-	raw, err := agentcontract.ScalarValue(v)
+	raw, err := restScalarValue(v)
 	if err != nil || raw == "" || raw == "." || raw == ".." || strings.ContainsAny(raw, "/\\%?#") {
 		return "", errors.New("unsafe path parameter")
 	}
@@ -80,7 +144,7 @@ func restPathValue(v any) (string, error) {
 }
 
 func safeHeaderValue(v any) (string, error) {
-	s, err := agentcontract.ScalarValue(v)
+	s, err := restScalarValue(v)
 	if err != nil {
 		return "", err
 	}
@@ -460,14 +524,14 @@ func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any,
 	for key, v := range queryArgs {
 		if items, ok := v.([]any); ok {
 			for _, item := range items {
-				s, e := agentcontract.ScalarValue(item)
+				s, e := restScalarValue(item)
 				if e != nil {
 					return agentcontract.CapabilityResult{ErrorCode: "capability_input_invalid"}, nil
 				}
 				params.Add(key, s)
 			}
 		} else {
-			s, e := agentcontract.ScalarValue(v)
+			s, e := restScalarValue(v)
 			if e != nil {
 				return agentcontract.CapabilityResult{ErrorCode: "capability_input_invalid"}, nil
 			}
@@ -796,7 +860,7 @@ func (p *LegacyRestPack) Invoke(ctx context.Context, name string, args map[strin
 			query := url.Values{}
 			for key, v := range args {
 				if v != nil {
-					s, err := agentcontract.ScalarValue(v)
+					s, err := restScalarValue(v)
 					if err != nil {
 						return agentcontract.CapabilityResult{ErrorCode: "capability_input_invalid"}, nil
 					}
