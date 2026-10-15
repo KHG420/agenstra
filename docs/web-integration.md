@@ -167,6 +167,8 @@ go run ./cmd/agenstra-manage disable alice records-web
 
 需要保留完整大结果时，可信 profile 可为指定 action 声明 `"max_result_bytes": 16777216`。该字段限定整个结果的规范化 JSON 字节数，显式范围为 1–67108864（64 MiB）；省略或 0 使用原 1 MiB，省略字段保持原 profile digest。声明参与原版本和命令绑定，模型和页面观察不能提高它。仅 browser command 的 `/result` 入口在读取请求体前核对可信 owner、command 和 session key，并按该命令固定的 profile/action 选择 HTTP 上限：至少保留原 2 MiB，较大结果增加 64 KiB 封装余量。generation、输出 Schema、结果精确上限、重复回执及不确定结果仍按原完成路径核验；未知字段、尾随 JSON、其他 HTTP 入口和有界模型预览的保护保留。结果超限不改变 command，也不授权重放业务操作。选择限额时应计入 base64 与 JSON 编码后的实际字节，并只为需要的动作提高限额。
 
+该声明只调整浏览器结果传输边界，不覆盖 Host 的 `max_artifact_bytes`、`max_active_artifact_bytes` 和 `max_state_bytes`。部署大结果动作时须同时核对这些已有预算，并为 Fact/回执封装和运行状态留出余量；默认单产物和状态预算均为 8,000,000 字节。新任务冻结当时的 Host 设置，更新部署配置不改变旧任务的预算。浏览器回执保存成功而 Host 随后以 `result_too_large` 拒绝保存产物时，原 browser command 的真实结果仍保留，不能据此推断业务失败或重放写入。
+
 profile 由服务端发布，在线浏览器不能新增模型可用能力。纯浏览器 release 固定前端 profile；组合 release 还固定后端 fingerprint。托管后端恢复不可变 release；静态后端契约或绑定发生变更时，旧组合 run 在执行前以 `web_base_contract_changed` 拒绝，不能静默接受新契约。新任务使用新版本。别名不能改绑到其他业务包，也不能在组合与纯浏览器之间切换；改变接入模式时使用新别名。
 
 handler 语义变化时更新 `handler_version` 和 profile 版本。注册版本必须匹配当前 profile；旧 run 保留原契约。页面重载不会将未确认的旧动作迁移到新 generation。恢复连接时若当前 profile digest 与旧会话不同，服务端在改变 generation 前返回 `browser_profile_changed`。SDK 发出 `connection: {status: "profile_changed"}`，并尝试按当前 handler 注册替代旧连接；仍有未结束任务或不确定动作时保留旧绑定并返回相应错误。

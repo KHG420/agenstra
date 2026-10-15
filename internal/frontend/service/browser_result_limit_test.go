@@ -267,3 +267,30 @@ func TestBrowserDeclaredLargeResultKeepsFullFactAndBoundedModelView(t *testing.T
 		t.Fatal("full persisted result was replaced by its preview")
 	}
 }
+
+func TestBrowserDeclaredResultLimitDoesNotOverrideHostArtifactBudget(t *testing.T) {
+	f := newResultLimitFixture(t, &hostModel{decisions: browserDecisions()}, 4<<20)
+	f.h.Settings.MaxArtifactBytes = 1024
+	run := f.run(t)
+	command := f.dispatch(t)
+	if accepted, _, err := f.w.BeginBrowserCommand(t.Context(), "alice", command.ID, f.key, 1); err != nil || !accepted {
+		t.Fatal(accepted, err)
+	}
+	result := agentcontract.JSON{"page": strings.Repeat("x", 4096)}
+	if _, err := f.w.CompleteBrowserCommand("alice", command.ID, f.key, 1, "succeeded", result, ""); err != nil {
+		t.Fatal("declared browser receipt could not be retained", err)
+	}
+	f.now += 2
+	run, err := f.h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "failed" {
+		t.Fatal("browser declaration bypassed the host budget", run.Status, err)
+	}
+	state, err := f.h.Restore(run)
+	if err != nil || state.ErrorCode == nil || *state.ErrorCode != "result_too_large" {
+		t.Fatal("host storage rejection was not preserved", err)
+	}
+	saved, err := f.w.command("alice", command.ID)
+	if err != nil || saved.Status != "succeeded" || agentcontract.WebHash(saved.Result) != agentcontract.WebHash(result) {
+		t.Fatal("host budget rejection erased the original browser outcome", saved.Status, err)
+	}
+}
