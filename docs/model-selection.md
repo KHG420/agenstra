@@ -67,6 +67,8 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 授权技能目录为空时，`output_tools` 不在决策联合中提供 `read_skill` 或其字段提示；有已声明技能时保留该选项。运行上下文未启用 `capability_search` 时，也不提供 `search_capabilities` 或其字段提示；启用时保留，即使当前可见能力目录尚未加载完整。这些选择依据当前上下文，不依据模型名称；运行时继续核对功能是否启用、技能是否存在及是否获准。按运行上下文过滤可用工具的取舍参考 [Pydantic AI 的工具过滤](https://ai.pydantic.dev/toolsets/#filtering-tools)和[工具搜索实现](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/toolsets/tool_search.py#L337-L390)，Agenstra 沿用现有请求生成和校验路径。
 
+已加载技能在模型消息中明确标为本轮已完成的 `read_skill` 结果，提示模型复用现有内容；只有内容已被裁剪或用户明确要求时才需要重读。完整技能文本只发送一次，从累计上下文投影到单独的已保存结果消息，并放在后续业务调用证据之前；原运行状态、技能作用域与权限保持原有约束。未读取或已被裁剪的技能不会被标为已加载，实际消息仍全部纳入输入测量和预算。这种明确保留工具结果的表达参考 [Pydantic AI 的 ToolReturnPart](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_tool_execution.py#L162-L168)；模型仍可能重复读取，原无进展保护继续生效。
+
 宿主沿用已有业务能力绑定和接线；部署管理员在框架开发者控制台的模型配置中保存输出策略即可。实际业务输入仍按该能力的 `input_schema` 校验，合法的决策输出不能代替业务参数或任务结果验收。
 
 单次或多个独立能力调用均使用 `{"kind":"tool_batch","calls":[...]}`，单次调用的 `calls` 数组只有一项。完成复核阶段，决策联合和字段提示只保留 `final`。保存的能力调用及其真实结果也使用统一输出函数成对表达，保留历史证据的身份、状态和数据边界。输出工具中的 `call_ref` 可省略，实际本地调用引用由适配器生成；模型提供的可选标签仍检查格式，但不决定运行内核的调用身份。调用被保存后，执行重试、审批和恢复继续沿用同一引用及原有参数摘要，不重新生成身份。业务参数、授权、审批和真实回执继续由运行内核校验。字符串形式的对象或数组不会被自动转换。类型化输出工具及校验处理的参考实现见 [Pydantic AI](https://github.com/pydantic/pydantic-ai/blob/721c78d6014f197c595a9c2a83789aa4dbf6d008/pydantic_ai_slim/pydantic_ai/_output.py)；单函数内的带种类决策联合是 Agenstra 为本身决策协议作出的选择，仍需逐网关验证。
