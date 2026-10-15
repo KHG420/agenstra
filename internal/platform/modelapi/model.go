@@ -414,13 +414,17 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		descriptor := format["json_schema"].(agentcontract.JSON)
 		if detail := validateNativeDecisionOutput(body, descriptor["schema"].(agentcontract.JSON)); detail != "" {
 			invalid := invalidModelJSON(ctx, detail, body)
-			// Keep recognized fixed range constraints through native-schema validation;
+			// Keep recognized fixed protocol bounds through native-schema validation;
 			// the response remains rejected, with no data repair or parameter clamping.
 			if detail == "model_decision_schema_invalid" && modelJSONFormatError(body) == "" {
 				_, err := agentcontract.StrictDecision(body)
 				var inspectionRange agentcontract.DecisionInspectionRangeError
 				if errors.As(err, &inspectionRange) {
 					return nil, inspectionRange
+				}
+				var oversized agentcontract.DecisionTooManyCallsError
+				if errors.As(err, &oversized) {
+					return nil, oversized
 				}
 			}
 			return nil, invalid
