@@ -41,6 +41,9 @@ type AgentRuntime struct {
 	MaxModelOutputTokens       int
 	MaxStagnantRounds          int
 	MaxConcurrentTools         int
+	// ModelTimeout bounds each model request when positive; the caller context
+	// still bounds the whole step, including completion review and recovery.
+	ModelTimeout time.Duration
 }
 
 func (r *AgentRuntime) defaults() {
@@ -833,7 +836,16 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			return err
 		}
 		started := time.Now()
-		d, err := r.Model.Decide(ctx, modelPacket, prompt)
+		modelCtx := ctx
+		cancelModel := func() {}
+		if r.ModelTimeout > 0 {
+			modelCtx, cancelModel = context.WithTimeout(ctx, r.ModelTimeout)
+		}
+		d, err := r.Model.Decide(modelCtx, modelPacket, prompt)
+		if err == nil && ctx.Err() == nil {
+			err = modelCtx.Err()
+		}
+		cancelModel()
 		metrics := agentcontract.ModelCallMetrics{Attempts: 1, EstimatedInputTokens: measurement.Tokens, ElapsedMilliseconds: time.Since(started).Milliseconds()}
 		if d.ModelCall != nil {
 			metrics = *d.ModelCall

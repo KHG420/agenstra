@@ -1026,6 +1026,7 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 		return run, agentcontract.NewHostError("pack_changed")
 	}
 	runtime := &reactcore.AgentRuntime{Provider: provider, Model: runModel, Grants: policy.GrantedCapabilities, OriginPackID: run.PackID, ConnectionID: agentcontract.NewID(), Durable: true, MaxModelRounds: h.runSettings(run).MaxModelRounds, MaxToolCalls: h.runSettings(run).MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.runSettings(run).MaxContextCharacters}
+	runtime.ModelTimeout = time.Duration(h.runSettings(run).ModelTimeoutSeconds * 1e9)
 	runtime.CompletionValidator = h.CompletionValidator
 	runtime.ContextPolicy = h.runSettings(run).ContextPolicy
 	runtime.ModelContextWindowTokens = h.runSettings(run).ModelContextWindowTokens
@@ -1170,21 +1171,22 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 			run, e = h.save(run, state, "", nil, map[string]any{"kind": "model_requested", "round": state.RoundsUsed})
 			return e
 		}
-		modelCtx, cancel := context.WithTimeout(ctx, time.Duration(h.runSettings(run).ModelTimeoutSeconds*1e9))
-		modelCtx = agentcontract.WithModelRequestObserver(modelCtx, func(progress agentcontract.ModelRequestProgress) error {
+		remaining := h.runSettings(run).MaxRunSeconds - (h.Now() - run.CreatedAt)
+		stepCtx, cancel := context.WithTimeout(ctx, time.Duration(remaining*1e9))
+		stepCtx = agentcontract.WithModelRequestObserver(stepCtx, func(progress agentcontract.ModelRequestProgress) error {
 			var err error
 			run, err = h.save(run, state, "", nil, agentcontract.JSON{"kind": progress.Kind, "attempt": progress.Attempt, "error_code": progress.ErrorCode, "retry_at": progress.RetryAt})
 			return err
 		})
-		e = runtime.Step(modelCtx, state, before)
-		expired := errors.Is(modelCtx.Err(), context.DeadlineExceeded)
+		e = runtime.Step(stepCtx, state, before)
+		expired := errors.Is(stepCtx.Err(), context.DeadlineExceeded)
 		cancel()
 		if ctx.Err() != nil {
 			return run, ctx.Err()
 		}
 		if expired {
 			state.Status = "failed"
-			state.ErrorCode = agentcontract.Strptr("model_timeout")
+			state.ErrorCode = agentcontract.Strptr("run_deadline_exceeded")
 		} else if e != nil {
 			return run, e
 		}
