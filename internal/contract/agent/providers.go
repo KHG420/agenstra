@@ -175,6 +175,9 @@ func (c CapabilityDescription) CatalogView(fullInputSchema bool) JSON {
 		return JSON{}
 	}
 	delete(m, "output_schema")
+	// The runtime applies this policy to evidence and references. Repeating its
+	// path list in the model catalog cannot grant access and crowds out results.
+	delete(m, "model_output")
 	if strings.HasPrefix(c.Name, "ui.") && c.Operation != nil && c.Operation.PollCapability == "ui.command_status" {
 
 		// The host, rather than the model, applies this browser poll binding.

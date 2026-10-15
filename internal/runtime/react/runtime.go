@@ -493,6 +493,9 @@ func (r *AgentRuntime) contextCandidate(state *agentcontract.RuntimeState) agent
 	if state.InspectedCapability != nil {
 		if c, ok := r.Provider.Capabilities()[*state.InspectedCapability]; ok && r.Grants[c.Name] {
 			if view, err := agentcontract.ObjectOf(c); err == nil {
+				// Visibility is enforced against the original provider/Fact policy,
+				// not by the model reading another copy of its path list.
+				delete(view, "model_output")
 				inspected = view
 			}
 		}

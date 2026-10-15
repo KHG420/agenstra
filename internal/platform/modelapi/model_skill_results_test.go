@@ -55,8 +55,19 @@ func TestLoadedSkillsAreRetainedCompletedResults(t *testing.T) {
 					}
 					resultIndex = i
 				}
-				if resultIndex != 2 {
+				expectedIndex := 2
+				if mode != "output_tools" {
+					expectedIndex = 3
+				}
+				if resultIndex != expectedIndex {
 					t.Fatal("loaded skill has no explicit completed result before later evidence", resultIndex)
+				}
+				if mode != "output_tools" {
+					previous := messages[resultIndex-1].(agentcontract.JSON)
+					var decision agentcontract.Decision
+					if previous["role"] != "assistant" || jsonvalue.DecodeStrict([]byte(previous["content"].(string)), &decision) != nil || decision.Schema != "agenstra.decision.v1" || decision.Kind != "read_skill" || decision.Name != "source::$project" {
+						t.Fatal("completed JSON skill result lost its actual decision identity")
+					}
 				}
 				var cumulative agentcontract.ContextPacket
 				if err := jsonvalue.DecodeStrict([]byte(messages[1].(agentcontract.JSON)["content"].(string)), &cumulative); err != nil {

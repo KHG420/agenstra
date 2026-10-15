@@ -34,6 +34,8 @@ utf8.RuneCountInString(systemPrompt) + utf8.RuneCount(CanonicalJSON(packet))
 
 输入契约拒绝后的反馈最多保留四条诊断、1,000 个字符。根对象的 `anyOf`／`oneOf` 若由各分支必填且唯一的字符串 `const` 字段选择类型，框架优先反馈所选分支的参数错误；标签不属于当前能力时明确报告该能力不支持这个值，并按字典序列出已声明的字符串值，不回显被拒绝的输入。值列表最多占 400 个字符，超出时注明展示数量并要求检查完整 `input_schema`，不用第一条无关分支推断宿主缺少业务接口。模型须重新提交符合所选分支的参数；框架不替换标签、不自动执行被拒绝的调用。诊断选择仍保留根约束，缺少标签、重复标签和普通联合类型沿用完整校验器反馈；实际执行前始终校验原始完整契约，不因反馈而放宽授权或参数规则。这条反馈路径参考 [Pydantic AI 的校验错误重试消息](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/messages.py#L1808-L1853)，字符限制和已声明值的展示方式由 Agenstra 自行限定。
 
+JSON 决策模式将每个仍保留的已完成技能读取呈现为原 `read_skill` 决策及其结果，按技能名称稳定排列，避免仅有技能正文时把同一读取误当成尚未执行。只依据已加载技能重建历史，不补造未读取或已省略的技能；正文仅出现一次，计入实际输入预算。`output_tools` 保留现有数据消息，不补造原推理内容。这个边界参考 [smolagents 的调用与观察历史](https://github.com/huggingface/smolagents/blob/227ef5e49ddd82339295939072f0223249aa8d38/src/smolagents/memory.py#L92-L151)；历史决策不会被执行，也不改变任务、授权或完成校验。
+
 正常情况下，全部有界预览、最近 12 条观察与已加载技能都能放入预算，直接保留。每个 Fact 预览仍以 6,000 字符为上限；过长或未提供的观察参数通过 `arguments_omitted` 标记，不能作为已知空对象呈现给模型。明确提供的空参数对象仍保留为 `{}`。
 
 可选 `last_call_reason` 从现有决策记录中重建最近可见调用的原始目的。只有调用引用、能力与完整模型参数一致且该能力仍获授权时才提供，最多 2,000 个字符；缺失或超长时省略，不编造或截断。它是历史模型文本，不授予权限，也不证明调用成功。HTTP 适配器呈现上一条调用时使用这段实际目的，避免以通用说明替换已保存的下一步意图；只在历史调用中提供一次。预算压力下先移出该可选文本，再裁剪原有业务证据。完整状态、宿主接线和数据库结构保持原样，恢复后从同一记录重新投影。此取舍参考 [Pydantic AI 保留实际模型响应并关联工具反馈](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_agent_graph.py)，不保存未取得的推理正文；目标模型仍须通过完整任务验收。
@@ -50,6 +52,8 @@ utf8.RuneCountInString(systemPrompt) + utf8.RuneCount(CanonicalJSON(packet))
 | 最新观察结果 | 至少保留最后一次状态、Fact ID 或错误码。参数可通过标记省略。 |
 
 Fact 预览先按原始 `model_output` 策略过滤可见值，再移出已执行的策略定义；模型无需在每份结果中重新接收完整路径清单。持久 Fact 继续保存原策略和完整回执，引用解析、完成校验及后续检查仍从原始 Fact 执行可见性校验。仅预览中的重复策略被移出，来源、身份、寿命、真实值和遗漏标记保持原有含义。这沿用 [Pydantic AI ToolReturnPart](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_tool_execution.py#L162-L168) 将工具结果与工具身份保留为消息的做法；Agenstra 的可见性策略仍由本地运行状态负责执行。
+
+能力目录和 `inspect_capability` 的模型视图同样不重复携带 `model_output` 路径策略。能力名称、输入约束、输出说明以及按原规则提供的输出 Schema 保留；Provider 和持久 Fact 继续持有并执行原策略。长策略不能挤掉已完成的 Fact 检查，使模型反复读取同一结果。这个边界参考 [smolagents 的工具声明](https://github.com/huggingface/smolagents/blob/227ef5e49ddd82339295939072f0223249aa8d38/src/smolagents/models.py#L288-L329)：模型接收工具名称、说明和输入参数，执行端保留自己的控制逻辑；Agenstra 仍保留自身原有的输出契约与引用校验。
 
 可恢复信息按下面的顺序回收：
 
