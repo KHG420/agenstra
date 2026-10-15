@@ -47,6 +47,15 @@ func capabilityQueryTerms(query string, significantOnly bool) []string {
 		if !significantOnly || hasHan || len(runes) >= 3 {
 			add(part)
 		}
+		if hasHan {
+			// Han prose can touch an ASCII capability identity without a space.
+			// Retain that identity so exact-name ranking can still recognize it.
+			for _, adjacent := range strings.FieldsFunc(part, func(r rune) bool { return unicode.Is(unicode.Han, r) }) {
+				if strings.Trim(adjacent, "._") != "" && (!significantOnly || len([]rune(adjacent)) >= 3) {
+					add(adjacent)
+				}
+			}
+		}
 
 		// Keep full capability names while also discovering operations named as
 		// module.operation, including identifiers directly beside Han text.
