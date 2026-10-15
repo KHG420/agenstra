@@ -88,15 +88,7 @@ func canonicalPrepare(v any) (any, error) {
 	case json.Number:
 		raw := string(x)
 		if strings.ContainsAny(raw, ".eE") {
-			n, e := x.Float64()
-			if e != nil {
-				return nil, e
-			}
-			s, e := Float(n)
-			if e != nil {
-				return nil, e
-			}
-			return json.Number(s), nil
+			return canonicalDecimalNumber(x)
 		}
 		return x, nil
 	case map[string]any:

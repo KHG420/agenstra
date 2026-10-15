@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"math/big"
 	"testing"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
@@ -17,6 +18,8 @@ func TestHostNumericResultReferencesUsePersistedEvidence(t *testing.T) {
 		{name: "decimal integer", value: "42.0", id: "42"},
 		{name: "exponent integer", value: "4.2e1", id: "42"},
 		{name: "exact large integer", value: "18446744073709551615", id: "18446744073709551615"},
+		{name: "decimal large integer", value: "18446744073709551615.0", id: "18446744073709551615"},
+		{name: "exponent large integer", value: "1.8446744073709551615e19", id: "18446744073709551615"},
 		{name: "fraction corrected without repeating read", value: "1.5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,6 +55,19 @@ func TestHostNumericResultReferencesUsePersistedEvidence(t *testing.T) {
 			}
 			if run.Status != "completed" || provider.calls != 1 || len(state.Facts) != 1 {
 				t.Fatal(run.Status, provider.calls, state.Facts)
+			}
+			data, ok := state.Facts[0].Value["data"].(map[string]any)
+			if !ok {
+				t.Fatal("missing persisted business data", state.Facts[0].Value)
+			}
+			value, ok := data["id"].(json.Number)
+			if !ok {
+				t.Fatal("persisted ID is no longer a JSON number", data["id"])
+			}
+			before, validBefore := new(big.Rat).SetString(string(tc.value))
+			after, validAfter := new(big.Rat).SetString(string(value))
+			if !validBefore || !validAfter || before.Cmp(after) != 0 {
+				t.Fatalf("persisted evidence changed exact numeric value: %s -> %s", tc.value, value)
 			}
 			if tc.id == "" {
 				if len(state.ResultRefs) != 0 || rounds != 3 {
