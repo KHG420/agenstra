@@ -979,6 +979,13 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 				feedback += " Include all required fields and only fields permitted for the selected decision kind.\n" + agentcontract.DecisionObjectShapePrompt
 			}
 		}
+		var syntax *json.SyntaxError
+		if metrics.FormatError == "model_output_invalid_json" && errors.As(err, &syntax) && syntax.Offset > 0 {
+			feedback += fmt.Sprintf(" JSON syntax error at byte %d: %s. Rebuild the complete object with matching object and array delimiters; do not change business values to repair JSON syntax.", syntax.Offset, syntax.Error())
+			if review == nil {
+				feedback += " In a tool_batch, each calls[i] object permits only call_ref, capability, arguments and reason. Keep every capability input property inside that call's single arguments object, closing arguments only after all of its properties and before closing the call object."
+			}
+		}
 	}
 	if !approvedProposal {
 		recordDecision(state, decision)

@@ -95,8 +95,7 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet agentcontract
 		return agentcontract.Decision{}, err
 	}
 	if detail := modelJSONFormatError(body); detail != "" {
-		metrics.FormatError = detail
-		return agentcontract.Decision{}, agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
+		return agentcontract.Decision{}, invalidModelJSON(ctx, detail, body)
 	}
 	decision, err = agentcontract.StrictDecision(body)
 	if err != nil {
@@ -388,6 +387,9 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 					return nil, agentcontract.ModelDecisionError{Kind: "model_output_truncated"}
 				}
 			}
+			if detail == "model_output_invalid_json" {
+				return nil, invalidModelJSON(ctx, detail, []byte(envelope.Choices[0].Message.ToolCalls[0].Function.Arguments))
+			}
 			return nil, invalidModelOutput(ctx, detail)
 		}
 		return raw, nil
@@ -411,7 +413,7 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		}
 		descriptor := format["json_schema"].(agentcontract.JSON)
 		if detail := validateNativeDecisionOutput(body, descriptor["schema"].(agentcontract.JSON)); detail != "" {
-			invalid := invalidModelOutput(ctx, detail)
+			invalid := invalidModelJSON(ctx, detail, body)
 			// Keep recognized fixed range constraints through native-schema validation;
 			// the response remains rejected, with no data repair or parameter clamping.
 			if detail == "model_decision_schema_invalid" && modelJSONFormatError(body) == "" {
@@ -499,6 +501,20 @@ func invalidModelOutput(ctx context.Context, detail string) error {
 		metrics.FormatError = detail
 	}
 	return agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
+}
+
+// Preserve only the native decoder's location and syntax reason, never rejected
+// response text. The safe model error code and strict rejection remain intact.
+func invalidModelJSON(ctx context.Context, detail string, body []byte) error {
+	invalid := invalidModelOutput(ctx, detail)
+	if detail == "model_output_invalid_json" {
+		var value json.RawMessage
+		var syntax *json.SyntaxError
+		if err := json.Unmarshal(body, &value); errors.As(err, &syntax) {
+			return errors.Join(invalid, syntax)
+		}
+	}
+	return invalid
 }
 
 func modelContentError(body []byte) string {
