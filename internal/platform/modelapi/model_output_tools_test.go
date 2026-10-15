@@ -296,6 +296,19 @@ func TestDecisionOutputToolPromptRetainsRuntimeRules(t *testing.T) {
 	}
 }
 
+func TestDecisionOutputToolPromptExplainsBoundedBatchContinuation(t *testing.T) {
+	prompt := decisionOutputToolPrompt("Keep authorization and evidence.", false)
+	for _, required := range []string{"at most 4 calls", "separate tool_batch decisions", "wait for their results", "remaining calls"} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("native output guidance omits bounded continuation %q", required)
+		}
+	}
+	review := decisionOutputToolPrompt("Keep authorization and evidence.", true)
+	if strings.Contains(review, "separate tool_batch decisions") {
+		t.Fatal("completion review must not advertise capability execution")
+	}
+}
+
 func TestDecisionOutputToolsKeepUserFormatsInsideFinal(t *testing.T) {
 	for _, tc := range []struct{ name, answer string }{
 		{"JSON", `{"count":0,"missing":null}`},
