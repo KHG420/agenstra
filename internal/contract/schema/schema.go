@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 
-	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -16,7 +16,7 @@ import (
 func CompileLocal(schema map[string]any, strictREST bool) (*jsonschema.Schema, error) {
 	// SDK declarations may use typed Go slices and maps. Compile their JSON
 	// meaning, as Validate does for values, without mutating caller-owned data.
-	raw, err := jsonvalue.Canonical(schema)
+	raw, err := json.Marshal(schema)
 	if err != nil {
 		return nil, err
 	}
@@ -24,6 +24,9 @@ func CompileLocal(schema map[string]any, strictREST bool) (*jsonschema.Schema, e
 	dec.UseNumber()
 	var normalized map[string]any
 	if err := dec.Decode(&normalized); err != nil {
+		return nil, err
+	}
+	if err := checkJSONNumbers(normalized); err != nil {
 		return nil, err
 	}
 	schema = normalized
@@ -84,12 +87,13 @@ func CompileLocal(schema map[string]any, strictREST bool) (*jsonschema.Schema, e
 	return compiler.Compile("schema.json")
 }
 
-// Validate checks normalized finite JSON against a compiled contract; nil permits any value.
+// Validate checks the standard Go JSON representation against a compiled contract.
+// json.Number retains its exact decimal value; nil permits any value.
 func Validate(s *jsonschema.Schema, v any) error {
 	if s == nil {
 		return nil
 	}
-	raw, err := jsonvalue.Canonical(v)
+	raw, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
@@ -99,5 +103,37 @@ func Validate(s *jsonschema.Schema, v any) error {
 	if err := dec.Decode(&normalized); err != nil {
 		return err
 	}
+	if err := checkJSONNumbers(normalized); err != nil {
+		return err
+	}
 	return s.Validate(normalized)
+}
+
+// checkJSONNumbers retains the existing finite decimal range and rejects values
+// math/big cannot represent before the validator dereferences a parsed rational.
+func checkJSONNumbers(value any) error {
+	switch v := value.(type) {
+	case json.Number:
+		if strings.ContainsAny(string(v), ".eE") {
+			if _, err := v.Float64(); err != nil {
+				return fmt.Errorf("invalid finite JSON number: %w", err)
+			}
+		}
+		if _, ok := new(big.Rat).SetString(string(v)); !ok {
+			return errors.New("JSON number is outside the schema validator range")
+		}
+	case map[string]any:
+		for _, item := range v {
+			if err := checkJSONNumbers(item); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if err := checkJSONNumbers(item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

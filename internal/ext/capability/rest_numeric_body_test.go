@@ -57,7 +57,7 @@ func TestRESTJSONBodyBindsEquivalentIntegerNumbers(t *testing.T) {
 	}))
 	defer server.Close()
 	pack := restNumericBodyPack(t, server, agentcontract.JSON{"type": "object",
-		"properties": agentcontract.JSON{"ids": agentcontract.JSON{"type": "array", "items": agentcontract.JSON{"type": "integer", "minimum": 1}}},
+		"properties": agentcontract.JSON{"ids": agentcontract.JSON{"type": "array", "items": agentcontract.JSON{"type": "integer", "minimum": 1, "maximum": json.Number("9223372036854775807")}}},
 		"required":   []any{"ids"}, "additionalProperties": false})
 	for _, ids := range [][]any{
 		{json.Number("2.0"), json.Number("2.50e1"), json.Number("9223372036854775807.0")},
@@ -84,7 +84,7 @@ func TestRESTJSONBodyBindsEquivalentIntegerNumbers(t *testing.T) {
 			t.Fatalf("integer value or repeated request bytes changed: %s", body)
 		}
 	}
-	for _, value := range []any{"2.0", true, json.Number("2.1")} {
+	for _, value := range []any{"2.0", true, json.Number("2.1"), json.Number("2.00000000000000000001")} {
 		result, err := pack.Invoke(context.Background(), "records.batch", agentcontract.JSON{"body": agentcontract.JSON{"ids": []any{value}}},
 			&agentcontract.InvocationContext{IdempotencyKey: "same-operation"})
 		if err != nil || result.ErrorCode != "capability_input_invalid" || len(bodies) != 4 {
