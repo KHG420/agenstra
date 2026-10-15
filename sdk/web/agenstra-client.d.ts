@@ -42,6 +42,7 @@ export class AgenstraClient {
   /** Accept profile-generated handler types; the server validates each action's input contract. */
   registerActions<T extends { [K in keyof T]: (args: never, context: { commandId: string; runId: string }) => JSONObject | Promise<JSONObject> }>(actions: T): this;
   // Event payloads are heterogeneous; keep the existing permissive callback contract.
+  /** The action succeeded event follows a validated, persisted result ACK, including receipt retries; it does not mean the run completed. A restored confirmed receipt may notify again in a new client. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on(name: string, callback: (value: any) => void): () => void;
   /** Persist a resume request identity so reconnect retries retain the active session after a lost response. */

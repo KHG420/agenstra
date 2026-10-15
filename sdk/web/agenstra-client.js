@@ -27,6 +27,7 @@ export class AgenstraClient {
     this.selectionChain = Promise.resolve();
     this.selectionRevision = 0;
     this.receipts = this.load("receipts") || {};
+    this.actionSuccessNotifications = new Set();
     this.browserRecovery = this.load("browser_recovery");
     this.browserResume = this.load("browser_resume");
     this.chatWatchers = 0;
@@ -292,7 +293,7 @@ export class AgenstraClient {
         if (JSON.stringify(latest) !== JSON.stringify(this.pageObservation)) await this.updatePageObservation(latest);
       } catch (error) { this.emit("error", error); }
       await this.flushReceipts();
-      this.emit("action", { command, status: ["confirmed", "acked"].includes(receipt.status) ? "succeeded" : "unknown" });
+      if (!this.closed && !this.actionSuccessNotifications.has(command.id)) this.emit("action", { command, status: "unknown" });
     } catch (error) {
       const receipt = this.receipts[command.id];
       // A server-confirmed result stays confirmed when the following run read
@@ -320,7 +321,7 @@ export class AgenstraClient {
     if (!this.browser) return;
     for (const receipt of Object.values(this.receipts)) {
       if (receipt.status === "acked") continue;
-      if (receipt.status === "confirmed") { await this.finishReceipt(receipt); continue; }
+      if (receipt.status === "confirmed") { this.notifyReceiptSuccess(receipt);await this.finishReceipt(receipt);continue; }
       if (receipt.command.id === this.activeCommand && ["starting", "running"].includes(receipt.status)) continue;
       if (receipt.status === "starting" || receipt.status === "running") {
         receipt.status = "unknown"; receipt.error_code = "browser_client_interrupted"; this.save("receipts", this.receipts);
@@ -338,9 +339,18 @@ export class AgenstraClient {
         throw error;
       }
       if (result.status === "unknown") { this.emit("reconciliation", result); continue; }
+      if (result.status !== receipt.status || !["succeeded", "failed"].includes(result.status)) throw new AgenstraError("browser_result_ack_invalid");
       receipt.status = "confirmed"; this.save("receipts", this.receipts);
+      this.notifyReceiptSuccess(receipt);
       await this.finishReceipt(receipt);
     }
+  }
+  notifyReceiptSuccess(receipt) {
+    if (this.closed || receipt.error_code || !Object.hasOwn(receipt, "result") || this.actionSuccessNotifications.has(receipt.command.id)) return;
+    // A validated result ACK is durable before any optional run recovery read.
+    // Host teardown can follow this event without losing the original result.
+    this.actionSuccessNotifications.add(receipt.command.id);
+    this.emit("action", { command: structuredClone(receipt.command), status: "succeeded" });
   }
   async finishReceipt(receipt) {
     // Keep the recovery work durable after ACK. A lost get/reconcile response,
@@ -522,6 +532,7 @@ export class AgenstraClient {
     globalThis.removeEventListener?.("pagehide", this.pagehide);
     for (const aborter of this.aborters) aborter.abort();
     this.listeners.clear();
+    this.actionSuccessNotifications.clear();
     if (closeSession && this.browser && this.token) {
       const aborter = new AbortController();const timer = setTimeout(() => aborter.abort(), 2000);
       try {

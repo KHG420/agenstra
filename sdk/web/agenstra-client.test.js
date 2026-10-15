@@ -653,3 +653,112 @@ for (const status of ["cancelled", "failed"]) test(`late receipts for ${status} 
  assert.equal(resumed.receipts[command.id].status, "acked");
  assert.equal(attempts, 1);
 });
+
+test("acknowledged action success is emitted after a retried result without rerunning the handler", async t => {
+  let handlers = 0, results = 0;
+  const events = [];
+  const c = client(async path => {
+    if (path.endsWith("/begin")) return response({ accepted: true });
+    if (path.endsWith("/result")) {
+      if (++results === 1) throw new Error("result ACK lost");
+      return response({ status: "succeeded" });
+    }
+    return response({ status: "waiting" });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.on("action", event => events.push(event.status));
+  c.registerActions({ "ui.navigate": () => { handlers++;return { page: "orders" }; } });
+  await c.executeCommand(command);
+  assert.deepEqual(events, ["running"]);
+  await c.flushReceipts();
+  assert.deepEqual(events, ["running", "succeeded"]);
+  await c.flushReceipts();
+  assert.equal(events.filter(status => status === "succeeded").length, 1);
+  assert.equal(handlers, 1);assert.equal(results, 2);
+});
+
+test("acknowledged action success does not wait for a failed run read", async t => {
+  let results = 0;
+  const events = [];
+  const c = client(async path => {
+    if (path.endsWith("/begin")) return response({ accepted: true });
+    if (path.endsWith("/result")) { results++;return response({ status: "succeeded" }); }
+    throw new Error("run read unavailable after persisted result");
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.on("action", event => events.push(event.status));
+  c.registerActions({ "ui.navigate": () => ({ page: "orders" }) });
+  await c.executeCommand(command);
+  assert.deepEqual(events, ["running", "succeeded"]);
+  assert.equal(c.receipts[command.id].status, "confirmed");
+  await assert.rejects(c.flushReceipts(), /run read unavailable/);
+  assert.equal(results, 1);
+  assert.deepEqual(events, ["running", "succeeded"]);
+});
+
+test("terminal command conflict cannot emit acknowledged action success", async t => {
+  const events = [];
+  const c = client(async path => {
+    if (path.endsWith("/begin")) return response({ accepted: true });
+    if (path.endsWith("/result")) return response({ code: "browser_result_conflict" }, 409);
+    assert.equal(path, "/browser/v1/commands/" + command.id);
+    return response({ status: "expired" });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.on("action", event => events.push(event.status));
+  c.registerActions({ "ui.navigate": () => ({ page: "orders" }) });
+  await c.executeCommand(command);
+  assert.deepEqual(events, ["running", "unknown"]);
+  assert.equal(c.receipts[command.id].status, "acked");
+});
+
+test("acknowledged action listeners may close their client only after result persistence", async t => {
+  let persisted = false, handlers = 0;
+  const c = client(async path => {
+    if (path.endsWith("/begin")) return response({ accepted: true });
+    if (path.endsWith("/result")) { persisted = true;return response({ status: "succeeded" }); }
+    throw new Error("run lookup must not gate a host's acknowledged cleanup");
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.on("action", event => {
+    if (event.status !== "succeeded") return;
+    assert.equal(persisted, true);
+    void c.destroy({ closeSession: false });
+  });
+  c.registerActions({ "ui.navigate": () => { handlers++;return { page: "orders" }; } });
+  await c.executeCommand(command);
+  assert.equal(persisted, true);assert.equal(c.closed, true);
+  assert.equal(c.receipts[command.id].status, "confirmed");assert.equal(handlers, 1);
+});
+
+test("restored confirmed receipts emit acknowledged action success once per client", async t => {
+  const events = [];
+  let requests = 0;
+  const c = client(async path => {
+    requests++;
+    assert.equal(path, "/web/v1/runs/" + command.run_id);
+    return response({ status: "waiting" });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.receipts[command.id] = { command, status: "confirmed", result: { page: "orders" } };
+  c.on("action", event => events.push(event.status));
+  await c.flushReceipts();await c.flushReceipts();
+  assert.deepEqual(events, ["succeeded"]);assert.equal(requests, 2);
+});
+
+for (const ack of [{}, { status: "failed" }]) test(`unconfirmed result ACK ${JSON.stringify(ack)} retains success for retry without publishing it`, async t => {
+  const events = [], errors = [];
+  const c = client(async path => {
+    if (path.endsWith("/begin")) return response({ accepted: true });
+    if (path.endsWith("/result")) return response(ack);
+    return response({ status: "waiting" });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.on("action", event => events.push(event.status));
+  c.on("error", error => errors.push(error.code));
+  c.registerActions({ "ui.navigate": () => ({ page: "orders" }) });
+  await c.executeCommand(command);
+  assert.deepEqual(events, ["running"]);
+  assert.equal(c.receipts[command.id].status, "succeeded");
+  assert.deepEqual(errors, ["browser_result_ack_invalid"]);
+});
