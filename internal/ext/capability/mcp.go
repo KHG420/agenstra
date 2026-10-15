@@ -48,6 +48,9 @@ func (p *MCPPack) Skills() map[string]agentcontract.Skill { return p.skills }
 // SystemPrompt returns fixed usage guidance without connection credentials.
 func (p *MCPPack) SystemPrompt() string { return AgentPrompt(p.Manifest.Guidance) }
 
+// ProjectGuidance returns the original package instructions for scoped loading.
+func (p *MCPPack) ProjectGuidance() string { return p.Manifest.Guidance }
+
 // Close releases owned connection resources after outstanding calls have stopped.
 func (p *MCPPack) Close() error { return p.transport.Close() }
 

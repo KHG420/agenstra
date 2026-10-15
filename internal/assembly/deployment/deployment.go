@@ -567,6 +567,16 @@ type boundProvider struct {
 	subject string
 }
 
+// ProjectGuidance preserves optional scoped instructions without duplicating
+// the underlying provider's global agent protocol. Custom providers retain the
+// existing SystemPrompt fallback unless they explicitly supply scoped guidance.
+func (p *boundProvider) ProjectGuidance() string {
+	if provider, ok := p.CapabilityProvider.(interface{ ProjectGuidance() string }); ok {
+		return provider.ProjectGuidance()
+	}
+	return p.CapabilityProvider.SystemPrompt()
+}
+
 // ConcurrentInvocation preserves the underlying provider's concurrency guarantee.
 func (p *boundProvider) ConcurrentInvocation(name string) bool {
 	provider, ok := p.CapabilityProvider.(agentcontract.ConcurrentCapabilityProvider)

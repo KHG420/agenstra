@@ -57,6 +57,27 @@ func source(pack string, names ...string) agentcontract.RunSource {
 	return agentcontract.RunSource{PackID: pack, Capabilities: names}
 }
 
+func TestBoundProviderPreservesScopedProjectGuidanceAndFallback(t *testing.T) {
+	const guidance = `Use source-local records; retain {"schema":"invoice"}.`
+	for _, provider := range []agentcontract.CapabilityProvider{
+		&capabilitypack.RestPack{Manifest: agentcontract.RestManifest{Guidance: guidance}},
+		&hostProvider{},
+	} {
+		bound := BindProvider(provider, "connection-version", "alice-source")
+		view, ok := bound.(interface{ ProjectGuidance() string })
+		if !ok {
+			t.Fatal("connection wrapper discarded scoped guidance")
+		}
+		want := provider.SystemPrompt()
+		if scoped, ok := provider.(interface{ ProjectGuidance() string }); ok {
+			want = scoped.ProjectGuidance()
+		}
+		if view.ProjectGuidance() != want || bound.SystemPrompt() != provider.SystemPrompt() || bound.(*boundProvider).BoundSubject() != "alice-source" || bound.(*boundProvider).BindingID() != "connection-version" {
+			t.Fatal("guidance forwarding changed instructions or connection identity")
+		}
+	}
+}
+
 func TestProjectCredentialAttestationUsesLoadedProvider(t *testing.T) {
 	token := "USER_TOKEN"
 	c := agentcontract.ConnectionConfig{Environment: map[string]string{"USER_TOKEN": "ALICE_TOKEN"}, Identity: &agentcontract.IdentityConfig{TokenEnv: "ALICE_TOKEN", ExpectedSubject: "alice-b", CapabilitiesPath: []any{"capabilities"}}}

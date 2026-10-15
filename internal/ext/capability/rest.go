@@ -236,6 +236,9 @@ func (p *RestPack) Skills() map[string]agentcontract.Skill { return p.skills }
 // SystemPrompt returns fixed usage guidance without connection credentials.
 func (p *RestPack) SystemPrompt() string { return AgentPrompt(p.Manifest.Guidance) }
 
+// ProjectGuidance returns the original package instructions for scoped loading.
+func (p *RestPack) ProjectGuidance() string { return p.Manifest.Guidance }
+
 // Close is a no-op; REST providers do not own the supplied HTTP client or transport.
 func (p *RestPack) Close() error { return nil }
 
@@ -775,6 +778,9 @@ func (p *LegacyRestPack) Skills() map[string]agentcontract.Skill {
 
 // SystemPrompt returns fixed usage guidance without connection credentials.
 func (p *LegacyRestPack) SystemPrompt() string { return AgentPrompt(p.Manifest.Guidance) }
+
+// ProjectGuidance returns the original package instructions for scoped loading.
+func (p *LegacyRestPack) ProjectGuidance() string { return p.Manifest.Guidance }
 
 // Close is a no-op; legacy REST providers do not own the supplied HTTP client or transport.
 func (p *LegacyRestPack) Close() error { return nil }

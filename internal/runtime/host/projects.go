@@ -143,6 +143,10 @@ func (h *AgentHost) OpenRunProvider(ctx context.Context, run agentcontract.Store
 		if !verified || identity.BoundSubject() != binding.Subject || binding.Subject == "" {
 			return nil, agentcontract.NewHostError("identity_unverified")
 		}
+		guidance := source.SystemPrompt()
+		if scoped, ok := source.(interface{ ProjectGuidance() string }); ok {
+			guidance = scoped.ProjectGuidance()
+		}
 		for _, local := range binding.Capabilities {
 			cap, exists := source.Capabilities()[local]
 			if !exists {
@@ -175,7 +179,7 @@ func (h *AgentHost) OpenRunProvider(ctx context.Context, run agentcontract.Store
 			if _, exists := primary.Skills()[guide]; exists {
 				return nil, agentcontract.NewHostError("source_scope_invalid")
 			}
-			p.skills[guide] = agentcontract.Skill{Description: agentcontract.SkillDescription{Name: guide, Description: "Usage instructions for project " + binding.PackID + "; apply only to its capabilities."}, Content: source.SystemPrompt()}
+			p.skills[guide] = agentcontract.Skill{Description: agentcontract.SkillDescription{Name: guide, Description: "Usage instructions for project " + binding.PackID + "; apply only to its capabilities."}, Content: guidance}
 			cap.SkillsList = append(cap.SkillsList, guide)
 			if cap.Operation != nil {
 				if !slices.Contains(binding.Capabilities, cap.Operation.PollCapability) {
