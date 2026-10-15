@@ -49,6 +49,8 @@ utf8.RuneCountInString(systemPrompt) + utf8.RuneCount(CanonicalJSON(packet))
 | 最新加载的技能 | 完整保留；重新 `read_skill` 会把该技能移到最新位置。 |
 | 最新观察结果 | 至少保留最后一次状态、Fact ID 或错误码。参数可通过标记省略。 |
 
+Fact 预览先按原始 `model_output` 策略过滤可见值，再移出已执行的策略定义；模型无需在每份结果中重新接收完整路径清单。持久 Fact 继续保存原策略和完整回执，引用解析、完成校验及后续检查仍从原始 Fact 执行可见性校验。仅预览中的重复策略被移出，来源、身份、寿命、真实值和遗漏标记保持原有含义。这沿用 [Pydantic AI ToolReturnPart](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_tool_execution.py#L162-L168) 将工具结果与工具身份保留为消息的做法；Agenstra 的可见性策略仍由本地运行状态负责执行。
+
 可恢复信息按下面的顺序回收：
 
 1. 暂时移出较旧的长技能，记录 `skill: NAME; read_skill to load again`。如果一段短技能比遗漏说明更小，直接保留。

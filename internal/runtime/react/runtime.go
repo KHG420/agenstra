@@ -180,6 +180,9 @@ func ResolveArgument(value any, facts map[string]agentcontract.Fact, connectionI
 
 func factView(f agentcontract.Fact, budget int) agentcontract.FactView {
 	f.Value = agentcontract.ModelFactValue(f)
+	// The visible value has already passed this policy. Retain enforcement on
+	// the original Fact, without repeating its compiled paths in every preview.
+	f.ModelOutput = nil
 	omitted := [][]any{}
 	var visit func(any, []any, int) any
 	visit = func(value any, path []any, n int) any {
