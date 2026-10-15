@@ -130,6 +130,58 @@ func integralParameterSpelling(raw string) string {
 	return digits
 }
 
+// restBodyJSON formats integral HTTP body numbers without changing saved arguments.
+// Decode the standard JSON representation to retain exact json.Number values and
+// support typed SDK bodies without converting them through canonical float64s.
+func restBodyJSON(v any) ([]byte, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return nil, err
+	}
+	var normalize func(any) (any, error)
+	normalize = func(value any) (any, error) {
+		switch x := value.(type) {
+		case json.Number:
+			if strings.ContainsAny(string(x), ".eE") {
+				// Bound positive exponent expansion as in scalar HTTP parameters.
+				// Plain integer digits never need a float64 conversion.
+				if _, err := x.Float64(); err != nil {
+					return nil, err
+				}
+				return json.Number(integralParameterSpelling(string(x))), nil
+			}
+		case map[string]any:
+			for key, item := range x {
+				item, err := normalize(item)
+				if err != nil {
+					return nil, err
+				}
+				x[key] = item
+			}
+		case []any:
+			for i, item := range x {
+				item, err := normalize(item)
+				if err != nil {
+					return nil, err
+				}
+				x[i] = item
+			}
+		}
+		return value, nil
+	}
+	value, err = normalize(value)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(value)
+}
+
 func restPathValue(v any) (string, error) {
 	raw, err := restScalarValue(v)
 	if err != nil || raw == "" || raw == "." || raw == ".." || strings.ContainsAny(raw, "/\\%?#") {
@@ -561,7 +613,7 @@ func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any,
 	}
 	var body io.Reader
 	if v, ok := args["body"]; ok {
-		raw, e := agentcontract.CanonicalJSON(v)
+		raw, e := restBodyJSON(v)
 		if e != nil {
 			return agentcontract.CapabilityResult{ErrorCode: "capability_input_invalid"}, nil
 		}
@@ -881,7 +933,7 @@ func (p *LegacyRestPack) Invoke(ctx context.Context, name string, args map[strin
 					payload[key] = value
 				}
 			}
-			raw, err := agentcontract.CanonicalJSON(payload)
+			raw, err := restBodyJSON(payload)
 			if err != nil {
 				return agentcontract.CapabilityResult{ErrorCode: "capability_input_invalid"}, nil
 			}
