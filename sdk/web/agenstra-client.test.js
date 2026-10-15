@@ -9,6 +9,107 @@ function client(fetch, store = storage()) {
   c.browser = { id: "tab-1", generation: 1, key: "tab-key", context_revision: 1 };
   return c;
 }
+test("a quota-limited stale running journal recovers the server's original success without executing again", async t => {
+  const values = new Map(), submissions = [], recovered = [];
+  const store = { getItem: key => values.get(key) || null, removeItem: key => values.delete(key), setItem(key, value) {
+    if (value.length > 2048) throw new Error("storage quota exceeded");
+    values.set(key, value);
+  } };
+  const result = { document: "x".repeat(4096) };
+  let committed = false, reloaded = false, settled = false, handlers = 0;
+  const fetch = async (path, options) => {
+    if (path.endsWith("/begin")) return response({ accepted: true });
+    if (path.endsWith("/result")) {
+      const body = JSON.parse(options.body);submissions.push(body);
+      if (!committed) { committed = true;return response({ status: "succeeded" }); }
+      return response({ code: "browser_result_conflict" }, 409);
+    }
+    if (path === "/browser/v1/commands/" + command.id) {
+      recovered.push(path);return response({ ...command, status: "succeeded", result });
+    }
+    if (path.endsWith("/reconcile")) { settled = true;return response({ status: "queued" }); }
+    if (!reloaded) throw new Error("run read unavailable after result ACK");
+    return response({ status: settled ? "completed" : "needs_reconciliation", revision: 3,
+      state: { runtime: { pending: settled ? [] : [{ invocation_id: command.id, status: "unknown" }] } } });
+  };
+  const first = client(fetch, store);
+  t.after(() => first.destroy({ closeSession: false }));
+  first.registerActions({ "ui.navigate": () => { handlers++;return result; } });
+  await first.executeCommand(command);
+  assert.equal(first.load("receipts")[command.id].status, "running");
+  await first.destroy({ closeSession: false });reloaded = true;
+  const resumed = client(fetch, store), events = [];
+  t.after(() => resumed.destroy({ closeSession: false }));
+  resumed.registerActions({ "ui.navigate": () => { handlers++;throw new Error("must not execute again"); } });
+  resumed.on("action", event => events.push(event.status));
+  await resumed.flushReceipts();await resumed.flushReceipts();
+  assert.equal(handlers, 1);
+  assert.equal(recovered.length, 1);
+  assert.deepEqual(submissions.map(body => body.status), ["succeeded", "unknown"]);
+  assert.deepEqual(events, ["succeeded"]);
+  assert.equal(settled, true);
+  assert.equal(resumed.load("receipts")[command.id].status, "acked");
+  assert.equal(Object.hasOwn(resumed.load("receipts")[command.id], "result"), false);
+});
+
+for (const field of ["id", "session_id", "run_id", "generation", "profile_digest", "action", "arguments_sha256", "context_revision"]) {
+  test(`unknown receipt recovery rejects a server command with a different ${field}`, async t => {
+    let reads = 0;
+    const c = client(async path => {
+      if (path.endsWith("/result")) return response({ code: "browser_result_conflict" }, 409);
+      reads++;return response({ ...command, [field]: field === "generation" ? 2 : "another", status: "succeeded", result: { page: "orders" } });
+    });
+    t.after(() => c.destroy({ closeSession: false }));
+    c.receipts[command.id] = { command, status: "unknown", error_code: "browser_client_interrupted" };
+    const events = [];c.on("action", event => events.push(event));
+    await assert.rejects(c.flushReceipts(), { code: "browser_result_conflict" });
+    assert.equal(reads, 1);assert.deepEqual(events, []);
+    assert.equal(c.receipts[command.id].status, "unknown");
+  });
+}
+
+for (const invalid of ["error_code", "local_result"]) {
+  test(`unknown receipt recovery cannot discard ${invalid === "error_code" ? "a server error" : "captured local evidence"}`, async t => {
+    const c = client(async path => path.endsWith("/result") ? response({ code: "browser_result_conflict" }, 409)
+      : response({ ...command, status: "succeeded", result: { page: "orders" }, ...(invalid === "error_code" ? { error_code: "action_failed" } : {}) }));
+    t.after(() => c.destroy({ closeSession: false }));
+    c.receipts[command.id] = { command, status: "unknown", ...(invalid === "local_result" ? { result: { page: "another" } } : {}) };
+    await assert.rejects(c.flushReceipts(), { code: "browser_result_conflict" });
+    assert.equal(c.receipts[command.id].status, "unknown");
+  });
+}
+
+test("an authoritative empty-object success can settle a stale unknown receipt", async t => {
+  const c = client(async path => {
+    if (path.endsWith("/result")) return response({ code: "browser_result_conflict" }, 409);
+    if (path === "/browser/v1/commands/" + command.id) return response({ ...command, status: "succeeded" });
+    return response({ status: "completed" });
+  });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.receipts[command.id] = { command, status: "unknown", result: null };
+  const events = [];c.on("action", event => events.push(event.status));
+  await c.flushReceipts();
+  assert.deepEqual(events, ["succeeded"]);
+  assert.equal(c.load("receipts")[command.id].status, "acked");
+});
+
+test("a conflicting known local success is preserved instead of replaced by another server result", async t => {
+  const c = client(async path => path.endsWith("/result") ? response({ code: "browser_result_conflict" }, 409)
+    : response({ ...command, status: "succeeded", result: { page: "another" } }));
+  t.after(() => c.destroy({ closeSession: false }));
+  c.receipts[command.id] = { command, status: "succeeded", result: { page: "orders" } };
+  await assert.rejects(c.flushReceipts(), { code: "browser_result_conflict" });
+  assert.deepEqual(c.receipts[command.id].result, { page: "orders" });
+});
+
+test("old acknowledged payloads are removed locally while their command identity stays durable", async t => {
+  const c = client(async () => { throw new Error("acknowledged commands need no network replay"); });
+  t.after(() => c.destroy({ closeSession: false }));
+  c.receipts[command.id] = { command, status: "acked", result: { document: "x".repeat(4096) } };
+  c.save("receipts", c.receipts);
+  await c.flushReceipts();
+  assert.deepEqual(c.load("receipts")[command.id], { command, status: "acked" });
+});
 test("heartbeat retries a page observation after its upload fails", async t => {
   let uploads = 0, polls = 0;
   const c = client(async (path, options) => {

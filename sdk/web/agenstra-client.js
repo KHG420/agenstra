@@ -320,7 +320,10 @@ export class AgenstraClient {
   async flushReceiptsOnce() {
     if (!this.browser) return;
     for (const receipt of Object.values(this.receipts)) {
-      if (receipt.status === "acked") continue;
+      if (receipt.status === "acked") {
+        if (Object.hasOwn(receipt, "result")) { delete receipt.result;this.save("receipts", this.receipts); }
+        continue;
+      }
       if (receipt.status === "confirmed") { this.notifyReceiptSuccess(receipt);await this.finishReceipt(receipt);continue; }
       if (receipt.command.id === this.activeCommand && ["starting", "running"].includes(receipt.status)) continue;
       if (receipt.status === "starting" || receipt.status === "running") {
@@ -332,11 +335,18 @@ export class AgenstraClient {
       try { result = await this.request("/browser/v1/commands/" + command.id + "/result", { method: "POST", browserKey: this.browser.key, body: { generation: command.generation, status: receipt.status, result: receipt.result || null, error_code: receipt.error_code || "" } }); }
       catch (error) {
         if (error.code === "browser_result_invalid") { receipt.status = "unknown"; receipt.result = null; receipt.error_code = "browser_result_invalid"; this.save("receipts", this.receipts); continue; }
-        if (error.code === "browser_result_conflict") {
-          const existing = await this.request("/browser/v1/commands/" + command.id, { browserKey: this.browser.key });
-          if (["failed", "expired", "cancelled"].includes(existing.status)) { receipt.status = "acked"; this.save("receipts", this.receipts); continue; }
-        }
-        throw error;
+        if (error.code !== "browser_result_conflict") throw error;
+        const existing = await this.request("/browser/v1/commands/" + command.id, { browserKey: this.browser.key });
+        if (["failed", "expired", "cancelled"].includes(existing.status)) { receipt.status = "acked"; this.save("receipts", this.receipts); continue; }
+        // Optional storage can retain "running" after a large result exceeds
+        // its quota. Recover only an unknown outcome from this exact command's
+        // authoritative success; conflicting captured results stay conflicts.
+        const sameCommand = ["id", "run_id", "session_id", "generation", "profile_digest", "action", "arguments_sha256", "context_revision"].every(field => existing[field] === command[field]);
+        if (receipt.status !== "unknown" || receipt.result != null || existing.status !== "succeeded" || existing.error_code || !sameCommand) throw error;
+        receipt.status = "succeeded";
+        // BrowserCommand omits its result field for a validated empty object.
+        receipt.result = structuredClone(existing.result ?? {});delete receipt.error_code;
+        result = existing;
       }
       if (result.status === "unknown") { this.emit("reconciliation", result); continue; }
       if (result.status !== receipt.status || !["succeeded", "failed"].includes(result.status)) throw new AgenstraError("browser_result_ack_invalid");
@@ -362,7 +372,9 @@ export class AgenstraClient {
     // original invocation while it still has an unsettled outcome.
     if (["needs_reconciliation", "failed", "cancelled"].includes(run.status) && unsettled) await this.reconcile(receipt.command.id, run.revision);
     if (["completed", "failed", "cancelled"].includes(run.status)) {
-      receipt.status = "acked"; this.save("receipts", this.receipts);
+      // The full result is durable on the server. Retain the command identity
+      // locally without exhausting optional browser storage with settled data.
+      receipt.status = "acked";delete receipt.result;this.save("receipts", this.receipts);
     }
   }
   changeConversation(operation) {
