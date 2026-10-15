@@ -53,12 +53,13 @@ function checkProfile(profile) {
   checkSchema(profile.context_schema, "context_schema");
   const seen = new Set();
   for (const action of profile.actions) {
-    knownFields(action, ["name", "description", "input_schema", "output_schema", "effect", "approval_required", "timeout_seconds"], "action");
+    knownFields(action, ["name", "description", "input_schema", "output_schema", "effect", "approval_required", "timeout_seconds", "max_result_bytes"], "action");
     if (typeof action.name !== "string" || !/^ui\.[A-Za-z0-9_.-]+$/.test(action.name) || byteLength(action.name) > 128 || ["ui.get_context", "ui.command_status"].includes(action.name) || seen.has(action.name)) throw new Error("Actions must have unique, non-reserved ui.* names");
     if (!boundedString(action.description, 1000)) throw new Error(`${action.name}: description required (maximum 1000 bytes)`);
     if (action.effect !== undefined && !["", "read", "write", "destructive"].includes(action.effect)) throw new Error(`${action.name}: invalid effect`);
     if (action.approval_required !== undefined && typeof action.approval_required !== "boolean") throw new Error(`${action.name}: approval_required must be boolean`);
     if (action.timeout_seconds !== undefined && (!Number.isInteger(action.timeout_seconds) || action.timeout_seconds < 0 || action.timeout_seconds > 300)) throw new Error(`${action.name}: timeout_seconds must be 0..300 (0 uses the default)`);
+    if (action.max_result_bytes !== undefined && (!Number.isInteger(action.max_result_bytes) || action.max_result_bytes < 0 || action.max_result_bytes > 64 * 1024 * 1024)) throw new Error(`${action.name}: max_result_bytes must be 0..67108864 (0 uses the default)`);
     checkSchema(action.input_schema, `${action.name}.input_schema`);
     checkSchema(action.output_schema, `${action.name}.output_schema`);
     seen.add(action.name);

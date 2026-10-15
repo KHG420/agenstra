@@ -468,13 +468,29 @@ func (s *HTTPServer) browserHTTP(w http.ResponseWriter, r *http.Request, owner s
 			writeJSON(w, 200, agentcontract.JSON{"accepted": accepted, "command": c})
 			return
 		case "result":
+			// Only a verified command/session can opt in to a larger request body.
+			command, e := s.Web.command(owner, parts[1])
+			if e != nil {
+				webError(w, e)
+				return
+			}
+			if !s.Web.sessionKeyMatches(owner, command.SessionID, key) {
+				webError(w, agentcontract.NewHostError("browser_session_invalid"))
+				return
+			}
+			profile, e := s.Web.frontend(command.ProfileDigest)
+			if e != nil {
+				webError(w, e)
+				return
+			}
+			bodyLimit := max(2<<20, int64(profile.resultLimits[command.Action])+(64<<10))
 			var b struct {
 				Generation int                `json:"generation"`
 				Status     string             `json:"status"`
 				Result     agentcontract.JSON `json:"result"`
 				ErrorCode  string             `json:"error_code"`
 			}
-			if decodeBody(r, &b) != nil {
+			if decodeBodyLimit(r, &b, bodyLimit) != nil {
 				apiError(w, 422, "invalid_request", false)
 				return
 			}

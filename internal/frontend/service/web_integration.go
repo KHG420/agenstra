@@ -27,6 +27,7 @@ type compiledFrontend struct {
 	profile         agentcontract.FrontendProfile
 	digest          string
 	inputs, outputs map[string]*jsonschema.Schema
+	resultLimits    map[string]int
 	context         *jsonschema.Schema
 }
 
@@ -34,7 +35,7 @@ func compileFrontend(p agentcontract.FrontendProfile) (*compiledFrontend, error)
 	if p.Schema != "agenstra.frontend-profile.v1" || len(p.Version) < 1 || len(p.Version) > 80 || len(p.HandlerVersion) < 1 || len(p.HandlerVersion) > 80 || len(p.Actions) > 200 {
 		return nil, errors.New("invalid frontend profile")
 	}
-	c := &compiledFrontend{profile: p, inputs: map[string]*jsonschema.Schema{}, outputs: map[string]*jsonschema.Schema{}}
+	c := &compiledFrontend{profile: p, inputs: map[string]*jsonschema.Schema{}, outputs: map[string]*jsonschema.Schema{}, resultLimits: map[string]int{}}
 	if p.ContextSchema == nil {
 		return nil, errors.New("frontend context_schema required")
 	}
@@ -58,6 +59,14 @@ func compileFrontend(p agentcontract.FrontendProfile) (*compiledFrontend, error)
 		}
 		if a.TimeoutSeconds < 1 || a.TimeoutSeconds > 300 {
 			return nil, errors.New("invalid frontend timeout")
+		}
+		if a.MaxResultBytes < 0 || a.MaxResultBytes > 64<<20 {
+			return nil, errors.New("invalid frontend result limit")
+		}
+		c.resultLimits[a.Name] = a.MaxResultBytes
+		if a.MaxResultBytes == 0 {
+			// Preserve omitted defaults in the profile and its existing digest.
+			c.resultLimits[a.Name] = 1 << 20
 		}
 		if a.InputSchema["type"] != "object" || a.OutputSchema["type"] != "object" {
 			return nil, errors.New("frontend schemas must be objects")

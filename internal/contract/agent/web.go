@@ -31,6 +31,8 @@ type FrontendAction struct {
 	Effect           string `json:"effect"`
 	ApprovalRequired bool   `json:"approval_required,omitempty"`
 	TimeoutSeconds   int    `json:"timeout_seconds,omitempty"`
+	// MaxResultBytes bounds canonical JSON result bytes; zero uses 1 MiB.
+	MaxResultBytes int `json:"max_result_bytes,omitempty"`
 }
 
 // FrontendProfile pins browser actions, context schema and a handler version.

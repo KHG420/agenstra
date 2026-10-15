@@ -254,7 +254,11 @@ func runView(run agentcontract.StoredRun, host *durablehost.AgentHost) map[strin
 }
 
 func decodeBody(r *http.Request, dst any) error {
-	r.Body = http.MaxBytesReader(nil, r.Body, 2<<20)
+	return decodeBodyLimit(r, dst, 2<<20)
+}
+
+func decodeBodyLimit(r *http.Request, dst any, limit int64) error {
+	r.Body = http.MaxBytesReader(nil, r.Body, limit)
 	dec := json.NewDecoder(r.Body)
 	dec.UseNumber()
 	dec.DisallowUnknownFields()

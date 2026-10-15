@@ -89,3 +89,23 @@ test("closed empty object contracts stay objects rather than accepting primitive
     assert.match(await readFile(join(dir, "agenstra-actions.d.ts"), "utf8"), /args: \{ \[key: string\]: unknown;/);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test("explicit result limits match the server range without changing generated host handlers", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "agenstra-result-limit-"));
+  const profile = { schema: "agenstra.frontend-profile.v1", version: "1", handler_version: "1", context_schema: { type: "object" }, actions: [{ name: "ui.read", description: "Read a document", effect: "read", input_schema: { type: "object" }, output_schema: { type: "object" } }] };
+  try {
+    const path = join(dir, "profile.json");
+    for (const value of [0, 1, 1 << 20, 64 << 20]) {
+      profile.actions[0].max_result_bytes = value;
+      await writeFile(path, JSON.stringify(profile));
+      await exportActions(path, dir);
+    }
+    const original = await readFile(join(dir, "agenstra-actions.d.ts"), "utf8");
+    for (const value of [-1, 1.5, (64 << 20) + 1, "4194304", null]) {
+      profile.actions[0].max_result_bytes = value;
+      await writeFile(path, JSON.stringify(profile));
+      await assert.rejects(exportActions(path, dir), /max_result_bytes/);
+      assert.equal(await readFile(join(dir, "agenstra-actions.d.ts"), "utf8"), original);
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
