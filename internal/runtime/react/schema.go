@@ -1,6 +1,7 @@
 package react
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -31,20 +32,39 @@ func inputValidationFeedback(schema agentcontract.JSON, arguments agentcontract.
 			validation = selected
 		}
 	}
-	parts := []string{}
 	if feedback != "" {
-		parts = append(parts, feedback)
-	} else {
-		for _, detail := range validation.BasicOutput().Errors {
-			if detail.Error != nil {
-				parts = append(parts, fmt.Sprintf("at %q: %s", detail.InstanceLocation, detail.Error.String()))
-				if len(parts) == 4 {
-					break
-				}
+		return boundedSchemaFeedback(feedback)
+	}
+	return validationFeedback(validation)
+}
+
+func modelValidationFeedback(err error) string {
+	var validation *jsonschema.ValidationError
+	if errors.As(err, &validation) {
+		return validationFeedback(validation)
+	}
+	var typeError *json.UnmarshalTypeError
+	if errors.As(err, &typeError) {
+		return boundedSchemaFeedback(fmt.Sprintf("at field %q: expected %s", typeError.Field, typeError.Type))
+	}
+	return ""
+}
+
+func validationFeedback(validation *jsonschema.ValidationError) string {
+	parts := []string{}
+	for _, detail := range validation.BasicOutput().Errors {
+		if detail.Error != nil {
+			parts = append(parts, fmt.Sprintf("at %q: %s", detail.InstanceLocation, detail.Error.String()))
+			if len(parts) == 4 {
+				break
 			}
 		}
 	}
-	text := []rune(strings.Join(parts, "; "))
+	return boundedSchemaFeedback(strings.Join(parts, "; "))
+}
+
+func boundedSchemaFeedback(value string) string {
+	text := []rune(value)
 	if len(text) > 1000 {
 		text = text[:1000]
 	}

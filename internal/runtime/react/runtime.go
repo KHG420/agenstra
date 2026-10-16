@@ -980,6 +980,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			}
 		}
 		var syntax *json.SyntaxError
+		if detail := modelValidationFeedback(err); detail != "" {
+			feedback += "\nThe rejected output failed its declared parameter schema: " + detail + ". Submit corrected parameters through the current output channel; do not coerce values or replay successful business calls."
+		}
 		if metrics.FormatError == "model_output_invalid_json" && errors.As(err, &syntax) && syntax.Offset > 0 {
 			feedback += fmt.Sprintf(" JSON syntax error at byte %d: %s. Rebuild the complete object with matching object and array delimiters; do not change business values to repair JSON syntax.", syntax.Offset, syntax.Error())
 			if review == nil {

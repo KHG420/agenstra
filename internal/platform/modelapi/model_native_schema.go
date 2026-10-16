@@ -1,6 +1,8 @@
 package modelapi
 
 import (
+	"context"
+
 	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
@@ -45,4 +47,43 @@ func validateNativeDecisionOutput(body []byte, schema agentcontract.JSON) string
 		return "model_decision_schema_invalid"
 	}
 	return ""
+}
+
+// Keep validation available to the runtime without exposing validator URLs or
+// rejected output through the adapter's public error string.
+type modelSchemaError struct {
+	model      error
+	validation error
+}
+
+func (e modelSchemaError) Error() string   { return e.model.Error() }
+func (e modelSchemaError) Code() string    { return "model_decision_invalid" }
+func (e modelSchemaError) Unwrap() []error { return []error{e.model, e.validation} }
+
+func invalidModelSchema(ctx context.Context, body []byte, schema agentcontract.JSON) error {
+	invalid := invalidModelOutput(ctx, "model_decision_schema_invalid")
+	var value any
+	if err := jsonvalue.DecodeStrict(body, &value); err != nil {
+		return invalid
+	}
+	compiled, err := agentcontract.ValidateLocalSchema(schema, false)
+	if err != nil {
+		return invalid
+	}
+	if err := agentcontract.ValidateSchema(compiled, value); err != nil {
+		return modelSchemaError{model: invalid, validation: err}
+	}
+	return invalid
+}
+
+func invalidModelToolSchema(ctx context.Context, calls []decisionOutputToolCall, tools []any) error {
+	if len(calls) == 1 && calls[0].Type == "function" {
+		for _, tool := range tools {
+			function := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)
+			if function["name"] == calls[0].Function.Name {
+				return invalidModelSchema(ctx, []byte(calls[0].Function.Arguments), function["parameters"].(agentcontract.JSON))
+			}
+		}
+	}
+	return invalidModelOutput(ctx, "model_decision_schema_invalid")
 }

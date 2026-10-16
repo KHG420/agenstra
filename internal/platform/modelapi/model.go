@@ -109,6 +109,12 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet agentcontract
 		if errors.As(err, &oversized) {
 			return agentcontract.Decision{}, oversized
 		}
+		var typeError *json.UnmarshalTypeError
+		if errors.As(err, &typeError) {
+			return agentcontract.Decision{}, modelSchemaError{
+				model: agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}, validation: typeError,
+			}
+		}
 		return agentcontract.Decision{}, agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
 	}
 	if decision.Kind == "approve_completion" && packet.CompletionReview == nil {
@@ -401,6 +407,9 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 			if detail == "model_output_invalid_json" {
 				return nil, invalidModelJSON(ctx, detail, []byte(envelope.Choices[0].Message.ToolCalls[0].Function.Arguments))
 			}
+			if detail == "model_decision_schema_invalid" {
+				return nil, invalidModelToolSchema(ctx, envelope.Choices[0].Message.ToolCalls, payload["tools"].([]any))
+			}
 			return nil, invalidModelOutput(ctx, detail)
 		}
 		return raw, nil
@@ -428,6 +437,7 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 			// Keep recognized fixed protocol bounds through native-schema validation;
 			// the response remains rejected, with no data repair or parameter clamping.
 			if detail == "model_decision_schema_invalid" && modelJSONFormatError(body) == "" {
+				invalid = invalidModelSchema(ctx, body, descriptor["schema"].(agentcontract.JSON))
 				_, err := agentcontract.StrictDecision(body)
 				var inspectionRange agentcontract.DecisionInspectionRangeError
 				if errors.As(err, &inspectionRange) {

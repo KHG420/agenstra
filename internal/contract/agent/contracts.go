@@ -281,6 +281,11 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 // ValidUUID checks the framework UUID format.
 func ValidUUID(s string) bool { return uuidPattern.MatchString(s) }
 
+type decisionDecodeError struct{ cause error }
+
+func (e decisionDecodeError) Error() string { return "model_decision_invalid" }
+func (e decisionDecodeError) Unwrap() error { return e.cause }
+
 // StrictDecision decodes exactly one decision object and validates the decision protocol.
 func StrictDecision(raw []byte) (Decision, error) {
 	var obj map[string]json.RawMessage
@@ -291,7 +296,7 @@ func StrictDecision(raw []byte) (Decision, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	if err := decoder.Decode(&d); err != nil {
-		return d, errors.New("model_decision_invalid")
+		return d, decisionDecodeError{cause: err}
 	}
 	if _, ok := obj["schema"]; !ok {
 		d.Schema = "agenstra.decision.v1"
