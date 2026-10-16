@@ -101,6 +101,8 @@ Fact 预览计算对象和数组的结构开销以及标量替代值。整体能
 
 任务或搜索查询中明确指定完整能力名时，先匹配这个能力身份，再考虑其他能力契约中的同名操作和普通词法相关性。能力名紧贴中文时也保留独立身份词，例如 `读取PeopleService_GetPerson资料` 中的 `PeopleService_GetPerson`；原中文短语匹配继续保留。跨项目的 `pack::capability` 保留项目命名空间，包括项目名中的点、下划线和连字符；相同的本地操作名不会替代明确指定的来源。匹配仍限于实时授权目录，不授予权限或强制执行。此取舍参考 [OpenAI Agents SDK 对命名空间与工具名的完整身份处理](https://github.com/openai/openai-agents-python/blob/adeafad8f3d692237748113bb64de527ff55df1e/src/agents/_tool_identity.py#L176-L187)。
 
+普通词法相关性沿用名称、描述和输入字段的相对权重，并在原有词法贡献上增加 BM25 的正逆文档频率项，乘数为 `1 + log(1 + (N - df + 0.5) / (df + 0.5))`。`N` 是当前获准能力数，`df` 是其中包含该查询词的能力数。保留原有贡献能避免罕见的偶然字段压过常见但明确的业务主题，额外频率权重则减少通用“读取”“回执”和输出格式说明的相对影响；初始目录选择与主动搜索共用这个排序。统计只使用实时授权范围，未授权能力不参与频率计算。完整能力身份和明确操作名继续优先于普通词法得分，目录数量、输入契约、审批和执行预算保持原规则。这使用 BM25 的频率项，完整 BM25 中的词频饱和和文档长度归一化不在本次实现范围内。
+
 这个取舍参考了 [OpenAI Tool Search](https://developers.openai.com/api/docs/guides/tools-tool-search)、[Anthropic Tool Search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool) 和 [Pydantic AI Tool Search](https://pydantic.dev/docs/ai/capabilities/tool-search/) 的按需发现机制。框架沿用已有 JSON 决策与本地搜索，不要求供应商原生工具搜索；相比 [LangChain LLM Tool Selector](https://docs.langchain.com/oss/python/langchain/middleware/built-in#llm-tool-selector)，这里无需每轮增加一次模型筛选请求。词法搜索的召回取决于宿主描述和查询词，仍须在实际模型上验收，不能把单次无匹配当成完整能力审计。
 
 多主题任务按已有决策记录保留近期查看过的能力和历史搜索的首个匹配，避免后一主题的搜索立即覆盖前一主题的工具。最新搜索的首个结果优先进入目录；其余位置先给当前检查和近期发现，再按最新搜索及原任务补充，全部遵守 `max_context_capabilities` 和实时授权。框架从固定发布版本重新解析这些契约，不保存第二份工具目录；字符和 token 预算仍可缩略非当前检查的 Schema。这个取舍对应成熟系统保留已发现工具引用的做法，使用现有决策状态，无需新增模型请求或宿主接线。

@@ -2,6 +2,7 @@ package react
 
 import (
 	"encoding/json"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -12,7 +13,7 @@ import (
 
 type capabilityMatch struct {
 	name      string
-	score     int
+	score     float64
 	exact     bool
 	exactName bool
 }
@@ -164,34 +165,56 @@ func searchAuthorizedCapabilities(caps map[string]agentcontract.CapabilityDescri
 	if len(terms) == 0 {
 		return []string{}
 	}
-	matches := []capabilityMatch{}
+	type searchDocument struct {
+		name, nameText, description, fields string
+		qualifiedOperations                 []string
+	}
+	documents := []searchDocument{}
 	for name, cap := range caps {
 		if !grants[cap.Name] {
 			continue
 		}
 		nameText, description, fields, qualifiedOperations := capabilitySearchText(cap)
-		score := 0
+		documents = append(documents, searchDocument{name, nameText, description, fields, qualifiedOperations})
+	}
+	weights := map[string]float64{}
+	for _, term := range terms {
+		frequency := 0
+		for _, doc := range documents {
+			if strings.Contains(doc.nameText, term) || strings.Contains(doc.description, term) || strings.Contains(doc.fields, term) {
+				frequency++
+			}
+		}
+		// Keep the existing lexical contribution and add BM25's positive inverse
+		// document frequency. Retaining the base avoids letting rare incidental
+		// fields displace an operation named by otherwise common subject words.
+		// Count only the live authorized catalog; restricted tools cannot alter it.
+		weights[term] = 1 + math.Log1p((float64(len(documents)-frequency)+0.5)/(float64(frequency)+0.5))
+	}
+	matches := []capabilityMatch{}
+	for _, doc := range documents {
+		score := 0.0
 		exact := false
 		exactName := false
 		for _, term := range terms {
-			exactName = exactName || nameText == term
-			exact = exact || nameText == term || agentcontract.ContainsString(qualifiedOperations, term)
+			exactName = exactName || doc.nameText == term
+			exact = exact || doc.nameText == term || agentcontract.ContainsString(doc.qualifiedOperations, term)
 			switch {
-			case nameText == term:
-				score += 8
-			case strings.Contains(nameText, term):
-				score += 5
-			case strings.Contains(description, term):
-				score += 2
-			case strings.Contains(fields, term):
+			case doc.nameText == term:
+				score += 8 * weights[term]
+			case strings.Contains(doc.nameText, term):
+				score += 5 * weights[term]
+			case strings.Contains(doc.description, term):
+				score += 2 * weights[term]
+			case strings.Contains(doc.fields, term):
 
 				// Keep operation and field discovery, without letting a broad
 				// contract's incidental parameters outweigh its stated purpose.
-				score++
+				score += weights[term]
 			}
 		}
 		if score > 0 {
-			matches = append(matches, capabilityMatch{name: name, score: score, exact: exact, exactName: exactName})
+			matches = append(matches, capabilityMatch{name: doc.name, score: score, exact: exact, exactName: exactName})
 		}
 	}
 	sort.Slice(matches, func(i, j int) bool {

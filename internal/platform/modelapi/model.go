@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
 
@@ -376,7 +377,17 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		}
 	}
 	if usesOutputTools {
-		raw, detail := decisionOutputToolBody(envelope.Choices[0].Message.ToolCalls, payload["tools"].([]any))
+		var raw []byte
+		var detail string
+		if m.DecisionOutputMode == "native_tools" {
+			var packet agentcontract.ContextPacket
+			if err := jsonvalue.DecodeStrict(input, &packet); err != nil {
+				return nil, invalidModelOutput(ctx, "model_decision_schema_invalid")
+			}
+			raw, detail = nativeDecisionOutputToolBody(envelope.Choices[0].Message.ToolCalls, payload["tools"].([]any), packet)
+		} else {
+			raw, detail = decisionOutputToolBody(envelope.Choices[0].Message.ToolCalls, payload["tools"].([]any))
+		}
 		if detail != "" {
 			if usage := envelope.Usage; detail == "model_output_invalid_json" && outputLimit > 0 && usage != nil && usage.Output != nil && *usage.Output >= outputLimit && *usage.Output <= 1000000000 {
 				// Tool identity and count have already passed validation. A gateway

@@ -23,6 +23,10 @@ func TestModelCheckUsesSelectedOutputProtocol(t *testing.T) {
 		{"typed malformed arguments", "output_tools", "decision", "", "submit_decision", `{"kind":"final","answer_markdown":"ok","fact_ids":"[]"}`, "model_decision_schema_invalid"},
 		{"memory retains JSON", "output_tools", "memory_extraction", `{"proposals":[]}`, "", "", ""},
 		{"native profile memory retains JSON", "json_schema", "memory_extraction", `{"proposals":[]}`, "", "", ""},
+		{"native function decision", "native_tools", "decision", "", "final", `{"answer_markdown":"ok","fact_ids":[]}`, ""},
+		{"plain JSON cannot prove native functions", "native_tools", "decision", final, "", "", "model_output_tool_calls_invalid"},
+		{"native wrapper rejected", "native_tools", "decision", "", "final", final, "model_decision_schema_invalid"},
+		{"native function memory retains JSON", "native_tools", "memory_extraction", `{"proposals":[]}`, "", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requests := 0
@@ -46,6 +50,22 @@ func TestModelCheckUsesSelectedOutputProtocol(t *testing.T) {
 					choice, err := agentcontract.CanonicalJSON(payload["tool_choice"])
 					if err != nil || string(choice) != `{"function":{"name":"submit_decision"},"type":"function"}` || payload["parallel_tool_calls"] != false || payload["response_format"] != nil {
 						t.Error("check changed selected output transport", string(choice), err)
+					}
+				} else if tc.mode == "native_tools" && tc.purpose == "decision" {
+					var functions []struct{ Function struct{ Name string } }
+					raw, err := agentcontract.CanonicalJSON(payload["tools"])
+					if err != nil || json.Unmarshal(raw, &functions) != nil || len(functions) == 0 {
+						t.Error("native check omitted its function definitions", err)
+					}
+					finalDeclared := false
+					for _, function := range functions {
+						finalDeclared = finalDeclared || function.Function.Name == "final"
+						if function.Function.Name == "submit_decision" {
+							t.Error("native check declared the wrong transport")
+						}
+					}
+					if !finalDeclared || payload["tool_choice"] != "required" || payload["parallel_tool_calls"] != false || payload["response_format"] != nil {
+						t.Error("native check changed output channel")
 					}
 				} else {
 					format := "json_object"
