@@ -47,6 +47,10 @@ func (m *HTTPJSONDecisionModel) measurePayload(raw []byte) (agentcontract.InputM
 	return agentcontract.InputMeasurement{Tokens: int64(len(raw) + 128), Source: "utf8_bytes_estimate"}, nil
 }
 
+const jsonDecisionDisplayGuidance = `User format requests apply to final.answer_markdown only; they never replace the agenstra.decision.v1 JSON decision object. A final keeps schema, kind, answer_markdown and fact_ids. Encode business JSON as escaped text in answer_markdown; evidence IDs stay in fact_ids and result_refs.`
+
+const jsonDecisionCallShapeGuidance = `calls[] keys call_ref, capability, arguments, reason are siblings. Close arguments before reason. In arguments, match input_schema; omit unrequested {} or null fields.`
+
 func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (agentcontract.JSON, error) {
 	if err := agentcontract.ValidateModelParameters(m.APIType, m.Thinking, m.ReasoningEffort, m.Temperature); err != nil {
 		return nil, agentcontract.ModelDecisionError{Kind: "model_parameters_invalid"}
@@ -65,7 +69,12 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 			} else if len(packet.Skills) == 0 {
 				prompt = jsonDecisionPromptWithoutSkills(prompt)
 			}
-			messages[0] = agentcontract.JSON{"role": "system", "content": prompt + "\n\nUser requests for prose, Markdown, JSON, code or tables apply to final.answer_markdown only; they never replace the agenstra.decision.v1 JSON decision object. Put the requested display format inside that string. For a final decision, keep literal fields schema, kind, answer_markdown and fact_ids; serialize requested JSON business data as escaped text in answer_markdown, never as the top-level decision. Keep supporting evidence identifiers in fact_ids and result_refs."}
+			messages[0] = agentcontract.JSON{"role": "system", "content": prompt + "\n\n" + jsonDecisionDisplayGuidance}
+			// Some gateways treat response schemas as advisory. Keep the small
+			// call-shape reminder in the actual prompt, before a format failure.
+			if packet.CompletionReview == nil && !strings.Contains(prompt, jsonDecisionCallShapeGuidance) {
+				messages[0].(agentcontract.JSON)["content"] = messages[0].(agentcontract.JSON)["content"].(string) + "\n" + jsonDecisionCallShapeGuidance
+			}
 		}
 		loadedSkills := packet.LoadedSkills
 		history := packet.InspectionHistory
