@@ -165,13 +165,14 @@ func (c CapabilityDescription) ModelView() JSON {
 // CatalogView builds the model catalog entry with optional complete input-schema detail.
 // A runtime with a selected catalog can disclose complete contracts first;
 // the context budget still defers schemas when the whole packet is too large.
+// CatalogView returns a detached model entry without rounding numeric contracts.
 func (c CapabilityDescription) CatalogView(fullInputSchema bool) JSON {
 	b, err := json.Marshal(c)
 	if err != nil {
 		return JSON{}
 	}
 	var m JSON
-	if err := json.Unmarshal(b, &m); err != nil {
+	if err := jsonvalue.DecodeStrict(b, &m); err != nil {
 		return JSON{}
 	}
 	delete(m, "output_schema")
