@@ -11,6 +11,7 @@ import (
 // RunSource is an explicit delegation for one other host project's pack.
 // Capabilities are local names in that pack. The originating user's connection
 // must also delegate them, and the target must verify that user's permissions.
+// Each source contains 1..1000 capability names; a task selects at most 8 sources.
 type RunSource struct {
 	PackID       string   `json:"pack_id"`
 	Capabilities []string `json:"capabilities"`
@@ -31,7 +32,7 @@ func NormalizedSources(origin string, sources []RunSource) ([]RunSource, error) 
 	out := []RunSource{}
 	seen := map[string]bool{}
 	for _, source := range sources {
-		if source.PackID == origin || !RegistryID.MatchString(source.PackID) || seen[source.PackID] || len(source.Capabilities) < 1 || len(source.Capabilities) > 100 {
+		if source.PackID == origin || !RegistryID.MatchString(source.PackID) || seen[source.PackID] || len(source.Capabilities) < 1 || len(source.Capabilities) > 1000 {
 			return nil, NewHostError("source_scope_invalid")
 		}
 		seen[source.PackID] = true

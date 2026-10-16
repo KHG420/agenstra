@@ -1,5 +1,6 @@
 export type JSONObject = { [key: string]: unknown };
 export interface BrowserCommand { id: string; run_id: string; session_id: string; generation: number; action: string; arguments: JSONObject; status: string; context_revision: number; expires_at: number }
+/** Explicit authorized scope: 1..1000 local capability names per source, at most 8 sources per task. */
 export interface RunSource { pack_id: string; capabilities: string[] }
 export interface ProjectBinding extends RunSource { release: string; subject: string }
 export interface Run { run_id: string; status: string; revision: number; state: JSONObject & { runtime: RuntimeState; project_sources?: ProjectBinding[] }; telemetry?: RunTelemetry }

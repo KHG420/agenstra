@@ -138,6 +138,7 @@ type RunProgress = agent.RunProgress
 type ProgressTracker = agent.ProgressTracker
 
 // RunSource is an explicit delegation for one other host project's pack.
+// Each source contains 1..1000 local capability names; a task selects at most 8 sources.
 // Capabilities are local names in that pack. The originating user's connection
 // must also delegate them, and the target must verify that user's permissions.
 type RunSource = agent.RunSource
