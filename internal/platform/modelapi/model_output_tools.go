@@ -45,9 +45,16 @@ func decisionOutputTools(completionReview bool) []any {
 		"parameters":  call,
 	}}}
 	add := func(kind string, properties agentcontract.JSON, required ...string) {
+		description := "Submit the " + kind + " Agenstra decision. Structured output only; does not execute capabilities or grant permission."
+		switch kind {
+		case "search_capabilities":
+			description = "Search the current authorized capability catalog by name, description or input fields. Use this control function to discover whether a requested operation has a callable authorized capability, including when the visible catalog is incomplete. This reads runtime metadata only and performs no business API call. A result is a discovery hint; inspect a deferred contract before constructing its arguments. A missing match does not by itself establish a host limitation or a permission denial."
+		case "inspect_capability":
+			description = "Look up the complete input and output contract of one exact capability name in the current authorized catalog. This control function reads runtime metadata only and performs no business API call. Use it to verify a named callable contract or discover a deferred schema. An unknown or unauthorized capability returns the existing capability_unknown rejection; it does not invoke a business identity or role endpoint and never grants permission."
+		}
 		tools = append(tools, agentcontract.JSON{"type": "function", "function": agentcontract.JSON{
 			"name":        "submit_" + kind,
-			"description": "Submit the " + kind + " Agenstra decision. Structured output only; does not execute capabilities or grant permission.",
+			"description": description,
 			"parameters":  object(properties, required...),
 		}})
 	}
