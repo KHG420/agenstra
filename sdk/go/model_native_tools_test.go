@@ -79,11 +79,19 @@ func TestSDKNativeToolsResolveTypedEvidenceBeforeBusinessExecution(t *testing.T)
 		if native {
 			name = "native function"
 		}
-		t.Run(name, func(t *testing.T) { testNativeSDKReferenceExecution(t, native) })
+		t.Run(name, func(t *testing.T) {
+			for _, durable := range []bool{false, true} {
+				path := "transient runtime"
+				if durable {
+					path = "durable host"
+				}
+				t.Run(path, func(t *testing.T) { testNativeSDKReferenceExecution(t, native, durable) })
+			}
+		})
 	}
 }
 
-func testNativeSDKReferenceExecution(t *testing.T, native bool) {
+func testNativeSDKReferenceExecution(t *testing.T, native, durable bool) {
 	provider := &nativeInventoryProvider{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload agenstra.JSON
@@ -99,6 +107,12 @@ func testNativeSDKReferenceExecution(t *testing.T, native bool) {
 			w.WriteHeader(500)
 			return
 		}
+		if packet.Schema == "" && payload["tools"] == nil {
+			if err := json.NewEncoder(w).Encode(agenstra.JSON{"choices": []any{agenstra.JSON{"message": agenstra.JSON{"content": `{"proposals":[]}`}}}}); err != nil {
+				t.Error(err)
+			}
+			return
+		}
 		switch {
 		case packet.CompletionReview != nil:
 			nativeSDKReply(t, w, "approve_completion", agenstra.JSON{})
@@ -112,11 +126,13 @@ func testNativeSDKReferenceExecution(t *testing.T, native bool) {
 				nativeSDKReply(t, w, "tool_batch", agenstra.JSON{"calls": []any{agenstra.JSON{"capability": "inventory.set", "arguments": args, "reason": "Use the observed inventory ID"}}})
 			}
 		default:
+			savedCalls := 0
 			for _, item := range messages {
 				message := item.(map[string]any)
 				if message["role"] != "assistant" || message["tool_calls"] == nil {
 					continue
 				}
+				savedCalls++
 				call := message["tool_calls"].([]any)[0].(map[string]any)
 				function := call["function"].(map[string]any)
 				if function["name"] != "tool_batch" {
@@ -130,7 +146,17 @@ func testNativeSDKReferenceExecution(t *testing.T, native bool) {
 				entries, ok := arguments["calls"].([]any)
 				if !ok || len(entries) != 1 || entries[0].(map[string]any)["capability"] != "inventory.set" {
 					t.Error("saved reference proposal lost its original capability", arguments)
+					continue
 				}
+				original := agenstra.JSON{"id": agenstra.JSON{"$fact_value": agenstra.JSON{"fact_id": packet.Facts[0].FactID, "path": []any{"data", "id"}}}, "enabled": true}
+				want, wantErr := agenstra.CanonicalJSON(original)
+				got, gotErr := agenstra.CanonicalJSON(entries[0].(map[string]any)["arguments"])
+				if wantErr != nil || gotErr != nil || string(got) != string(want) {
+					t.Error("saved assistant history replaced the original reference", arguments, wantErr, gotErr)
+				}
+			}
+			if savedCalls != 1 {
+				t.Error("saved assistant history did not contain exactly one prior reference call", savedCalls)
 			}
 			ids := []string{}
 			for _, fact := range packet.Facts {
@@ -146,7 +172,42 @@ func testNativeSDKReferenceExecution(t *testing.T, native bool) {
 	}
 	model.DecisionOutputMode = "native_tools"
 	runtime := &agenstra.AgentRuntime{Provider: provider, Model: model, Grants: map[string]bool{"inventory.list": true, "inventory.set": true}, MaxModelRounds: 6}
-	result, err := runtime.Run(t.Context(), "First read the inventory ID, then enable it using the returned evidence.")
+	instruction := "First read the inventory ID, then enable it using the returned evidence."
+	var result agenstra.RunResult
+	if durable {
+		store, storeErr := agenstra.NewSQLiteStore(filepath.Join(t.TempDir(), "runs.sqlite3"))
+		if storeErr != nil {
+			t.Fatal(storeErr)
+		}
+		defer func() {
+			if closeErr := store.Close(); closeErr != nil {
+				t.Error(closeErr)
+			}
+		}()
+		if initErr := store.Initialize(); initErr != nil {
+			t.Fatal(initErr)
+		}
+		host := agenstra.NewAgentHost(store,
+			func(context.Context, string, string) (agenstra.CapabilityProvider, error) { return provider, nil }, model,
+			func(context.Context, string, string) (agenstra.ExecutionPolicy, error) {
+				return agenstra.ExecutionPolicy{GrantedCapabilities: runtime.Grants, AllowModelData: true}, nil
+			})
+		run, createErr := host.Create(t.Context(), "owner", "inventory", instruction, "")
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		run, err = host.Drive(t.Context(), run.RunID, "owner")
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, restoreErr := host.Restore(run)
+		if restoreErr != nil {
+			t.Fatal(restoreErr)
+		}
+		result = runtime.Result(state)
+	} else {
+		result, err = runtime.Run(t.Context(), instruction)
+	}
 	if err != nil || result.Status != "completed" || len(provider.calls) != 2 || provider.calls[0].capability != "inventory.list" || provider.calls[1].capability != "inventory.set" {
 		t.Fatal("native transport did not retain the ordinary execution path", result, provider.calls, err)
 	}

@@ -399,3 +399,28 @@ func TestDecisionOutputModesRetainUserVisibleAnswerGuidance(t *testing.T) {
 		})
 	}
 }
+
+func TestDecisionOutputModesKeepConversationalGuidanceWithinOutputProtocol(t *testing.T) {
+	provider := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{}}
+	runtime := &reactcore.AgentRuntime{Provider: provider}
+	for _, mode := range []string{"json_object", "json_schema", "output_tools", "native_tools"} {
+		t.Run(mode, func(t *testing.T) {
+			model := &HTTPJSONDecisionModel{Model: "compatible-model", DecisionOutputMode: mode}
+			payload, err := model.requestPayload([]byte(`{"schema":"agenstra.context.v1"}`), runtime.SystemPrompt())
+			if err != nil {
+				t.Fatal(err)
+			}
+			prompt := payload["messages"].([]any)[0].(agentcontract.JSON)["content"].(string)
+			for _, ambiguous := range []string{"does not require a tool call", "Do not call tools just to justify", "without tools."} {
+				if strings.Contains(prompt, ambiguous) {
+					t.Errorf("conversational guidance can waive the required output channel: %q", ambiguous)
+				}
+			}
+			for _, rule := range []string{"does not require a business capability call", "Do not call business capabilities just to justify", "without business capability calls.", "A final reply ends this turn, not the conversation."} {
+				if !strings.Contains(prompt, rule) {
+					t.Errorf("conversational guidance lost its business-operation boundary: %q", rule)
+				}
+			}
+		})
+	}
+}
