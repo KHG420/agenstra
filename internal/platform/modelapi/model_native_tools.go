@@ -105,6 +105,7 @@ func nativeDecisionOutputTools(tools []any, packet agentcontract.ContextPacket) 
 		}
 		function["name"] = kind
 		if kind == "tool_batch" {
+			function["description"] = "Propose 1 to 4 independent business calls together. All entries are decided before any result is returned. A user requirement to wait for each receipt before deciding the next step makes those steps dependent, even when they share input values. Submit only the next step in that case and wait for its result. Group calls only when neither data dependencies nor user sequencing requirements separate them. This proposal does not grant permission; original contracts, grants and approvals still apply."
 			parameters := function["parameters"].(agentcontract.JSON)
 			call := parameters["properties"].(agentcontract.JSON)["calls"].(agentcontract.JSON)["items"].(agentcontract.JSON)
 			call["properties"].(agentcontract.JSON)["capability"].(agentcontract.JSON)["enum"] = names
