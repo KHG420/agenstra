@@ -35,10 +35,23 @@ export class AgenstraClient {
     this.aborters = new Set();
     this.browserEpoch = 0;
     this.browserConnected = false;
-    // BFCache freezes and restores this object, including timers and receipts.
-    // Only a real unload should permanently stop the client.
-    this.pagehide = event => { if (!event.persisted) this.destroy({ closeSession: false }); };
+    this.pageSuspended = false;
+    this.chatPollAborters = new Set();
+    // A frozen page cannot consume a large history response. Cancel only that
+    // read; preserve writes, receipts, handlers and the original binding.
+    this.pagehide = event => {
+      if (!event.persisted) { this.destroy({ closeSession: false });return; }
+      this.pageSuspended = true;
+      clearTimeout(this.chatTimer);
+      for (const aborter of this.chatPollAborters) aborter.abort();
+    };
+    this.pageshow = event => {
+      if (!event.persisted || !this.pageSuspended || this.closed) return;
+      this.pageSuspended = false;
+      if (this.chatWatchers) this.pollChat();
+    };
     globalThis.addEventListener?.("pagehide", this.pagehide);
+    globalThis.addEventListener?.("pageshow", this.pageshow);
   }
   on(name, callback) {
     if (!this.listeners.has(name)) this.listeners.set(name, new Set());
@@ -56,8 +69,9 @@ export class AgenstraClient {
     const hex = Array.from(bytes, n => n.toString(16).padStart(2, "0")).join("");
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
-  async request(path, { method = "GET", body, browserKey, retry = true } = {}) {
+  async request(path, { method = "GET", body, browserKey, retry = true, signal } = {}) {
     if (this.closed) throw new AgenstraError("client_closed");
+    signal?.throwIfAborted();
     if (!this.token) {
       if (!this.sessionPromise) {
         this.sessionPromise = Promise.resolve().then(() => this.options.getSession()).then(session => {
@@ -67,8 +81,11 @@ export class AgenstraClient {
       await this.sessionPromise;
     }
     if (this.closed) throw new AgenstraError("client_closed");
+    signal?.throwIfAborted();
     const token = this.token;
     const aborter = new AbortController();
+    const abort = () => aborter.abort();
+    signal?.addEventListener("abort", abort, { once: true });
     this.aborters.add(aborter);
     try {
       const headers = { Authorization: "Bearer " + token };
@@ -88,10 +105,10 @@ export class AgenstraClient {
       if (response.status === 401 && retry && rawCode === "unauthorized") {
         // A late rejection only invalidates the credential used by this request.
         if (this.token === token) this.token = null;
-        return await this.request(path, { method, body, browserKey, retry: false });
+        return await this.request(path, { method, body, browserKey, retry: false, signal });
       }
       throw new AgenstraError(code, response.status);
-    } finally { this.aborters.delete(aborter); }
+    } finally { signal?.removeEventListener("abort", abort); this.aborters.delete(aborter); }
   }
   registerActions(actions) {
     if (this.browserPromise) throw new AgenstraError("register_actions_before_connect");
@@ -460,16 +477,20 @@ export class AgenstraClient {
     return () => { if (!watching) return; watching = false; off(); this.chatWatchers--; if (!this.chatWatchers) clearTimeout(this.chatTimer); };
   }
   async pollChat() {
-    if (this.closed || !this.chatWatchers) return;
+    if (this.closed || this.pageSuspended || !this.chatWatchers) return;
+    const aborter = new AbortController();
+    this.chatPollAborters.add(aborter);
     try {
       const conversation = await this.getConversation();
       const selectionRevision = this.selectionRevision;
-      const snapshot = await this.request("/chat/v1/conversations/" + conversation.id);
+      const snapshot = await this.request("/chat/v1/conversations/" + conversation.id, { signal: aborter.signal });
+      if (aborter.signal.aborted) return;
       if (selectionRevision === this.selectionRevision && snapshot.conversation.id === this.conversation?.id) this.emit("conversation", snapshot);
       if (!this.options.browser || this.browserConnected) this.emit("connection", { status: "connected" });
     }
-    catch (error) { this.emit("error", error); this.emit("connection", { status: "disconnected" }); }
-    if (!this.closed && this.chatWatchers) this.chatTimer = setTimeout(() => this.pollChat(), this.options.pollInterval || 1000);
+    catch (error) { if (!aborter.signal.aborted) { this.emit("error", error); this.emit("connection", { status: "disconnected" }); } }
+    finally { this.chatPollAborters.delete(aborter); }
+    if (!aborter.signal.aborted && !this.closed && !this.pageSuspended && this.chatWatchers) this.chatTimer = setTimeout(() => this.pollChat(), this.options.pollInterval || 1000);
   }
   getRun(id) { return this.request("/web/v1/runs/" + id); }
   async setContextPolicy(id, policy, revision, { requestId = this.id() } = {}) {
@@ -540,8 +561,10 @@ export class AgenstraClient {
     if (this.closed) return;
     this.closed = true;
     clearTimeout(this.browserTimer);clearTimeout(this.chatTimer);
+    for (const aborter of this.chatPollAborters) aborter.abort();
     for (const stop of this.runWatchers) stop();
     globalThis.removeEventListener?.("pagehide", this.pagehide);
+    globalThis.removeEventListener?.("pageshow", this.pageshow);
     for (const aborter of this.aborters) aborter.abort();
     this.listeners.clear();
     this.actionSuccessNotifications.clear();

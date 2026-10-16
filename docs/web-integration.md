@@ -233,7 +233,7 @@ await client.send("查询待处理订单", { clientId: client.id() });
 
 如果 client 由路由组件持有，组件卸载时调用 `client.destroy({ closeSession: false })`，停止本地轮询和订阅，保留服务端绑定及恢复身份。回到页面后创建 client、注册相同 handlers，再调用 `connectBrowser()` 恢复；离开期间任务可能等待浏览器，等待仍受原任务期限约束。默认 `client.destroy()` 尝试永久关闭服务端浏览器会话，仅用于退出登录、切换登录用户或明确结束该绑定。仅当服务端返回 HTTP 200 且 `status` 为 `closed` 时清除持久化绑定；网络失败、错误响应或关闭尚未确认时保留原 key 和恢复请求身份，供同一用户的新 client 恢复。`destroy()` 仍停止本地工作并返回 `Promise<void>`，返回本身不证明服务端已经关闭。把默认关闭用于普通路由卸载，会使原任务留在已关闭的 session 上；新的页面即使显示已连接，也不能执行原任务。
 
-浏览器返回缓存（BFCache）会冻结并恢复同一页面对象。SDK 收到 `pagehide` 且 `persisted: true` 时保留 client、handlers、订阅和待上传回执，返回页面后继续使用原连接；真正卸载时停止本地工作并保留服务端恢复身份。宿主不应在可缓存的 `pagehide` 上主动 `destroy()`。显式销毁的 client 始终保持关闭。冻结期间仍受服务端原有任务、命令和审批期限约束，过期或未知动作不自动重放。
+浏览器返回缓存（BFCache）会冻结并恢复同一页面对象。SDK 收到 `pagehide` 且 `persisted: true` 时暂停聊天历史轮询并取消进行中的只读历史请求，避免冻结页面缓冲大响应；client、handlers、订阅和待上传回执保留，业务写请求不会因此取消或重放。`pageshow` 且 `persisted: true` 后继续读取原会话并使用原连接；真正卸载时停止本地工作并保留服务端恢复身份。宿主不应在可缓存的 `pagehide` 上主动 `destroy()`。显式销毁的 client 始终保持关闭。冻结期间仍受服务端原有任务、命令和审批期限约束，过期或未知动作不自动重放。
 
 默认 `sessionStorage` 保存所选会话 ID、tab 绑定和执行回执，不保存 Agent 会话上下文；可传 `storage: null`。禁用存储后仍可通过会话列表手动恢复，服务端仍阻止重复认领；上述销毁并重建 client 的自动浏览器恢复需要保留存储。
 
