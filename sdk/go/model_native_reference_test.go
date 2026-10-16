@@ -37,7 +37,7 @@ func TestSDKNativeReferenceProposalsRespectRuntimeValidationAndPolicy(t *testing
 		value                     any
 		mutate                    string
 		expired, approval, revoke bool
-		batch                     bool
+		batch, single             bool
 	}{
 		{name: "resolved type", value: "7", code: "capability_input_invalid"},
 		{name: "resolved conditional", value: 1, code: "capability_input_invalid"},
@@ -52,6 +52,19 @@ func TestSDKNativeReferenceProposalsRespectRuntimeValidationAndPolicy(t *testing
 		{name: "invalid input before approval", value: "7", approval: true, code: "capability_input_invalid"},
 		{name: "valid input requires approval", value: 7, approval: true, status: "needs_approval"},
 		{name: "live grant revoked", value: 7, revoke: true, status: "needs_authorization"},
+		{single: true, name: "single resolved type", value: "7", code: "capability_input_invalid"},
+		{single: true, name: "single resolved conditional", value: 1, code: "capability_input_invalid"},
+		{single: true, name: "single resolved minimum", value: 0, code: "capability_input_invalid"},
+		{single: true, name: "single unrelated invalid literal", value: 7, mutate: "literal", code: "capability_input_invalid"},
+		{single: true, name: "single unknown business property", value: 7, mutate: "extra", code: "capability_input_invalid"},
+		{single: true, name: "single malformed reference", value: 7, mutate: "shape", code: "fact_reference_invalid"},
+		{single: true, name: "single unknown fact", value: 7, mutate: "unknown", code: "fact_reference_not_available"},
+		{single: true, name: "single invalid fact path", value: 7, mutate: "path", code: "fact_reference_path_invalid"},
+		{single: true, name: "single expired fact", value: 7, expired: true, code: "fact_reference_expired"},
+		{single: true, name: "single fact ID is not business ID", value: 7, mutate: "id-reference", code: "capability_input_invalid"},
+		{single: true, name: "single invalid input before approval", value: "7", approval: true, code: "capability_input_invalid"},
+		{single: true, name: "single valid input requires approval", value: 7, approval: true, status: "needs_approval"},
+		{single: true, name: "single live grant revoked", value: 7, revoke: true, status: "needs_authorization"},
 		{name: "batch resolved type", value: "7", batch: true, code: "capability_input_invalid"},
 		{name: "batch invalid literal", value: 7, batch: true, mutate: "literal", code: "capability_input_invalid"},
 		{name: "batch valid input requires approval", value: 7, batch: true, approval: true, status: "needs_approval"},
@@ -108,7 +121,11 @@ func TestSDKNativeReferenceProposalsRespectRuntimeValidationAndPolicy(t *testing
 					allowed = false
 					mu.Unlock()
 				}
-				if tc.batch {
+				if tc.single {
+					nativeSDKReply(t, w, "tool_call", agenstra.JSON{
+						"capability": "inventory.set", "arguments": args, "reason": "Use the requested evidence source",
+					})
+				} else if tc.batch {
 					nativeSDKReply(t, w, "tool_batch", agenstra.JSON{"calls": []any{agenstra.JSON{
 						"capability": "inventory.set", "arguments": args, "reason": "Use the requested evidence source",
 					}}})

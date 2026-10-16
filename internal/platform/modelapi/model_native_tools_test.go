@@ -95,6 +95,20 @@ func TestNativeToolsValidateDeclaredCallsWithoutRepair(t *testing.T) {
 		{name: "business call", function: "business", arguments: `{"id":7}`},
 		{name: "symbolic business input remains a proposal", function: "business", arguments: `{"id":{"$fact_value":{"fact_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","path":["data","id"]}}}`},
 		{name: "evidence reference proposal", function: "tool_batch", arguments: `{"calls":[{"capability":"inventory.get","arguments":{"id":{"$fact_value":{"fact_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","path":["data","id"]}}},"reason":"Use the recorded evidence"}]}`},
+		{name: "flat evidence proposal", function: "tool_call", arguments: `{"capability":"inventory.get","arguments":{"id":{"$fact_value":{"fact_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","path":["data","id"]}}},"reason":"Use the recorded source"}`},
+		{name: "flat literal proposal", function: "tool_call", arguments: `{"capability":"inventory.get","arguments":{"id":7},"reason":"Read the record","call_ref":"model-label"}`},
+		{name: "flat unknown capability", function: "tool_call", arguments: `{"capability":"inventory.missing","arguments":{"id":7},"reason":"Read"}`, code: "model_decision_invalid"},
+		{name: "flat deferred capability", function: "tool_call", arguments: `{"capability":"inventory.deferred","arguments":{},"reason":"Read"}`, code: "model_decision_invalid"},
+		{name: "flat missing capability", function: "tool_call", arguments: `{"arguments":{"id":7},"reason":"Read"}`, code: "model_decision_invalid"},
+		{name: "flat reason inside arguments", function: "tool_call", arguments: `{"capability":"inventory.get","arguments":{"id":7,"reason":"Read"}}`, code: "model_decision_invalid"},
+		{name: "flat no stringified arguments", function: "tool_call", arguments: `{"capability":"inventory.get","arguments":"{}","reason":"Read"}`, code: "model_decision_invalid"},
+		{name: "flat no extra fields", function: "tool_call", arguments: `{"capability":"inventory.get","arguments":{"id":7},"reason":"Read","query":{}}`, code: "model_decision_invalid"},
+		{name: "flat no duplicate fields", function: "tool_call", arguments: `{"capability":"inventory.get","capability":"inventory.get","arguments":{"id":7},"reason":"Read"}`, code: "model_decision_invalid"},
+		{name: "flat malformed JSON", function: "tool_call", arguments: `{"capability":"inventory.get","arguments":`, code: "model_decision_invalid"},
+		{name: "flat optional identity remains validated", function: "tool_call", arguments: `{"capability":"inventory.get","arguments":{"id":7},"reason":"Read","call_ref":"Invalid Label"}`, code: "model_decision_invalid"},
+		{name: "flat is not legacy alias", function: "submit_tool_call", arguments: `{"capability":"inventory.get","arguments":{"id":7},"reason":"Read"}`, code: "model_decision_invalid"},
+		{name: "flat mixed calls", function: "tool_call", arguments: `{"capability":"inventory.get","arguments":{"id":7},"reason":"Read"}`, multiple: true, code: "model_decision_invalid"},
+		{name: "split batch entries stay rejected", function: "tool_batch", arguments: `{"calls":[{"arguments":{"id":7,"reason":"Read"}},{"capability":"inventory.get","reason":"Read","call_ref":"step5-quotas"}]}`, code: "model_decision_invalid"},
 		{name: "final", function: "final", arguments: `{"answer_markdown":"ok","fact_ids":[]}`},
 		{name: "unknown name", function: "unknown_function", arguments: `{}`, code: "model_decision_invalid"},
 		{name: "business ID is not a native alias", function: "inventory.get", arguments: `{"id":7}`, code: "model_decision_invalid"},
@@ -145,8 +159,11 @@ func TestNativeToolsValidateDeclaredCallsWithoutRepair(t *testing.T) {
 			if err != nil || decision.Schema != "agenstra.decision.v1" {
 				t.Fatal("native call did not produce a canonical decision", decision, err)
 			}
-			if tc.function == "business" && (decision.Kind != "tool_batch" || len(decision.Calls) != 1 || decision.Calls[0].Capability != "inventory.get" || !agentcontract.CallRefPattern.MatchString(decision.Calls[0].CallRef)) {
+			if (tc.function == "business" || tc.function == "tool_call") && (decision.Kind != "tool_batch" || len(decision.Calls) != 1 || decision.Calls[0].Capability != "inventory.get" || !agentcontract.CallRefPattern.MatchString(decision.Calls[0].CallRef)) {
 				t.Fatal("business binding or local call identity changed", decision)
+			}
+			if tc.function == "tool_call" && (decision.Calls[0].CallRef == "model-label" || decision.Calls[0].Reason != "Use the recorded source" && decision.Calls[0].Reason != "Read the record") {
+				t.Fatal("single proposal lost its reason or trusted the model's call identity", decision)
 			}
 		})
 	}

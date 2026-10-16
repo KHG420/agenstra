@@ -12,11 +12,13 @@ import (
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
 
-const nativeReferenceProposalPrompt = "For arguments containing $fact_value or $fact_id, use the declared tool_batch proposal function, including for a single business call. Its arguments object represents symbolic values while direct business functions declare the original resolved input schema. A one-entry tool_batch performs exactly one business invocation and preserves a requirement to execute operations separately. The runtime resolves references before validating the original business input, current grants and approvals."
+const nativeReferenceProposalPrompt = "For one business call containing $fact_value or $fact_id, use the declared tool_call proposal function with capability, arguments and reason. Its arguments object represents symbolic values while direct business functions declare the original resolved input schema. Use tool_batch only when proposing multiple independent calls. A tool_call performs exactly one business invocation. The runtime resolves references before validating the original business input, current grants and approvals."
 
-const nativeReferenceBatchHint = "Use this function for symbolic $fact_value or $fact_id arguments, including a single call; direct business functions declare resolved input schemas. A one-entry batch is one invocation and may follow a user requirement to run one operation at a time."
+const nativeReferenceCallHint = "Propose exactly one business call with capability, arguments and reason. Use this function for symbolic $fact_value or $fact_id arguments; direct business functions declare resolved input schemas. Wait for this call result before deciding a dependent next step. This proposal does not grant permission; original contracts, grants and approvals still apply."
 
-const nativeReferenceBusinessHint = "For a symbolic Fact reference argument, propose this exact capability via tool_batch."
+const nativeReferenceBatchHint = "For a single symbolic $fact_value or $fact_id call, use tool_call; use this batch only for multiple independent calls."
+
+const nativeReferenceBusinessHint = "For a single symbolic Fact reference argument, propose this exact capability via tool_call."
 
 // Native function names are stable request bindings, never aliases accepted from
 // a model. A suffix distinguishes routed identities with identical readable parts.
@@ -102,7 +104,7 @@ func nativeDecisionOutputTools(tools []any, packet agentcontract.ContextPacket) 
 	for _, tool := range tools {
 		function := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)
 		kind := strings.TrimPrefix(function["name"].(string), "submit_")
-		if kind == "tool_call" || kind == "tool_batch" && len(names) == 0 {
+		if (kind == "tool_call" || kind == "tool_batch") && len(names) == 0 {
 			continue
 		}
 		function, err := jsonvalue.Clone(function)
@@ -110,6 +112,11 @@ func nativeDecisionOutputTools(tools []any, packet agentcontract.ContextPacket) 
 			return nil, err
 		}
 		function["name"] = kind
+		if kind == "tool_call" {
+			function["description"] = nativeReferenceCallHint
+			parameters := function["parameters"].(agentcontract.JSON)
+			parameters["properties"].(agentcontract.JSON)["capability"].(agentcontract.JSON)["enum"] = names
+		}
 		if kind == "tool_batch" {
 			function["description"] = "Propose 1 to 4 independent business calls together. " + nativeReferenceBatchHint + " All entries are decided before any result is returned. A user requirement to wait for each receipt before deciding the next step makes those steps dependent, even when they share input values. Submit only the next step in that case and wait for its result. Group calls only when neither data dependencies nor user sequencing requirements separate them. This proposal does not grant permission; original contracts, grants and approvals still apply."
 			parameters := function["parameters"].(agentcontract.JSON)
@@ -185,6 +192,10 @@ func nativeDecisionOutputToolBody(calls []decisionOutputToolCall, tools []any, p
 	if detail := validateNativeDecisionOutput(raw, function["parameters"].(agentcontract.JSON)); detail != "" {
 		return nil, detail
 	}
+	if kind == "tool_call" {
+		fields = agentcontract.JSON{"calls": []any{fields}}
+		kind = "tool_batch"
+	}
 	if kind == "tool_batch" {
 		entries := fields["calls"].([]any)
 		for _, value := range entries {
@@ -244,7 +255,7 @@ func nativeDecisionToolPrompt(prompt string, review bool) string {
 		prompt += " This is completion review. Only final and approve_completion are available. Call approve_completion with no payload for an unchanged fully verified proposal; otherwise call final with completion_feedback as a string. Reject missing original work through nonempty feedback without executing, proposing or replaying calls."
 	} else {
 		prompt += " For up to 4 independent business calls, use the declared tool_batch function with its calls array; wait before dependent calls and follow the user's explicit operation order. A deferred capability must be inspected before its native function becomes available."
-		prompt += " " + nativeReferenceProposalPrompt + " For tool_batch, each calls entry uses the exact capability ID in capability, preserves the business parameter structure in arguments, and includes a reason. Respect explicit requests to perform calls separately even when their inputs are independent."
+		prompt += " " + nativeReferenceProposalPrompt + " For tool_call, use the exact capability ID in capability, preserve the business parameter structure in arguments, and include a reason. For tool_batch, each calls entry has those same fields. Respect explicit requests to perform calls separately even when their inputs are independent."
 		prompt += " When the user requests an input value through an evidence reference, or names a prior result as that input's source, use $fact_value with that exact observed Fact and path. A matching literal, including a value already present in the task, does not satisfy a requested input reference. Preserve the requested input source even when the same business value appears in another Fact. Final-answer citations alone do not require replacing ordinary literal inputs."
 	}
 	return prompt
