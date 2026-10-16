@@ -37,6 +37,7 @@ func TestSDKNativeReferenceProposalsRespectRuntimeValidationAndPolicy(t *testing
 		value                     any
 		mutate                    string
 		expired, approval, revoke bool
+		batch                     bool
 	}{
 		{name: "resolved type", value: "7", code: "capability_input_invalid"},
 		{name: "resolved conditional", value: 1, code: "capability_input_invalid"},
@@ -51,6 +52,10 @@ func TestSDKNativeReferenceProposalsRespectRuntimeValidationAndPolicy(t *testing
 		{name: "invalid input before approval", value: "7", approval: true, code: "capability_input_invalid"},
 		{name: "valid input requires approval", value: 7, approval: true, status: "needs_approval"},
 		{name: "live grant revoked", value: 7, revoke: true, status: "needs_authorization"},
+		{name: "batch resolved type", value: "7", batch: true, code: "capability_input_invalid"},
+		{name: "batch invalid literal", value: 7, batch: true, mutate: "literal", code: "capability_input_invalid"},
+		{name: "batch valid input requires approval", value: 7, batch: true, approval: true, status: "needs_approval"},
+		{name: "batch live grant revoked", value: 7, batch: true, revoke: true, status: "needs_authorization"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			provider := &nativeReferenceProvider{value: tc.value, expired: tc.expired}
@@ -103,7 +108,13 @@ func TestSDKNativeReferenceProposalsRespectRuntimeValidationAndPolicy(t *testing
 					allowed = false
 					mu.Unlock()
 				}
-				nativeSDKReply(t, w, nativeSDKFunction(t, payload, "inventory.set"), args)
+				if tc.batch {
+					nativeSDKReply(t, w, "tool_batch", agenstra.JSON{"calls": []any{agenstra.JSON{
+						"capability": "inventory.set", "arguments": args, "reason": "Use the requested evidence source",
+					}}})
+				} else {
+					nativeSDKReply(t, w, nativeSDKFunction(t, payload, "inventory.set"), args)
+				}
 			}))
 			defer server.Close()
 			model, err := agenstra.NewHTTPJSONDecisionModel("test", server.URL, "fixture", time.Second*5, server.Client())
