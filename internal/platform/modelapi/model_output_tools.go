@@ -29,7 +29,7 @@ func decisionOutputTools(completionReview bool) []any {
 		"arguments":  agentcontract.JSON{"type": "object", "additionalProperties": true},
 		"reason":     agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 500},
 	}, "capability", "arguments", "reason")
-	resultPath := agentcontract.JSON{"type": "array", "minItems": 1, "maxItems": 16, "items": path["items"]}
+	resultPath := agentcontract.JSON{"type": "array", "minItems": 1, "maxItems": 16, "items": path["items"], "description": "Path from the cited Fact.value to a nonempty scalar business ID (string or integer). Never point to an object, array or local Fact ID; include every actual response wrapper in the path."}
 	resultRef := object(agentcontract.JSON{
 		"fact_id": uuid, "path": resultPath, "label": agentcontract.JSON{"type": "string", "maxLength": 100},
 		"entity_type": agentcontract.JSON{"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
@@ -58,11 +58,11 @@ func decisionOutputTools(completionReview bool) []any {
 			"parameters":  object(properties, required...),
 		}})
 	}
-	add("tool_batch", agentcontract.JSON{"calls": agentcontract.JSON{"type": "array", "minItems": 1, "maxItems": 4, "items": call}}, "calls")
+	add("tool_batch", agentcontract.JSON{"calls": agentcontract.JSON{"type": "array", "minItems": 1, "maxItems": 4, "items": call, "description": "Independent calls chosen before any result is returned. A user requirement to wait for each receipt before deciding the next operation makes those steps dependent, even when inputs are already known: submit only the next call and wait. A batch cannot stand for separate future decisions."}}, "calls")
 	final := agentcontract.JSON{
 		"answer_markdown": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 30000, "description": "User-facing response with the requested business values and necessary limitations. Never put internal Fact IDs in prose, tables, links or footnotes. Keep supporting evidence IDs only in fact_ids and result_refs. Requested business record IDs remain ordinary answer data."},
 		"fact_ids":        agentcontract.JSON{"type": "array", "maxItems": 50, "items": uuid, "description": "Supporting evidence identifiers from this run: copy full Fact IDs exactly here. Do not repeat these internal evidence identifiers in answer_markdown."},
-		"result_refs":     agentcontract.JSON{"type": "array", "maxItems": 20, "items": resultRef},
+		"result_refs":     agentcontract.JSON{"type": "array", "maxItems": 20, "items": resultRef, "description": "Optional links to business objects, not generic evidence or statistics references. Every entry must point to a scalar business ID in an available Fact included in fact_ids. Use fact_ids for supporting evidence. Omit result_refs when the answer needs no object reference; never link a statistics or configuration object."},
 	}
 	required := []string{"answer_markdown", "fact_ids"}
 	if completionReview {
