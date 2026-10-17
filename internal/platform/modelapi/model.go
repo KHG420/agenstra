@@ -385,12 +385,23 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	if usesOutputTools {
 		var raw []byte
 		var detail string
+		invalidCalls := envelope.Choices[0].Message.ToolCalls
 		if m.DecisionOutputMode == "native_tools" {
 			var packet agentcontract.ContextPacket
 			if err := jsonvalue.DecodeStrict(input, &packet); err != nil {
 				return nil, invalidModelOutput(ctx, "model_decision_schema_invalid")
 			}
 			raw, detail = nativeDecisionOutputToolBody(envelope.Choices[0].Message.ToolCalls, payload["tools"].([]any), packet)
+			if detail != "" && len(invalidCalls) > 1 && len(invalidCalls) <= 4 {
+				// Preserve the actual rejected arguments for schema/syntax feedback
+				// and truncation detection; an earlier valid call is not the cause.
+				for _, call := range invalidCalls {
+					if _, rejected := nativeDecisionOutputToolBody([]decisionOutputToolCall{call}, payload["tools"].([]any), packet); rejected == detail {
+						invalidCalls = []decisionOutputToolCall{call}
+						break
+					}
+				}
+			}
 		} else {
 			raw, detail = decisionOutputToolBody(envelope.Choices[0].Message.ToolCalls, payload["tools"].([]any))
 		}
@@ -399,16 +410,16 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 				// Tool identity and count have already passed validation. A gateway
 				// can still report tool_calls after cutting its arguments at the cap.
 				var value json.RawMessage
-				arguments := envelope.Choices[0].Message.ToolCalls[0].Function.Arguments
+				arguments := invalidCalls[0].Function.Arguments
 				if errors.Is(json.NewDecoder(strings.NewReader(arguments)).Decode(&value), io.ErrUnexpectedEOF) {
 					return nil, agentcontract.ModelDecisionError{Kind: "model_output_truncated"}
 				}
 			}
 			if detail == "model_output_invalid_json" {
-				return nil, invalidModelJSON(ctx, detail, []byte(envelope.Choices[0].Message.ToolCalls[0].Function.Arguments))
+				return nil, invalidModelJSON(ctx, detail, []byte(invalidCalls[0].Function.Arguments))
 			}
 			if detail == "model_decision_schema_invalid" {
-				return nil, invalidModelToolSchema(ctx, envelope.Choices[0].Message.ToolCalls, payload["tools"].([]any))
+				return nil, invalidModelToolSchema(ctx, invalidCalls, payload["tools"].([]any))
 			}
 			return nil, invalidModelOutput(ctx, detail)
 		}

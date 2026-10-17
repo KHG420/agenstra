@@ -149,6 +149,37 @@ func nativeDecisionOutputTools(tools []any, packet agentcontract.ContextPacket) 
 }
 
 func nativeDecisionOutputToolBody(calls []decisionOutputToolCall, tools []any, packet agentcontract.ContextPacket) ([]byte, string) {
+	if len(calls) > 1 {
+		if len(calls) > 4 {
+			return nil, "model_decision_schema_invalid"
+		}
+		business := map[string]bool{}
+		for name := range nativeFunctionCapabilities(packet) {
+			business[nativeCapabilityFunctionName(name)] = true
+		}
+		decision := agentcontract.Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch"}
+		for _, call := range calls {
+			// Only direct business functions form a batch. Control and proposal
+			// functions already express one decision and cannot be combined.
+			if !business[call.Function.Name] {
+				return nil, "model_output_tool_calls_invalid"
+			}
+			body, detail := nativeDecisionOutputToolBody([]decisionOutputToolCall{call}, tools, packet)
+			if detail != "" {
+				return nil, detail
+			}
+			var single agentcontract.Decision
+			if err := jsonvalue.DecodeStrict(body, &single); err != nil || single.Kind != "tool_batch" || len(single.Calls) != 1 {
+				return nil, "model_decision_schema_invalid"
+			}
+			decision.Calls = append(decision.Calls, single.Calls[0])
+		}
+		body, err := agentcontract.CanonicalJSON(decision)
+		if err != nil {
+			return nil, "model_decision_schema_invalid"
+		}
+		return body, ""
+	}
 	if len(calls) != 1 || calls[0].Type != "function" {
 		return nil, "model_output_tool_calls_invalid"
 	}
@@ -272,11 +303,15 @@ func nativeDecisionToolPrompt(prompt string, review bool) string {
 		line = strings.ReplaceAll(line, "standalone search_capabilities decision", "search_capabilities function call")
 		retained = append(retained, line)
 	}
-	prompt = strings.Join(retained, "\n") + "\nChoose exactly one declared native function per response and wait for its result. Business functions accept the capability's actual parameters. Do not add decision wrappers such as kind, schema, calls, reason or call_ref unless those are declared business parameters. Preserve all declared business fields without coercion. The adapter assigns fresh local call identities; the runtime still checks original contracts, stored evidence references, current grants, identity, approval and budgets. Keep $fact_value references as objects. Unknown function names and multiple output functions are invalid. Call final with answer_markdown and fact_ids to answer; user display formats apply inside answer_markdown only. Native functions replace legacy JSON decision output and its examples."
+	choice := "\nChoose one decision per response: one declared control or proposal function, or 1 to 4 declared business functions for independent calls. Never mix a control, proposal or final function with another function. Wait for results before deciding dependent calls."
+	if review {
+		choice = "\nChoose exactly one declared native function per response and wait for its result."
+	}
+	prompt = strings.Join(retained, "\n") + choice + " Business functions accept the capability's actual parameters. Do not add decision wrappers such as kind, schema, calls, reason or call_ref unless those are declared business parameters. Preserve all declared business fields without coercion. The adapter assigns fresh local call identities; the runtime still checks original contracts, stored evidence references, current grants, identity, approval and budgets. Keep $fact_value references as objects. Unknown function names are invalid. Call final with answer_markdown and fact_ids to answer; user display formats apply inside answer_markdown only. Native functions replace legacy JSON decision output and its examples."
 	if review {
 		prompt += " This is completion review. Only final and approve_completion are available. Call approve_completion with no payload for an unchanged fully verified proposal; otherwise call final with completion_feedback as a string. Reject missing original work through nonempty feedback without executing, proposing or replaying calls."
 	} else {
-		prompt += " For up to 4 independent business calls, use the declared tool_batch function with its calls array; wait before dependent calls and follow the user's explicit operation order. A deferred capability must be inspected before its native function becomes available."
+		prompt += " Prefer one function call; the declared tool_batch function can propose up to 4 independent calls in its calls array. Multiple direct business functions also represent one batch, never separate future decisions. Wait before dependent calls and follow the user's explicit operation order. A deferred capability must be inspected before its native function becomes available."
 		prompt += " " + nativeReferenceProposalPrompt + " For tool_call, use the exact capability ID in capability, preserve the business parameter structure in arguments, and include a reason. For tool_batch, each calls entry has those same fields. Respect explicit requests to perform calls separately even when their inputs are independent."
 		prompt += " When the user requests an input value through an evidence reference, or names a prior result as that input's source, use $fact_value with that exact observed Fact and path. A matching literal, including a value already present in the task, does not satisfy a requested input reference. Preserve the requested input source even when the same business value appears in another Fact. Final-answer citations alone do not require replacing ordinary literal inputs."
 	}
