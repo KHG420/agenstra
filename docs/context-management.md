@@ -123,6 +123,8 @@ HTTP 模型适配器将已有的 `capability_search_query` 和 `capability_searc
 
 初始系统提示明确 `search_capabilities` 与 `read_skill`、`inspect_capability`、`inspect_fact` 均为独立框架决策，不能放入 `tool_batch.calls[].capability`；后者只填写授权目录中的确切业务能力名。搜索需要相应 runtime feature，单独决策并等待返回目录后再选业务调用。这与 [FastMCP 的工具目录](https://gofastmcp.com/servers/tools)只将显式注册函数作为可执行工具的边界一致；提示不能保证模型遵守，也不会把非法调用转换为合法决策。
 
+模型判断工具是否可用时，以当前授权目录和已检查的契约为依据；业务账号的角色不代表工具授权，不能仅为探测权限而调用身份、资料或无关业务接口，尤其不能违反用户排除额外业务调用的要求。所需能力可能暂未进入可见目录时，仍使用现有能力搜索和契约检查。这沿用 [Pydantic AI 的 FilteredToolset](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/toolsets/filtered.py) 根据可信运行上下文筛选实际工具的边界；Agenstra 在已有提示中解释这个边界，实际授权、审批和宿主权限校验保持生效。该说明不替代用户明确请求的身份查询，也不保证模型不再发出无关调用。
+
 上一条模型观察为 `capability_unknown` 时，下一轮提示会明确该调用未执行，要求按当前授权目录的确切名称选择能力，并区分 `tool_batch` 中的业务调用与独立的框架决策。能力搜索仍受 `runtime_features` 约束，不猜测别名、不增加授权，也不把错误调用自动转换成执行。此反馈参考 [Pydantic AI 的未知工具纠正机制](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/docs/retries.md#tool-retries)；Agenstra 沿用已有模型轮次、工具调用与停滞预算。
 
 全部 Fact 身份、能力目录和技能目录都必须保留；最小元数据本身超限时，运行明确失败。字符预算不代表供应商的 token 容量，模型质量、延迟和费用需要在部署方选择的模型上评估。
