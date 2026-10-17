@@ -558,6 +558,10 @@ func LoadRestPack(path string, environment map[string]string, client *http.Clien
 			replay = "safe"
 		} else if endpoint.IdempotencyHeader != nil || endpoint.IdempotencyArgument != nil {
 			replay = "idempotent"
+		} else if endpoint.Effect == "read" {
+			// The trusted manifest declares the business effect; a query can
+			// use POST without introducing an external write to replay.
+			replay = "safe"
 		}
 		p.endpoints[endpoint.Name] = endpoint
 		p.inputs[endpoint.Name] = input

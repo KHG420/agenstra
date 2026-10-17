@@ -135,7 +135,7 @@ go run ./cmd/agenstra-manage audit
 
 `check` 建立连接并读取实际能力目录，不发起业务工具调用；对 MCP 会进行握手和契约哈希校验。停用连接会立即撤销运行访问，包括已有任务：
 
-REST v2 的重放契约依据业务 `effect` 与已声明的幂等绑定，不能只依据 HTTP 方法判断。没有幂等绑定的写操作即使使用 GET，仍为 `replay=never`。这类调用使用默认或调用方提供的标准 `http.Transport` 时，框架复制传输配置并使用一次调用独有的连接池，关闭连接复用，避免标准库因 GET 在已复用连接上丢失响应而自动重发；调用结束后清理该连接池，不修改调用方的 client 或 transport。响应丢失继续返回 `provider_outcome_unknown`，由 Host 保留原调用并进入核对流程。自定义 `RoundTripper` 保持调用方实现，接入方须确保其自身不重放 `never` 操作。
+REST v2 的重放契约依据业务 `effect` 与已声明的幂等绑定，不能只依据 HTTP 方法判断。开发者已审查并在可信清单中声明 `effect=read` 的查询，即使使用 POST 等方法，也可具有 `replay=safe`；已有显式幂等绑定保持原来的分类。模型输出或未受信任的工具注解不能自行声明这种保证。没有幂等绑定的写操作即使使用 GET，仍为 `replay=never`。这类调用使用默认或调用方提供的标准 `http.Transport` 时，框架复制传输配置并使用一次调用独有的连接池，关闭连接复用，避免标准库因 GET 在已复用连接上丢失响应而自动重发；调用结束后清理该连接池，不修改调用方的 client 或 transport。响应丢失继续返回 `provider_outcome_unknown`，由 Host 保留原调用并进入核对流程。自定义 `RoundTripper` 保持调用方实现，接入方须确保其自身不重放 `never` 操作。
 
 ```sh
 go run ./cmd/agenstra-manage disable operator records
