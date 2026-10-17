@@ -47,9 +47,9 @@ func (m *HTTPJSONDecisionModel) measurePayload(raw []byte) (agentcontract.InputM
 	return agentcontract.InputMeasurement{Tokens: int64(len(raw) + 128), Source: "utf8_bytes_estimate"}, nil
 }
 
-const finalAnswerJSONGuidance = `Use answer_json for requested raw JSON as a native value even if task names answer_markdown. For text/code/tables use answer_markdown. Exactly one answer plus fact_ids; evidence IDs only in fact_ids/result_refs.`
+const finalAnswerJSONGuidance = `Use native answer_json for raw JSON even if task names answer_markdown; text/code/tables use answer_markdown. One answer plus fact_ids; evidence IDs only in fact_ids/result_refs.`
 
-const jsonDecisionDisplayGuidance = finalAnswerJSONGuidance + ` Formats never replace the agenstra.decision.v1 JSON decision object.`
+const jsonDecisionDisplayGuidance = finalAnswerJSONGuidance + ` Formats never replace the decision: keep schema=agenstra.decision.v1 and kind=final for answers.`
 
 const jsonDecisionCallShapeGuidance = `calls[] keys call_ref, capability, arguments, reason are siblings. Close arguments before reason. In arguments, match input_schema; omit unrequested {} or null fields.`
 

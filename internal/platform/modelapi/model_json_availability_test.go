@@ -83,7 +83,7 @@ func TestJSONAvailabilityPreservesExistingSkillsAndMemory(t *testing.T) {
 		messages := payload["messages"].([]any)
 		got := messages[0].(agentcontract.JSON)["content"].(string)
 		if tc.decision {
-			if !strings.HasPrefix(got, tc.prompt+"\n\n") || !strings.Contains(got, "Use answer_json for requested raw JSON") {
+			if !strings.HasPrefix(got, tc.prompt+"\n\n") || !strings.Contains(got, "Use native answer_json for raw JSON") {
 				t.Fatal("decision prompt lost existing phase guidance or display boundary")
 			}
 		} else if got != tc.prompt {
@@ -99,7 +99,7 @@ func TestJSONAvailabilityPreservesExistingSkillsAndMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := payload["messages"].([]any)[0].(agentcontract.JSON)["content"].(string)
-	if !strings.HasPrefix(got, customPrompt+"\n\n") || !strings.Contains(got, "Use answer_json for requested raw JSON") {
+	if !strings.HasPrefix(got, customPrompt+"\n\n") || !strings.Contains(got, "Use native answer_json for raw JSON") {
 		t.Fatal("transport lost a custom decision prompt or display boundary")
 	}
 }

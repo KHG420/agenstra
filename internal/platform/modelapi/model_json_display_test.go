@@ -33,8 +33,8 @@ func TestJSONDecisionKeepsUserFormatsInsideFinal(t *testing.T) {
 						}
 						messages := payload["messages"].([]any)
 						prompt := messages[0].(map[string]any)["content"].(string)
-						if !strings.HasPrefix(prompt, hostRule) || !strings.Contains(prompt, "Use answer_json for requested raw JSON") ||
-							!strings.Contains(prompt, "never replace the agenstra.decision.v1 JSON decision object") {
+						if !strings.HasPrefix(prompt, hostRule) || !strings.Contains(prompt, "Use native answer_json for raw JSON") ||
+							!strings.Contains(prompt, "keep schema=agenstra.decision.v1 and kind=final") {
 							t.Error("JSON display format is not separated from the decision protocol", prompt)
 						}
 						if payload["tools"] != nil || payload["response_format"].(map[string]any)["type"] != "json_object" {

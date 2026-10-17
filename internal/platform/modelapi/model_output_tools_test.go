@@ -330,7 +330,7 @@ func TestDecisionOutputToolsKeepUserFormatsInsideFinal(t *testing.T) {
 					}
 					assertSingleDecisionOutputRequest(t, payload)
 					prompt := payload["messages"].([]any)[0].(map[string]any)["content"].(string)
-					if !strings.Contains(prompt, "Use answer_json for requested raw JSON") || !strings.Contains(prompt, "never replace the submit_decision output tool call") {
+					if !strings.Contains(prompt, "Use native answer_json for raw JSON") || !strings.Contains(prompt, "never replace the submit_decision output tool call") {
 						t.Error("requested display format was not separated from the output protocol", prompt)
 					}
 					if review && (strings.Contains(prompt, "Do not propose or execute any tool call during review.") ||

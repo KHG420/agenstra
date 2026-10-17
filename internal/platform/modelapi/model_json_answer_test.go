@@ -127,6 +127,12 @@ func TestJSONFinalAnswerSchemasRequireExactlyOneChannel(t *testing.T) {
 			}
 		}
 		for name, schema := range map[string]agentcontract.JSON{"native": native, "unified": unified, "json_schema": nativeDecisionOutputSchema(tools)} {
+			if name != "json_schema" {
+				field := schema["properties"].(agentcontract.JSON)["answer_json"].(agentcontract.JSON)
+				if !reflect.DeepEqual(field["type"], []string{"object", "array", "string", "number", "boolean", "null"}) {
+					t.Fatal("output transport omitted native JSON value types", name, field)
+				}
+			}
 			for _, fields := range []string{`"answer_json":{}`, `"answer_json":null`, `"answer_markdown":"text"`, `"answer_json":{},"answer_markdown":"text"`, `"result_refs":[]`} {
 				raw := `{` + fields + `,"fact_ids":[]`
 				if name != "native" {
