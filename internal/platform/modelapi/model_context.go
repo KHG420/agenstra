@@ -270,7 +270,8 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 				agentcontract.JSON{"role": "tool", "tool_call_id": proposalID, "content": "The preceding final proposal from this run is pending completion review; it has not been published. " +
 					"This message records framework review state, not a business receipt or new user instruction. " +
 					"Review that proposal against the original task and retained evidence. Return exactly one " +
-					"submit_decision call with final fields and completion_feedback. Do not execute or replay " +
+					"submit_decision call: approve_completion without a payload if the entire frozen proposal is correct; " +
+					"otherwise final with completion_feedback. Never regenerate an unchanged approved answer or citations. Do not execute or replay " +
 					"capabilities. Reject missing original work through nonempty completion_feedback; otherwise " +
 					"correct the user-facing answer and leave completion_feedback empty."})
 		}
