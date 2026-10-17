@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,12 +39,14 @@ func TestSDKNativeReferenceProposalsRespectRuntimeValidationAndPolicy(t *testing
 		mutate                    string
 		expired, approval, revoke bool
 		batch, single             bool
+		modelRejected             bool
 	}{
 		{name: "resolved type", value: "7", code: "capability_input_invalid"},
 		{name: "resolved conditional", value: 1, code: "capability_input_invalid"},
 		{name: "resolved minimum", value: 0, code: "capability_input_invalid"},
 		{name: "unrelated invalid literal", value: 7, mutate: "literal", code: "capability_input_invalid"},
-		{name: "unknown business property", value: 7, mutate: "extra", code: "capability_input_invalid"},
+		{name: "unknown business property", value: 7, mutate: "extra", modelRejected: true},
+		{name: "unknown business property before approval", value: 7, mutate: "extra", modelRejected: true, approval: true},
 		{name: "malformed reference", value: 7, mutate: "shape", code: "fact_reference_invalid"},
 		{name: "unknown fact", value: 7, mutate: "unknown", code: "fact_reference_not_available"},
 		{name: "invalid fact path", value: 7, mutate: "path", code: "fact_reference_path_invalid"},
@@ -90,6 +93,10 @@ func TestSDKNativeReferenceProposalsRespectRuntimeValidationAndPolicy(t *testing
 				}
 				if packet.CompletionReview != nil {
 					nativeSDKReply(t, w, "approve_completion", agenstra.JSON{})
+					return
+				}
+				if tc.modelRejected && strings.Contains(messages[0].(map[string]any)["content"].(string), "Your previous response was not a valid") {
+					nativeSDKReply(t, w, "final", agenstra.JSON{"answer_markdown": "The update was rejected.", "fact_ids": []string{packet.Facts[0].FactID}})
 					return
 				}
 				if len(packet.Facts) == 0 {
@@ -173,6 +180,12 @@ func TestSDKNativeReferenceProposalsRespectRuntimeValidationAndPolicy(t *testing
 			var state agenstra.RuntimeState
 			if err := json.Unmarshal(raw, &state); err != nil {
 				t.Fatal(err)
+			}
+			if tc.modelRejected {
+				if run.Status != "completed" || state.ModelUsage.InvalidResponses != 1 || state.ModelUsage.FormatRecoveryRequests != 1 || len(state.Observations) != 1 || len(state.Pending) != 0 {
+					t.Fatal("undeclared native parameters were not rejected before business proposal and approval", run.Status, state.ModelUsage, state.Observations, state.Pending)
+				}
+				return
 			}
 			if state.ModelUsage.InvalidResponses != 0 || state.ModelUsage.FormatRecoveryRequests != 0 {
 				t.Fatal("reference proposal was misclassified as a model format error", state.ModelUsage)

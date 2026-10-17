@@ -175,8 +175,26 @@ func nativeDecisionOutputToolBody(calls []decisionOutputToolCall, tools []any, p
 		// Evidence placeholders are not business values. The ordinary runtime
 		// resolves them from permitted Facts and validates the original schema
 		// before approval or Invoke, as it does for tool_batch arguments.
+		parameters := function["parameters"].(agentcontract.JSON)
 		if !nativeArgumentsUseReferences(fields) {
-			if detail := validateNativeDecisionOutput(raw, function["parameters"].(agentcontract.JSON)); detail != "" {
+			if detail := validateNativeDecisionOutput(raw, parameters); detail != "" {
+				return nil, detail
+			}
+		} else if parameters["additionalProperties"] == false && !(len(fields) == 1 && (fields["$fact_value"] != nil || fields["$fact_id"] != nil)) {
+			// References defer value validation, not the enclosing parameter names.
+			// Reuse the schema validator for closed objects and pattern properties;
+			// the runtime still resolves and validates every actual business value.
+			keys := agentcontract.JSON{"type": "object", "additionalProperties": false}
+			for _, keyword := range []string{"properties", "patternProperties"} {
+				if original, ok := parameters[keyword].(agentcontract.JSON); ok {
+					declared := agentcontract.JSON{}
+					for name := range original {
+						declared[name] = agentcontract.JSON{}
+					}
+					keys[keyword] = declared
+				}
+			}
+			if detail := validateNativeDecisionOutput(raw, keys); detail != "" {
 				return nil, detail
 			}
 		}
