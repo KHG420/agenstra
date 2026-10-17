@@ -21,10 +21,14 @@ const nativeReferenceBatchHint = "For a single symbolic $fact_value or $fact_id 
 const nativeReferenceBusinessHint = "For a single symbolic Fact reference argument, propose this exact capability via tool_call."
 
 // Native function names are stable request bindings, never aliases accepted from
-// a model. A suffix distinguishes routed identities with identical readable parts.
+// a model. Preserve the operation rather than truncating it behind repeated
+// routing prefixes; retain the nearest module and hash the full identity.
 func nativeCapabilityFunctionName(name string) string {
+	parts := strings.Split(name, ".")
+	operation := strings.Join(parts[max(0, len(parts)-2):], ".")
+	operation = operation[strings.LastIndex(operation, ":")+1:]
 	var readable strings.Builder
-	for _, r := range name {
+	for _, r := range operation {
 		if readable.Len() == 47 {
 			break
 		}
