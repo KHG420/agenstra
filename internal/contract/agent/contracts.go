@@ -287,6 +287,8 @@ func (e decisionDecodeError) Error() string { return "model_decision_invalid" }
 func (e decisionDecodeError) Unwrap() error { return e.cause }
 
 // StrictDecision decodes exactly one decision object and validates the decision protocol.
+// A final answer_json value is rendered into AnswerMarkdown without regenerating
+// its contents. Existing runtime validation and display limits still apply.
 func StrictDecision(raw []byte) (Decision, error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
@@ -301,7 +303,7 @@ func StrictDecision(raw []byte) (Decision, error) {
 	if _, ok := obj["schema"]; !ok {
 		d.Schema = "agenstra.decision.v1"
 	}
-	allowed := map[string]map[string]bool{"approve_completion": {"schema": true, "kind": true}, "tool_batch": {"schema": true, "kind": true, "calls": true}, "final": {"schema": true, "kind": true, "answer_markdown": true, "fact_ids": true, "result_refs": true, "completion_feedback": true}, "request_input": {"schema": true, "kind": true, "field": true, "prompt": true, "input_schema": true}, "search_capabilities": {"schema": true, "kind": true, "query": true}, "read_skill": {"schema": true, "kind": true, "name": true}, "inspect_capability": {"schema": true, "kind": true, "name": true}, "inspect_fact": {"schema": true, "kind": true, "fact_id": true, "path": true, "offset": true, "limit": true}}
+	allowed := map[string]map[string]bool{"approve_completion": {"schema": true, "kind": true}, "tool_batch": {"schema": true, "kind": true, "calls": true}, "final": {"schema": true, "kind": true, "answer_markdown": true, "answer_json": true, "fact_ids": true, "result_refs": true, "completion_feedback": true}, "request_input": {"schema": true, "kind": true, "field": true, "prompt": true, "input_schema": true}, "search_capabilities": {"schema": true, "kind": true, "query": true}, "read_skill": {"schema": true, "kind": true, "name": true}, "inspect_capability": {"schema": true, "kind": true, "name": true}, "inspect_fact": {"schema": true, "kind": true, "fact_id": true, "path": true, "offset": true, "limit": true}}
 	keys := allowed[d.Kind]
 	if keys == nil {
 		return d, errors.New("model_decision_invalid")
@@ -310,6 +312,16 @@ func StrictDecision(raw []byte) (Decision, error) {
 		if !keys[k] {
 			return d, errors.New("model_decision_invalid")
 		}
+	}
+	if value, exists := obj["answer_json"]; exists {
+		if _, conflicting := obj["answer_markdown"]; conflicting {
+			return d, errors.New("model_decision_invalid")
+		}
+		var rendered bytes.Buffer
+		if err := json.Compact(&rendered, value); err != nil {
+			return d, errors.New("model_decision_invalid")
+		}
+		d.AnswerMarkdown = rendered.String()
 	}
 	if raw, exists := obj["completion_feedback"]; exists && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return d, errors.New("model_decision_invalid")

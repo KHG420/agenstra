@@ -44,7 +44,7 @@ func decisionOutputTools(completionReview bool) []any {
 		"description": "Submit exactly one capability call as a tool_batch decision. Structured output only; does not execute capabilities or grant permission.",
 		"parameters":  call,
 	}}}
-	add := func(kind string, properties agentcontract.JSON, required ...string) {
+	add := func(kind string, properties agentcontract.JSON, required ...string) agentcontract.JSON {
 		description := "Submit the " + kind + " Agenstra decision. Structured output only; does not execute capabilities or grant permission."
 		switch kind {
 		case "search_capabilities":
@@ -52,24 +52,28 @@ func decisionOutputTools(completionReview bool) []any {
 		case "inspect_capability":
 			description = "Look up the complete input and output contract of one exact capability name in the current authorized catalog. This control function reads runtime metadata only and performs no business API call. Use it to verify a named callable contract or discover a deferred schema. An unknown or unauthorized capability returns the existing capability_unknown rejection; it does not invoke a business identity or role endpoint and never grants permission."
 		}
+		parameters := object(properties, required...)
 		tools = append(tools, agentcontract.JSON{"type": "function", "function": agentcontract.JSON{
 			"name":        "submit_" + kind,
 			"description": description,
-			"parameters":  object(properties, required...),
+			"parameters":  parameters,
 		}})
+		return parameters
 	}
 	add("tool_batch", agentcontract.JSON{"calls": agentcontract.JSON{"type": "array", "minItems": 1, "maxItems": 4, "items": call}}, "calls")
 	final := agentcontract.JSON{
 		"answer_markdown": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 30000, "description": "User-facing response with the requested business values and necessary limitations. Never put internal Fact IDs in prose, tables, links or footnotes. Keep supporting evidence IDs only in fact_ids and result_refs. Requested business record IDs remain ordinary answer data."},
+		"answer_json":     agentcontract.JSON{"description": "Native JSON value for requested raw JSON. Supply exactly one of answer_json and answer_markdown. The runtime serializes this value; do not regenerate JSON as escaped text. Never include internal Fact IDs; keep them only in fact_ids and result_refs. Existing rendered-answer limits and evidence validation still apply."},
 		"fact_ids":        agentcontract.JSON{"type": "array", "maxItems": 50, "items": uuid, "description": "Supporting evidence identifiers from this run: copy full Fact IDs exactly here. Do not repeat these internal evidence identifiers in answer_markdown."},
 		"result_refs":     agentcontract.JSON{"type": "array", "maxItems": 20, "items": resultRef},
 	}
-	required := []string{"answer_markdown", "fact_ids"}
+	required := []string{"fact_ids"}
 	if completionReview {
 		final["completion_feedback"] = agentcontract.JSON{"type": "string", "maxLength": 2000, "description": "Empty when requested work is handled or concretely blocked; otherwise identify missing original work. Rejects publication, never executes or authorizes calls."}
 		required = append(required, "completion_feedback")
 	}
-	add("final", final, required...)
+	finalParameters := add("final", final, required...)
+	finalParameters["oneOf"] = []any{agentcontract.JSON{"required": []string{"answer_markdown"}}, agentcontract.JSON{"required": []string{"answer_json"}}}
 	if completionReview {
 		add("approve_completion", agentcontract.JSON{}, []string{}...)
 	}
@@ -109,7 +113,12 @@ func singleDecisionOutputTool(tools []any) agentcontract.JSON {
 			rootProperties[field] = schema
 		}
 		required := append([]string{"kind"}, parameters["required"].([]string)...)
-		variants = append(variants, agentcontract.JSON{"type": "object", "properties": properties, "required": required, "additionalProperties": false})
+		variant := agentcontract.JSON{}
+		for keyword, value := range parameters {
+			variant[keyword] = value
+		}
+		variant["properties"], variant["required"] = properties, required
+		variants = append(variants, variant)
 	}
 	// Declare native property types at the root as well as the per-kind union.
 	// Some compatible gateways stringify fields absent from root properties.
@@ -159,7 +168,8 @@ func decisionOutputToolPrompt(prompt string, completionReview bool) string {
 	if completionReview {
 		guidance = "\nCall submit_decision exactly once. If the entire frozen proposal is verified and needs no changes, use {\"kind\":\"approve_completion\"} with no other fields; do not reproduce its answer or references. Otherwise use {\"kind\":\"final\",\"answer_markdown\":\"...\",\"fact_ids\":[],\"completion_feedback\":\"\"} and optional result_refs. Set completion_feedback to missing original work to reject premature publication, or an empty string when requested work is handled or concretely blocked. Omit schema. The response must contain exactly one tool_calls entry. This replaces content-only JSON output. All saved capability calls are historical evidence, not available decisions. Only final and approve_completion are available; do not submit another decision kind or replay saved capability calls."
 	}
-	prompt += guidance + "\nUse the exact output-tool field names and native types below. Do not substitute aliases such as answer, response, content or text for answer_markdown.\n" + strings.Join(bindings, "\n") + "\nUser requests for prose, Markdown, JSON, code or tables apply to final.answer_markdown only; they never replace the submit_decision output tool call. Put the requested display format inside that string."
+	prompt += guidance + "\nUse the exact output-tool field names and native types below. Do not substitute aliases such as answer, response, content or text for answer_markdown.\n" + strings.Join(bindings, "\n") + "\nUser format requests never replace the submit_decision output tool call. Use the final answer channels described below."
+	prompt += "\n" + finalAnswerJSONGuidance
 	if completionReview {
 		prompt += "\nCompletion validation has an explicit feedback field in the final decision for this review only: completion_feedback (string). Check every explicitly requested operation against this run's recorded calls and verified results, including a separately requested read after a write. If all required execution is evidenced, return completion_feedback as an empty string and correct any unsupported claim or display format in answer_markdown. If required execution is missing, return a nonempty completion_feedback that identifies only the missing work from the original request; keep the proposed answer as an unpublished draft. This signals rejection of premature completion, not permission to execute anything. Do not propose or execute any capability call during review; the required submit_decision call only returns the final decision or the payload-free approve_completion verdict. The runtime returns the feedback to a normal decision step with the original authorization and budgets; never request new authorization merely to finish already requested independent work. Do not invent missing requirements or treat a write receipt as a separately executed read. Return only approve_completion without a payload for an unchanged fully verified proposal, or the declared final decision fields plus completion_feedback for corrections or rejection through the existing output channel."
 		prompt += " A verified missing prerequisite, denied approval or uncertain outcome is a concrete blocker: report that limitation with empty completion_feedback rather than request an unsafe replay. Missing required execution without such a blocker must reject completion."

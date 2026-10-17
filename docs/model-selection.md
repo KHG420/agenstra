@@ -81,7 +81,13 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 写操作后的完成复核可用 `final.completion_feedback` 指出原请求中遗漏的执行步骤，拒绝发布草稿并返回普通决策循环；JSON 正文和类型化输出工具适用相同语义，不按模型名称分支。工具模式只在复核的 `final` 分支声明此字段，普通决策和记忆提取不增加字段。自定义模型可省略该可选字段；具体限制与重试、权限边界见[完成校验](completion-evaluation.md)。
 
-`output_tools` 的提示同时区分用户要求的展示格式与决策协议：用户需要的 JSON、代码块、表格或普通文字放在 `final.answer_markdown` 字符串中，普通决策和完成复核仍通过 `submit_decision` 输出。缺少输出工具的普通消息继续被拒绝，不把其中的 JSON 或文字自动转成决策；提示本身不能保证网关或模型遵守协议。
+所有四种输出模式的 `final` 均支持二选一的答案字段：普通文字、Markdown、代码块和表格继续使用 `answer_markdown`；用户要求原始 JSON 时，使用 `answer_json` 直接提交 JSON 值，例如 `{"schema":"agenstra.decision.v1","kind":"final","answer_json":{"count":0,"missing":null,"enabled":false},"fact_ids":[]}`。`output_tools` 的 `submit_decision` 参数省略 `schema`；`native_tools` 的 `final` 参数同时省略 `schema` 和 `kind`。正文 JSON 仍需完整决策封装，业务 JSON 本身不能代替决策。
+
+`answer_json` 支持对象、数组、字符串、数字、布尔值和 `null`，与 `answer_markdown` 严格互斥；两个字段同时出现时，即使其中一个为空或 `null` 也拒绝。Schema 与本地解析器共同校验答案通道，不接受未知别名，不修补坏 JSON，也不把字符串中的 JSON 自动解释为原生值。合法的原生 JSON 使用标准序列化生成既有 `AnswerMarkdown`／`answer_markdown` 显示字符串，保留大整数、小数字面量、`0`、`false` 和 `null`，避免要求模型再生成一层转义字符串。显示文本中的对象键顺序和空白不属于业务语义。
+
+该字段属于模型决策输出协议；Go `Decision`、HTTP 运行结果、持久状态及 Web 聊天接线沿用现有答案字段。序列化后的文本仍受 30,000 字符上限、Fact 引用、内部 Fact ID 过滤、结果引用、完成复核和宿主 `CompletionValidator` 约束；JSON 语法合法不代表业务值正确。完成复核的 `final` 仍须提供字符串 `completion_feedback`，确认整个冻结草稿正确时仍可使用无载荷的 `approve_completion`。原生值输出的取舍参考 [Pydantic AI 的结构化输出类型与参数校验](https://github.com/pydantic/pydantic-ai/blob/main/docs/output.md)，沿用本框架的原执行和预算路径。
+
+`output_tools` 的普通决策和完成复核仍通过 `submit_decision` 输出。用户要求的展示格式不能替代输出工具；缺少输出工具的普通消息继续被拒绝，不把其中的 JSON 或文字自动转成决策。
 
 输出函数名必须与当前请求声明的 `submit_decision` 完全一致；参数中的 `kind` 也必须属于该请求实际声明的决策联合。没有技能时返回 `read_skill`、没有搜索功能时返回 `search_capabilities`，或在完成复核阶段返回非 `final`，均在模型适配器内按格式错误拒绝，不交给运行内核尝试。`submit_final`、`submit_tool_batch` 等未声明名称即使携带有效参数也会被拒绝，不转换为决策或派发业务调用；拒绝仍保留模型用量，并沿用原有的有界格式纠正与预算。这与 Pydantic AI 按当轮可用工具名查找、再校验输出参数的方式一致（[固定版本源码](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/tool_manager.py)）。
 
