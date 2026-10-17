@@ -47,7 +47,7 @@ func (m *HTTPJSONDecisionModel) measurePayload(raw []byte) (agentcontract.InputM
 	return agentcontract.InputMeasurement{Tokens: int64(len(raw) + 128), Source: "utf8_bytes_estimate"}, nil
 }
 
-const finalAnswerJSONGuidance = `Use answer_json for requested raw JSON as a native value; otherwise answer_markdown for text, code or tables. Require exactly one answer field plus fact_ids. Internal evidence IDs stay in fact_ids/result_refs.`
+const finalAnswerJSONGuidance = `Use answer_json for requested raw JSON as a native value even if task names answer_markdown. For text/code/tables use answer_markdown. Exactly one answer plus fact_ids; evidence IDs only in fact_ids/result_refs.`
 
 const jsonDecisionDisplayGuidance = finalAnswerJSONGuidance + ` Formats never replace the agenstra.decision.v1 JSON decision object.`
 
