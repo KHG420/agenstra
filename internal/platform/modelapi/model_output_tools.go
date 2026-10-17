@@ -26,8 +26,9 @@ func decisionOutputTools(completionReview bool) []any {
 	call := object(agentcontract.JSON{
 		"call_ref":   agentcontract.JSON{"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$", "description": "Optional local label; the adapter assigns the actual fresh call reference."},
 		"capability": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 330},
-		"arguments":  agentcontract.JSON{"type": "object", "additionalProperties": true},
-		"reason":     agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 500},
+		"arguments": agentcontract.JSON{"type": "object", "additionalProperties": true,
+			"description": "The exact input object for the selected capability. Follow that capability's input_schema, including required properties and additionalProperties. Never add undeclared fields, even as empty objects. Do not add unrequested optional fields or empty wrappers to an exact user-supplied argument object; replace only the requested Fact references."},
+		"reason": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 500},
 	}, "capability", "arguments", "reason")
 	resultPath := agentcontract.JSON{"type": "array", "minItems": 1, "maxItems": 16, "items": path["items"]}
 	resultRef := object(agentcontract.JSON{

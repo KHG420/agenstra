@@ -61,6 +61,8 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 可选 `decision_output_mode` 选择业务决策输出：省略或 `json_object` 保持现有 JSON 内容；`output_tools` 提供一个类型化输出函数 `submit_decision`，通过明确的 `tool_choice` 选择该函数，并设置 `parallel_tool_calls=false`。参数形如 `{"kind":"final","answer_markdown":"...","fact_ids":[]}`；参数在根部声明原生字段类型，并用带固定 `kind` 的对象联合约束每种决策，各决策保留原有字段和类型约束。模型不能设置 `schema`；适配器校验决策种类和调用引用后，赋予固定 `schema`，继续使用原有 `agenstra.decision.v1` 校验。此设置不影响记忆提取。仅对已实测支持该协议的网关启用；接受参数不等于网关严格执行 Schema。未知或多个输出工具、错误类型、重复键和不匹配的决策均被拒绝，仍使用原有本地校验、授权与预算。工具定义和输出提示计入实际请求预算。不会从普通文字中提取或修复 JSON，也不会自动改用另一种输出方式掩盖异常。已有任务继续使用创建时冻结的模型配置。
 
+业务提案的 `arguments` 字段说明要求按所选能力的输入契约构造对象：未声明字段即使为空对象也不能添加；用户明确给出完整参数时，保留字段集合与值，只替换要求使用的 Fact 引用。这项说明同时用于输出工具和原生工具的符号提案；开放的提案对象仍须在引用解析后通过原能力契约校验，框架不删除多余字段或补默认值。参数说明随工具 Schema 发送的方式参考 [Pydantic AI 的函数参数描述生成](https://github.com/pydantic/pydantic-ai/blob/v1.0.0/pydantic_ai_slim/pydantic_ai/_function_schema.py)。说明用于减少模型误构造参数，不能代替本地校验或保证模型每次遵守。
+
 `decision_output_mode: "json_schema"` 使用原生 JSON Schema 正文输出：请求的 `response_format.type` 为 `json_schema`，不声明输出工具。Schema 沿用当前可用决策的字段和 `kind` 联合，要求固定 `schema: "agenstra.decision.v1"`；普通业务调用仍须提供合法且未复用的 `call_ref`，完成复核只允许 `final` 并要求 `completion_feedback`。无技能或未启用搜索时不声明相应决策。Schema、提示和历史证据全部计入实际输入测量与预算。
 
 原生模式显式使用 `strict: false`，因为决策含有可选字段及开放的宿主业务参数，不满足部分供应商 strict 模式要求的封闭对象约束。仅为实测支持这份 JSON Schema 的网关选择此模式；接受请求不等于供应商强制执行全部约束。框架仍对完整 JSON、重复键、请求所声明的 Schema 和原有 Decision 契约逐层校验，再由运行内核核对业务参数、权限、审批与调用证据。普通业务 JSON、未声明决策、缺少复核反馈和意外的工具调用均被拒绝；不自动包装、补字段或切换传输方式。原有默认模式和已创建任务的冻结配置保持原行为，记忆提取继续使用其原 JSON 契约。这项通道区分及本地校验参考 [Pydantic AI 的 native、prompted 与 tool 输出](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_output.py#L736-L780)。网关协议探针通过后仍需完整真实任务验收。
