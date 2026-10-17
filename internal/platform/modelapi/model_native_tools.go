@@ -258,5 +258,6 @@ func nativeDecisionToolPrompt(prompt string, review bool) string {
 		prompt += " " + nativeReferenceProposalPrompt + " For tool_call, use the exact capability ID in capability, preserve the business parameter structure in arguments, and include a reason. For tool_batch, each calls entry has those same fields. Respect explicit requests to perform calls separately even when their inputs are independent."
 		prompt += " When the user requests an input value through an evidence reference, or names a prior result as that input's source, use $fact_value with that exact observed Fact and path. A matching literal, including a value already present in the task, does not satisfy a requested input reference. Preserve the requested input source even when the same business value appears in another Fact. Final-answer citations alone do not require replacing ordinary literal inputs."
 	}
+	prompt += "\nUse the exact parameter property names from the selected function schema. Do not invent aliases or wrapping properties absent from that schema. Preserve native JSON types: arrays and objects are not strings. For final, answer_markdown is a string and fact_ids is a native array, including [] when there are no supporting Facts."
 	return prompt
 }
