@@ -133,6 +133,51 @@ func TestHostAuthManagedBrowserBindings(t *testing.T) {
 			if backend != "" && !policy.GrantedCapabilities["records.get"] {
 				t.Fatal("backend grants lost")
 			}
+			delegated := binding
+			delegated.Delegations = map[string][]string{"remote": {"records.get"}}
+			out := call("PUT", path, admin, delegated)
+			if backend != "" {
+				if out.Code != 422 {
+					t.Fatal("combined browser alias accepted business-connection delegation", out.Code)
+				}
+			} else {
+				if out.Code != 200 {
+					t.Fatal("frontend-only origin cannot save source delegation", out.Code, out.Body.String())
+				}
+				targetGranted, targetVerified := true, true
+				sources := []agentcontract.RunSource{{PackID: "remote", Capabilities: []string{"records.get"}}}
+				selector := durablehost.NewAgentHost(testStore(t), d.ProviderFactory, &hostModel{}, func(ctx context.Context, owner, pack string) (agentcontract.ExecutionPolicy, error) {
+					if owner == "alice" && pack == "remote" {
+						return agentcontract.ExecutionPolicy{AllowModelData: true, Subject: "remote-alice", PermissionsVerified: targetVerified,
+							GrantedCapabilities: map[string]bool{"records.get": targetGranted, "admin.read": true}}, nil
+					}
+					return h.PolicyResolver(ctx, owner, pack)
+				})
+				if selected, err := selector.BindSources(t.Context(), "alice", "browser-app", sources); err != nil || len(selected) != 1 || selected[0].Subject != "remote-alice" {
+					t.Fatal("managed origin delegation was not available to source binding", selected, err)
+				}
+				if _, err := selector.BindSources(t.Context(), "alice", "browser-app", []agentcontract.RunSource{{PackID: "remote", Capabilities: []string{"admin.read"}}}); agentcontract.ErrorCode(err) != "capability_not_granted" {
+					t.Fatal("source selection exceeded the managed delegation", err)
+				}
+				if _, err := selector.BindSources(t.Context(), "bob", "browser-app", sources); agentcontract.ErrorCode(err) != "access_denied" {
+					t.Fatal("another owner inherited source delegation", err)
+				}
+				targetGranted = false
+				if _, err := selector.BindSources(t.Context(), "alice", "browser-app", sources); agentcontract.ErrorCode(err) != "capability_not_granted" {
+					t.Fatal("origin delegation bypassed revoked target permission", err)
+				}
+				targetGranted, targetVerified = true, false
+				if _, err := selector.BindSources(t.Context(), "alice", "browser-app", sources); agentcontract.ErrorCode(err) != "identity_unverified" {
+					t.Fatal("origin delegation bypassed target identity verification", err)
+				}
+				targetVerified = true
+				if out := call("PUT", path, admin, binding); out.Code != 200 {
+					t.Fatal("clearing managed delegation failed", out.Code)
+				}
+				if _, err := selector.BindSources(t.Context(), "alice", "browser-app", sources); agentcontract.ErrorCode(err) != "capability_not_granted" {
+					t.Fatal("source delegation revocation was not enforced", err)
+				}
+			}
 			if backend != "" {
 				business := agentcontract.ConnectionConfig{Environment: map[string]string{"RECORDS_URL": "RECORDS_URL"}, GrantedCapabilities: []string{"records.get"}, AllowModelData: false}
 				if out := call("PUT", "/admin/api/bindings/alice/records", admin, business); out.Code != 200 {

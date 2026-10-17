@@ -78,6 +78,8 @@ REST v2 清单的 `token_env` 必须通过 `environment` 映射到 `identity.tok
 {"delegations": {"location": ["location.current"], "weather": ["weather.query"]}}
 ```
 
+纯前端集成本身就是发起项目，开发者可通过其管理绑定设置 `delegations`；浏览器用户票据不能修改这些配置。该绑定仍不接受后端凭据、环境映射或身份查询设置。组合集成的浏览器别名继续使用关联业务连接的委派配置。保存委派不会授予目标权限；选择和执行来源仍检查目标连接、可信身份、本次范围和实时撤权。
+
 跨项目有效授权是四者交集：
 
 ```text

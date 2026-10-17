@@ -207,9 +207,10 @@ func (w *WebIntegration) Close() error { return w.Store.Close() }
 
 func (w *WebIntegration) putBrowserBinding(owner, integration string, c agentcontract.ConnectionConfig) error {
 
-	// Browser handlers run in the authenticated host page. Backend credentials
-	// and identity/delegation settings belong to the separate business binding.
-	if len(c.Environment) != 0 || len(c.BindingEnvironment) != 0 || c.Identity != nil || len(c.Delegations) != 0 {
+	// Browser handlers never own backend credentials or identity settings. A
+	// frontend-only integration is its own delegation origin; combined aliases
+	// continue to use the associated business connection's delegations.
+	if len(c.Environment) != 0 || len(c.BindingEnvironment) != 0 || c.Identity != nil || (len(c.Delegations) != 0 && w.Config.Integrations[integration].PackID != "") {
 		return agentcontract.NewRegistryError("invalid_browser_binding")
 	}
 	names := map[string]bool{"ui.get_context": true, "ui.command_status": true}
