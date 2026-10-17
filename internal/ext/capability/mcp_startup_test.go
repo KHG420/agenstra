@@ -56,7 +56,10 @@ func TestMCPStdioStartupRespectsSourceTimeout(t *testing.T) {
 		t.Run(stage, func(t *testing.T) {
 			pidFile := t.TempDir() + "/pid"
 			tool := mcpStartupTool()
-			manifest := agentcontract.JSON{"schema": "agenstra.mcp-pack.v1", "name": "records", "version": "1", "guidance": "Read records", "source": agentcontract.JSON{"transport": "stdio", "command": os.Args[0], "args": []any{"-test.run=^TestMCPStdioStartupRespectsSourceTimeout$"}, "environment": agentcontract.JSON{"AGENSTRA_MCP_STARTUP_HELPER": "HELPER_MODE", "AGENSTRA_MCP_STARTUP_PID": "HELPER_PID"}, "timeout_seconds": 0.25}, "tools": []any{agentcontract.JSON{"name": tool["name"], "effect": "read", "contract_sha256": MCPContractDigest(tool)}}}
+			// A race-instrumented helper can take more than 250ms to enter its
+			// test under package-level load. Keep the source timeout below both
+			// the unchanged 2s elapsed bound and the 3s parent deadline.
+			manifest := agentcontract.JSON{"schema": "agenstra.mcp-pack.v1", "name": "records", "version": "1", "guidance": "Read records", "source": agentcontract.JSON{"transport": "stdio", "command": os.Args[0], "args": []any{"-test.run=^TestMCPStdioStartupRespectsSourceTimeout$"}, "environment": agentcontract.JSON{"AGENSTRA_MCP_STARTUP_HELPER": "HELPER_MODE", "AGENSTRA_MCP_STARTUP_PID": "HELPER_PID"}, "timeout_seconds": 1}, "tools": []any{agentcontract.JSON{"name": tool["name"], "effect": "read", "contract_sha256": MCPContractDigest(tool)}}}
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 			start := time.Now()
