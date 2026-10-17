@@ -121,6 +121,8 @@ HTTP 模型适配器将已有的 `capability_search_query` 和 `capability_searc
 
 核对未知结果后，当前上下文和进度按稳定 `call_ref` 保留最新观察；同一调用的旧受理记录不会作为另一项动作展示。只有已验证的核对 Fact 同时匹配原命令 ID 和轮询能力时，才省略它所替代的旧轮询。其他调用、不同来源或未验证的结果不会互相替代。诊断接口从完整的已保存 Fact 恢复进度，沿用模型上下文的证据投影。原始观察与 Fact 历史保持不变，授权、审批及重放规则沿用原路径。稳定标识的更新取舍参考 [LangGraph 的 `add_messages`](https://github.com/langchain-ai/langgraph/blob/40a2e6d845054cc0cc17a6a169ca6e7394e5231c/libs/langgraph/langgraph/graph/message.py)；Agenstra 将其用于当前证据投影，不覆盖已保存的历史。
 
+进度的 `completed` 最多保留 8 项。先沿用每项能力最近结果的覆盖范围，剩余位置保留最近的其他已完成调用，最终按观察顺序展示；同一能力的不同 `call_ref` 不再全部合并。`completed_count` 统计全部已完成调用，未放入这 8 项的完成记录计入 `omitted_items`。这保留较早能力的结果，又能区分同一能力的多次读取或写入；现有身份、证据可见性和上下文预算仍然生效，不恢复已省略的参数或增加业务调用。
+
 初始系统提示明确 `search_capabilities` 与 `read_skill`、`inspect_capability`、`inspect_fact` 均为独立框架决策，不能放入 `tool_batch.calls[].capability`；后者只填写授权目录中的确切业务能力名。搜索需要相应 runtime feature，单独决策并等待返回目录后再选业务调用。这与 [FastMCP 的工具目录](https://gofastmcp.com/servers/tools)只将显式注册函数作为可执行工具的边界一致；提示不能保证模型遵守，也不会把非法调用转换为合法决策。
 
 模型判断工具是否可用时，以当前授权目录和已检查的契约为依据；业务账号的角色不代表工具授权，不能仅为探测权限而调用身份、资料或无关业务接口，尤其不能违反用户排除额外业务调用的要求。所需能力可能暂未进入可见目录时，仍使用现有能力搜索和契约检查。这沿用 [Pydantic AI 的 FilteredToolset](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/toolsets/filtered.py) 根据可信运行上下文筛选实际工具的边界；Agenstra 在已有提示中解释这个边界，实际授权、审批和宿主权限校验保持生效。该说明不替代用户明确请求的身份查询，也不保证模型不再发出无关调用。

@@ -122,9 +122,10 @@ func RunProgress(state *agentcontract.RuntimeState, limit int) *agentcontract.Ru
 		latest[obs.CallRef] = i
 	}
 
-	// Keep the last successful result of each capability so a busy recent tool
-	// does not crowd earlier work out of the observation window.
-	completed := map[string]agentcontract.ProgressItem{}
+	// Reserve a result for each capability so a busy recent tool does not crowd
+	// earlier work out. Remaining slots retain distinct completed calls in order.
+	completed := []agentcontract.ProgressItem{}
+	latestCompleted := map[string]int{}
 	blocked := map[string]agentcontract.ProgressItem{}
 	for i, obs := range observations {
 		if latest[obs.CallRef] != i || active[obs.CallRef] {
@@ -133,7 +134,8 @@ func RunProgress(state *agentcontract.RuntimeState, limit int) *agentcontract.Ru
 		item := agentcontract.ProgressItem{Capability: obs.Capability, CallRef: obs.CallRef, Status: obs.Status, FactID: obs.FactID, ErrorCode: obs.ErrorCode}
 		if obs.Status == "succeeded" {
 			view.CompletedCount++
-			completed[obs.Capability] = item
+			latestCompleted[obs.Capability] = len(completed)
+			completed = append(completed, item)
 			delete(blocked, obs.Capability)
 		} else {
 			view.BlockedCount++
@@ -149,7 +151,24 @@ func RunProgress(state *agentcontract.RuntimeState, limit int) *agentcontract.Ru
 		view.OmittedItems += max(0, len(out)-8)
 		return out[:min(8, len(out))]
 	}
-	view.Completed = project(completed)
+	names := make([]string, 0, len(latestCompleted))
+	for name := range latestCompleted {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	selected := map[int]bool{}
+	for _, name := range names[:min(8, len(names))] {
+		selected[latestCompleted[name]] = true
+	}
+	for i := len(completed) - 1; i >= 0 && len(selected) < 8; i-- {
+		selected[i] = true
+	}
+	for i, item := range completed {
+		if selected[i] {
+			view.Completed = append(view.Completed, item)
+		}
+	}
+	view.OmittedItems += len(completed) - len(view.Completed)
 	view.Blocked = project(blocked)
 	return view
 }

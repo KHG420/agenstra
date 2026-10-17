@@ -25,7 +25,7 @@ func TestProgressRetainsEarlierOutcomesAndPendingIsUnfinished(t *testing.T) {
 	Reject(state, "blocked", "missing.read", "capability_not_granted", nil, "")
 	r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{}}}
 	packet := r.Context(state)
-	if packet.Progress.CompletedCount != 20 || len(packet.Progress.Completed) != 2 || packet.Progress.Completed[0].Capability != "earlier.compute" || len(packet.Progress.Pending) != 1 || packet.Progress.BlockedCount != 1 {
+	if packet.Progress.CompletedCount != 20 || len(packet.Progress.Completed) != 8 || packet.Progress.Completed[0].Capability != "earlier.compute" || packet.Progress.OmittedItems != 12 || len(packet.Progress.Pending) != 1 || packet.Progress.BlockedCount != 1 {
 		t.Fatalf("%+v", packet.Progress)
 	}
 	if packet.Observations[0].Capability == "earlier.compute" {
