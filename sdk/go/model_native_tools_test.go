@@ -135,22 +135,28 @@ func testNativeSDKReferenceExecution(t *testing.T, native, durable bool) {
 				savedCalls++
 				call := message["tool_calls"].([]any)[0].(map[string]any)
 				function := call["function"].(map[string]any)
-				if function["name"] != "tool_batch" {
-					t.Error("saved unresolved call was encoded against a literal-only function", function["name"])
+				if function["name"] != "tool_call" {
+					t.Error("single saved unresolved call did not use its declared proposal function", function["name"])
 				}
 				var arguments agenstra.JSON
 				if json.Unmarshal([]byte(function["arguments"].(string)), &arguments) != nil {
 					t.Error("saved proposal arguments are invalid")
 					continue
 				}
-				entries, ok := arguments["calls"].([]any)
-				if !ok || len(entries) != 1 || entries[0].(map[string]any)["capability"] != "inventory.set" {
+				if len(arguments) != 3 || arguments["capability"] != "inventory.set" {
 					t.Error("saved reference proposal lost its original capability", arguments)
 					continue
 				}
+				wantReason := "Use the observed inventory ID"
+				if native {
+					wantReason = "Invoke declared capability inventory.set"
+				}
+				if arguments["reason"] != wantReason {
+					t.Error("saved reference proposal lost its original reason", arguments)
+				}
 				original := agenstra.JSON{"id": agenstra.JSON{"$fact_value": agenstra.JSON{"fact_id": packet.Facts[0].FactID, "path": []any{"data", "id"}}}, "enabled": true}
 				want, wantErr := agenstra.CanonicalJSON(original)
-				got, gotErr := agenstra.CanonicalJSON(entries[0].(map[string]any)["arguments"])
+				got, gotErr := agenstra.CanonicalJSON(arguments["arguments"])
 				if wantErr != nil || gotErr != nil || string(got) != string(want) {
 					t.Error("saved assistant history replaced the original reference", arguments, wantErr, gotErr)
 				}

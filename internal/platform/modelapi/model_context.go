@@ -214,8 +214,9 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 					if agentcontract.ValidateSchema(contract, last.Arguments) != nil {
 						// Recorded unresolved arguments belong to the proposal channel,
 						// whose result still preserves the actual attempted outcome.
-						functionName = "tool_batch"
-						parameters = agentcontract.JSON{"calls": []any{agentcontract.JSON{"capability": last.Capability, "arguments": last.Arguments, "reason": reason}}}
+						// One saved observation is one proposal, matching current guidance.
+						functionName = "tool_call"
+						parameters = agentcontract.JSON{"capability": last.Capability, "arguments": last.Arguments, "reason": reason}
 					}
 				}
 				arguments, err := agentcontract.CanonicalJSON(parameters)
