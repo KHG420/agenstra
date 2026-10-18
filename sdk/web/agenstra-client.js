@@ -274,7 +274,7 @@ export class AgenstraClient {
     if (schedule && !this.closed && epoch === this.browserEpoch && !this.recoveryPromise) this.browserTimer = setTimeout(() => this.pollBrowser(), this.options.pollInterval || 1000);
   }
   async executeCommand(command) {
-    if (this.executing) return;
+    if (this.closed || this.executing) return;
     const cached = this.receipts[command.id];
     if (cached) {
       try { await this.flushReceipts(); } catch (error) { this.emit("error", error); }
@@ -288,11 +288,14 @@ export class AgenstraClient {
       const receipt = { command, status: "starting" };
       this.receipts[command.id] = receipt; this.save("receipts", this.receipts);
       await this.observationChain;
+      if (this.closed) throw new AgenstraError("client_closed");
       // Observe page changes before claiming an action against a page revision.
       if (this.options.getPageObservation) {
         const latest = await this.options.getPageObservation();
+        if (this.closed) throw new AgenstraError("client_closed");
         if (JSON.stringify(latest) !== JSON.stringify(this.pageObservation)) await this.updatePageObservation(latest);
       }
+      if (this.closed) throw new AgenstraError("client_closed");
       beginRequested = true;
       const begun = await this.request("/browser/v1/commands/" + command.id + "/begin", { method: "POST", browserKey: this.browser.key, body: { generation: command.generation } });
       if (!begun.accepted) {
@@ -300,11 +303,13 @@ export class AgenstraClient {
       }
       receipt.status = "running"; this.save("receipts", this.receipts);
       this.emit("action", { command, status: "running" });
+      if (this.closed) throw new AgenstraError("client_closed");
       const handler = this.actions.get(command.action);
       if (!handler) throw new AgenstraError("browser_handler_unavailable");
       const result = structuredClone((await handler(structuredClone(command.arguments), { commandId: command.id, runId: command.run_id })) ?? {});
       receipt.status = "succeeded"; receipt.result = result;
       this.save("receipts", this.receipts);
+      if (this.closed) return;
       try {
         const latest = this.options.getPageObservation ? await this.options.getPageObservation() : (this.pendingPageObservation ?? this.pageObservation);
         if (JSON.stringify(latest) !== JSON.stringify(this.pageObservation)) await this.updatePageObservation(latest);

@@ -85,6 +85,7 @@ export class AgenstraClient {
   reconcileInvocation(id: string, invocation: JSONObject, revision: number): Promise<Run>;
   run(instruction: string, options?: { requestId?: string; sources?: RunSource[] }): Promise<Run>;
   /** Stops local work. By default also attempts to permanently close the browser session.
+   * Does not start pending handlers; already invoked handlers retain their actual outcomes.
    * Use closeSession: false on route unmount to retain its stored binding for reconnect.
    * Keeps the stored binding when the server has not confirmed closure.
    */

@@ -249,6 +249,8 @@ SDK 只把服务端成功确认的上传快照作为已同步页面状态；上�
 
 handler 只有在能证明没有提交业务副作用时，才能抛出 SDK 导出的 `AgenstraActionError(code, message)`，例如执行前权限/版本检查失败，或原后端明确拒绝请求。SDK 将它记录为 `failed`；普通异常仍为 `unknown`。不要把网络超时、连接中断或未知服务端错误包装成确定失败。只读查询出错可报告确定失败。业务已保存之后的显示失败应通过原业务查询和回执恢复处理，不能重发写命令。页面更新和装饰动画需要有界等待，后台窗口可能暂停 `requestAnimationFrame`，不能靠它作为业务完成的唯一证据。
 
+`destroy()` 后，SDK 不再启动尚未调用的 handler。命令执行路径在页面观察、begin 响应等异步步骤返回后，以及 `running` 事件通知后，都会重新核对客户端是否已关闭，避免宿主切换账号或卸载时旧命令继续调用当前页面的业务函数。尚未发送 begin 的本地起始记录可清除；已认领命令仍保留不确定回执。关闭前已经进入的 handler 无法据此撤销，完成后仍保存其真实结果，不再为该命令读取页面观察，沿用原回执核对流程。
+
 SDK 的 `id()` 在没有 `crypto.randomUUID` 的 HTTP 页面使用 `crypto.getRandomValues` 生成 UUID。这只保证稳定请求标识；生产身份和传输保护仍由宿主现有部署承担。
 
 仅聊天省略 browser、handlerVersion、getPageObservation 和注册动作。仅控制桥用 `await client.run(instruction, {requestId})`，再以 `getRun()` 读取状态。聊天 UI 使用 `watchConversation`、`send`、`supplyInput`、`approve`、`cancelMessage`，自行渲染补充输入、精确审批参数和取消按钮。发送失败后在原会话保留原 `clientId` 重试；SDK 错误附带 clientId，不要换 ID 自动重发同一操作，也不要把重试移到另一个会话。
