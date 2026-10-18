@@ -2,6 +2,8 @@ package modelapi
 
 import (
 	"context"
+	"encoding/json"
+	"maps"
 
 	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
@@ -76,12 +78,41 @@ func invalidModelSchema(ctx context.Context, body []byte, schema agentcontract.J
 	return invalid
 }
 
+// decisionDiagnosticSchema is only used after a generated protocol schema has
+// rejected the output. Keep root constraints and report the declared kind's
+// missing fields instead of spending the bounded feedback on unrelated kinds.
+func decisionDiagnosticSchema(body []byte, schema agentcontract.JSON) agentcontract.JSON {
+	var decision struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(body, &decision); err != nil || decision.Kind == "" {
+		return schema
+	}
+	variants, _ := schema["anyOf"].([]any)
+	for _, value := range variants {
+		variant, _ := value.(agentcontract.JSON)
+		properties, _ := variant["properties"].(agentcontract.JSON)
+		kind, _ := properties["kind"].(agentcontract.JSON)
+		if kind["const"] == decision.Kind {
+			narrowed := maps.Clone(schema)
+			narrowed["anyOf"] = []any{variant}
+			return narrowed
+		}
+	}
+	return schema
+}
+
 func invalidModelToolSchema(ctx context.Context, calls []decisionOutputToolCall, tools []any) error {
 	if len(calls) == 1 && calls[0].Type == "function" {
 		for _, tool := range tools {
 			function := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)
 			if function["name"] == calls[0].Function.Name {
-				return invalidModelSchema(ctx, []byte(calls[0].Function.Arguments), function["parameters"].(agentcontract.JSON))
+				body := []byte(calls[0].Function.Arguments)
+				parameters := function["parameters"].(agentcontract.JSON)
+				if function["name"] == "submit_decision" {
+					parameters = decisionDiagnosticSchema(body, parameters)
+				}
+				return invalidModelSchema(ctx, body, parameters)
 			}
 		}
 	}
