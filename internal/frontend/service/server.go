@@ -315,7 +315,12 @@ func (s *HTTPServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	owner, e := s.owner(r)
 	if e != nil {
-		apiError(w, 401, "unauthorized", true)
+		var authentication *agentcontract.DeploymentError
+		if errors.As(e, &authentication) && authentication.Code == "authorization_unavailable" {
+			apiError(w, http.StatusServiceUnavailable, authentication.Code, true)
+		} else {
+			apiError(w, http.StatusUnauthorized, "unauthorized", true)
+		}
 		return
 	}
 	if p == "/memories" || strings.HasPrefix(p, "/memories/") {

@@ -104,7 +104,12 @@ func (s *HTTPServer) webHTTP(w http.ResponseWriter, r *http.Request) {
 			owner, e = s.owner(r)
 		}
 		if e != nil || owner == "" {
-			apiError(w, 401, "unauthorized", false)
+			var authentication *agentcontract.DeploymentError
+			if errors.As(e, &authentication) && authentication.Code == "authorization_unavailable" {
+				apiError(w, http.StatusServiceUnavailable, authentication.Code, false)
+			} else {
+				apiError(w, http.StatusUnauthorized, "unauthorized", false)
+			}
 			return
 		}
 		token, e := integration.MintSession(owner)

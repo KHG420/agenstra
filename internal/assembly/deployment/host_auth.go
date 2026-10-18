@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -89,18 +90,24 @@ func (d *Deployment) authenticateHost(ctx context.Context, token string) (string
 	safeClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := safeClient.Do(req)
 	if err != nil {
-		return deny()
+		return "", fmt.Errorf("%w: %w", DeploymentError("authorization_unavailable"), err)
 	}
 	defer func() {
 		if err := response.Body.Close(); err != nil {
 			log.Print("HTTP response cleanup failed")
 		}
 	}()
+	if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError {
+		return "", DeploymentError("authorization_unavailable")
+	}
 	if response.StatusCode != http.StatusOK {
 		return deny()
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
-	if err != nil || len(raw) > 1<<20 {
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", DeploymentError("authorization_unavailable"), err)
+	}
+	if len(raw) > 1<<20 {
 		return deny()
 	}
 	var body map[string]any
