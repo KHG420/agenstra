@@ -357,6 +357,9 @@ func (w *WebIntegration) enqueue(owner string, b agentcontract.WebRunBinding, id
 		if agentcontract.ErrorCode(existing) != "not_found" {
 			return existing
 		}
+		if !browserNumbersRoundTrip(args) {
+			return agentcontract.NewHostError("browser_argument_number_unsupported")
+		}
 		var raw string
 		if e := tx.QueryRow("SELECT payload FROM web_bindings WHERE run=? AND owner=?", b.RunID, owner).Scan(&raw); e != nil {
 			return e
@@ -519,6 +522,11 @@ func (w *WebIntegration) BeginBrowserCommand(ctx context.Context, owner, id, key
 			if c.ContextRevision != s.ContextRevision {
 				c.Status = "failed"
 				c.ErrorCode = "browser_context_changed"
+			} else if !browserNumbersRoundTrip(c.Arguments) {
+				// Previously persisted commands must not execute against a rounded
+				// object ID after upgrade; already running outcomes stay untouched.
+				c.Status = "failed"
+				c.ErrorCode = "browser_argument_number_unsupported"
 			} else {
 				c.Status = "running"
 				accepted = true

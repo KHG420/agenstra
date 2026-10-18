@@ -279,6 +279,10 @@ SDK 的 `id()` 在没有 `crypto.randomUUID` 的 HTTP 页面使用 `crypto.getRa
 
 浏览器动作与 `ui.command_status` 使用既有 `model_output` 投影：模型可读取回执的 `status`、`result` 和 `error_code`，框架的外层 `command_id` 留在完整回执中供自动轮询、恢复和核对使用，不通过 Fact 预览、检查或参数引用暴露。宿主声明的 `result` 完整保留，包括同名的业务 `command_id`、业务 UUID、`null`、`false` 和零值。执行状态用于判断成功、失败或结果不确定；最终回答按用户要求选取宿主契约中的业务字段，不能把整个命令封套代替业务值。宿主若自行封装响应，应在能力说明中明确业务数据的路径与执行元数据的含义；框架不会按字段名称猜测或自动扁平化宿主结果。完整持久回执和浏览器 HTTP 接口保持原有结构。
 
+浏览器动作参数须能通过 JavaScript 的 binary64 数值解析保留相同的十进制值。例如 `9007199254740993` 会被解析成另一个整数，框架在创建命令前返回 `browser_argument_number_unsupported`，不会投递处理器；已有但尚未开始的命令也在 begin 时重新检查。检查递归覆盖对象和数组，保留可正确往返的普通小数、科学计数值和大数，不把数值静默转换成字符串。已经运行、结果不确定或完成的历史命令仍保留原有执行语义。
+
+宿主需要通过浏览器传递这类精确 ID 时，应在业务契约允许的情况下使用字符串；模型不得四舍五入、截断或替换 ID 绕过错误。已有契约只允许数值时，可使用已授权且支持精确数值的后端能力，或如实说明浏览器路径的限制。REST 与 Go 接入继续保留原有精确 JSON 数值支持；框架不能恢复宿主代码在交出参数前已经丢失的精度。
+
 业务对象引用接受非空字符串和整数值。字符串 ID 保留原文；保留为 JSON 数字的整数按精确数值生成十进制 ID，例如 `42.0` 和 `4.2e1` 都解析为 `"42"`，精确大整数不会先转成浮点数。非整数值（如 `1.5`）被拒绝，解析后的 ID 仍受 256 字节上限约束。已经以 `float64` 提供的数字继续要求处于安全整数范围；引用解析不会恢复上游已丢失的精度。拒绝使用已有 `final_result_refs_invalid` 反馈及原有决策预算，模型可用现有证据纠正回答，无需重复业务调用。服务端校验结构化输出、拒绝非整数并避免大整数浮点转换的取舍参考 [Pydantic AI 的输出校验](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_output.py#L973-L989)及其 [Pydantic Core 数值校验](https://github.com/pydantic/pydantic-core/blob/383eb95a19433754c0cecf7025b50c26b6d97a36/src/input/shared.rs#L144-L155)。Agenstra 沿用自己的证据解析与纠正路径。
 
 ```mermaid
