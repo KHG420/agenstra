@@ -11,16 +11,26 @@ import (
 
 func TestCompletionRejectsInvalidEvidenceBeforeAndAfterReview(t *testing.T) {
 	cases := []struct {
-		name string
-		code string
-		bad  func(*agentcontract.Decision, string)
+		name     string
+		code     string
+		bad      func(*agentcontract.Decision, string)
+		feedback []string
 	}{
-		{"missing_citations", "final_fact_citations_invalid", func(d *agentcontract.Decision, _ string) { d.FactIDs = nil }},
-		{"unknown_citation", "final_fact_citations_invalid", func(d *agentcontract.Decision, _ string) { d.FactIDs = []string{agentcontract.NewID()} }},
+		{"missing_citations", "final_fact_citations_invalid", func(d *agentcontract.Decision, _ string) { d.FactIDs = nil }, nil},
+		{"unknown_citation", "final_fact_citations_invalid", func(d *agentcontract.Decision, _ string) { d.FactIDs = []string{agentcontract.NewID()} }, nil},
 		{"array_reference", "final_result_refs_invalid", func(d *agentcontract.Decision, id string) {
 			d.ResultRefs = []agentcontract.ResultRefRequest{{FactID: id, Path: []any{"data", "ip_whitelist"}}}
-		}},
-		{"internal_fact_id", "final_internal_fact_id_exposed", func(d *agentcontract.Decision, id string) { d.AnswerMarkdown = "Created: " + strings.ToUpper(id) }},
+		}, nil},
+		{"internal_fact_id", "final_internal_fact_id_exposed", func(d *agentcontract.Decision, id string) { d.AnswerMarkdown = "Created: " + strings.ToUpper(id) }, nil},
+		{"boolean_reference_and_internal_id", "final_result_refs_invalid", func(d *agentcontract.Decision, id string) {
+			d.ResultRefs = []agentcontract.ResultRefRequest{{FactID: id, Path: []any{"data", "schedulable"}}}
+			d.AnswerMarkdown = "Created: " + id
+		}, []string{"Each result_refs entry", "Remove internal Fact identifiers"}},
+		{"all_evidence_errors", "final_fact_citations_invalid", func(d *agentcontract.Decision, id string) {
+			d.FactIDs = nil
+			d.ResultRefs = []agentcontract.ResultRefRequest{{FactID: id, Path: []any{"data", "schedulable"}}}
+			d.AnswerMarkdown = "Created: " + id
+		}, []string{"Cite at least one observed Fact", "Each result_refs entry", "Remove internal Fact identifiers"}},
 	}
 	for _, tc := range cases {
 		for _, stage := range []string{"proposal", "review"} {
@@ -28,6 +38,7 @@ func TestCompletionRejectsInvalidEvidenceBeforeAndAfterReview(t *testing.T) {
 				r, s := consistencyFixture(t)
 				id := s.Facts[0].FactID
 				s.Facts[0].Value["data"].(agentcontract.JSON)["ip_whitelist"] = []any{"127.0.0.1"}
+				s.Facts[0].Value["data"].(agentcontract.JSON)["schedulable"] = false
 				facts := append([]agentcontract.Fact{}, s.Facts...)
 				originalObservation := s.Observations[0]
 				valid := agentcontract.Decision{Kind: "final", AnswerMarkdown: "Created R-1", FactIDs: []string{id}, ResultRefs: []agentcontract.ResultRefRequest{{FactID: id, Path: []any{"data", "id"}}}}
@@ -53,6 +64,12 @@ func TestCompletionRejectsInvalidEvidenceBeforeAndAfterReview(t *testing.T) {
 					if calls > firstCalls {
 						if len(p.Observations) != 2 || p.Observations[1].ErrorCode == nil || *p.Observations[1].ErrorCode != tc.code {
 							t.Fatal("correction lost deterministic validation feedback", p.Observations)
+						}
+						feedback, _ := p.Observations[1].Arguments["feedback"].(string)
+						for _, want := range tc.feedback {
+							if !strings.Contains(feedback, want) {
+								t.Fatalf("correction lost an independent validation failure %q: %s", want, feedback)
+							}
 						}
 					} else if p.CompletionReview != nil {
 						t.Fatal("invalid proposal was sent for review")

@@ -18,6 +18,8 @@
 
 草稿和复核结果都进入现有决策审计。框架先检查草稿的 Fact 引用、标量业务对象引用及正文中的内部 Fact ID；这些本地规则已能确定无效的草稿直接返回普通决策纠正，保留原错误码、执行证据和预算，不发送无效草稿进行模型复核。有效草稿仍须复核，复核结果再次通过同一组本地规则和已有 `CompletionValidator` 检查后才发布。宿主完成校验不在草稿阶段执行。先验证输出再处理有效输出的顺序参考 [Pydantic AI 输出工具处理](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/tool_manager.py#L968-L982)。
 
+同一份回答同时违反多项本地证据规则时，一次反馈所有已发现的问题，避免模型改好一处后才收到另一处已知错误。观察仍保留原有首个错误码优先级，不新增响应字段；所有问题修正后仍须正常复核，纠正消耗原预算且不重放业务调用。这参考 [Pydantic AI 在重试反馈中保留完整校验错误列表](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/messages.py#L1809-L1854)，不保证模型首次输出或下一次纠正一定正确。
+
 没有写操作、也没有引用截断证据的只读、计算和对话运行不增加复核请求。正常复核增加一次模型请求；格式错误最多使用现有的一次格式纠正，并始终受轮次、Token、输入上下文、超时和费用统计约束。复核无法完成时，任务保持未完成、草稿不发布，已有业务回执继续保留。该反馈方式参考 [Pydantic AI 将输出校验失败反馈回模型循环](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_agent_graph.py#L2393-L2399)。
 
 使用 `output_tools` 时，复核请求只提供 `submit_decision` 的 `final` 和 `approve_completion` 分支，`final` 保留上述反馈字段，通过明确的 `tool_choice` 选择该函数，保持单个输出决策限制；内置复核工具 Schema 要求显式提供 `completion_feedback`。业务调用、追问、搜索和检查工具不作为此阶段的可选输出。普通决策工具不暴露复核反馈。已保存调用及结果仍作为历史证据呈现，输入测量与实际请求一致。该限制依据框架已有的复核阶段，不按模型名称分支；JSON 正文复核使用同一反馈语义，记忆提取不变。此取舍参考 [Pydantic AI 按可选工具限制模型请求](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/models/openai.py#L1583-L1616)。筛选输出工具使模型请求与运行内核一致，不能保证最终回答不混用字段来源或遗漏用户要求的数据。
