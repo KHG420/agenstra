@@ -18,7 +18,7 @@ const nativeReferenceCallHint = "Propose exactly one business call with capabili
 
 const nativeReferenceBatchHint = "For a single symbolic $fact_value or $fact_id call, use tool_call; use this batch only for multiple independent calls."
 
-const nativeReferenceBusinessHint = "For a single symbolic Fact reference argument, propose this exact capability via tool_call."
+const nativeReferenceBusinessHint = "Keep object and array parameters as JSON objects and arrays, never JSON-encoded strings. If any nested value is a symbolic Fact reference, propose this exact capability via tool_call with the complete arguments object."
 
 // Native function names are stable request bindings, never aliases accepted from
 // a model. Preserve the operation rather than truncating it behind repeated
