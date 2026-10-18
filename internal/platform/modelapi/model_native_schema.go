@@ -87,3 +87,44 @@ func invalidModelToolSchema(ctx context.Context, calls []decisionOutputToolCall,
 	}
 	return invalidModelOutput(ctx, "model_decision_schema_invalid")
 }
+
+// invalidModelToolEnvelope retains identity/count/type constraints for bounded
+// recovery. Arguments and rejected values never become diagnostic text. The
+// original parser still owns acceptance, including native control grouping.
+func invalidModelToolEnvelope(ctx context.Context, calls []decisionOutputToolCall, tools []any, batchFunctions map[string]bool) error {
+	invalid := invalidModelOutput(ctx, "model_output_tool_calls_invalid")
+	maxCalls := 1
+	if len(calls) > 1 && len(batchFunctions) > 0 {
+		maxCalls = 4
+	}
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		function := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)
+		name := function["name"].(string)
+		if maxCalls == 1 || batchFunctions[name] {
+			names = append(names, name)
+		}
+	}
+	metadata := make([]any, 0, len(calls))
+	for _, call := range calls {
+		metadata = append(metadata, agentcontract.JSON{"type": call.Type, "function": agentcontract.JSON{"name": call.Function.Name}})
+	}
+	schema := agentcontract.JSON{"type": "object", "properties": agentcontract.JSON{
+		"tool_calls": agentcontract.JSON{"type": "array", "minItems": 1, "maxItems": maxCalls, "items": agentcontract.JSON{
+			"type": "object", "properties": agentcontract.JSON{
+				"type": agentcontract.JSON{"type": "string", "const": "function"},
+				"function": agentcontract.JSON{"type": "object", "properties": agentcontract.JSON{
+					"name": agentcontract.JSON{"type": "string", "enum": names},
+				}},
+			},
+		}},
+	}}
+	compiled, err := agentcontract.ValidateLocalSchema(schema, false)
+	if err != nil {
+		return invalid
+	}
+	if err := agentcontract.ValidateSchema(compiled, agentcontract.JSON{"tool_calls": metadata}); err != nil {
+		return modelSchemaError{model: invalid, validation: err}
+	}
+	return invalid
+}

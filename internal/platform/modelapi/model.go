@@ -385,6 +385,7 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	if usesOutputTools {
 		var raw []byte
 		var detail string
+		var batchFunctions map[string]bool
 		invalidCalls := envelope.Choices[0].Message.ToolCalls
 		if m.DecisionOutputMode == "native_tools" {
 			var packet agentcontract.ContextPacket
@@ -392,6 +393,12 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 				return nil, invalidModelOutput(ctx, "model_decision_schema_invalid")
 			}
 			raw, detail = nativeDecisionOutputToolBody(envelope.Choices[0].Message.ToolCalls, payload["tools"].([]any), packet)
+			if detail == "model_output_tool_calls_invalid" {
+				batchFunctions = map[string]bool{}
+				for name := range nativeFunctionCapabilities(packet) {
+					batchFunctions[nativeCapabilityFunctionName(name)] = true
+				}
+			}
 			if detail != "" && len(invalidCalls) > 1 && len(invalidCalls) <= 4 {
 				// Preserve the actual rejected arguments for schema/syntax feedback
 				// and truncation detection; an earlier valid call is not the cause.
@@ -420,6 +427,9 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 			}
 			if detail == "model_decision_schema_invalid" {
 				return nil, invalidModelToolSchema(ctx, invalidCalls, payload["tools"].([]any))
+			}
+			if detail == "model_output_tool_calls_invalid" {
+				return nil, invalidModelToolEnvelope(ctx, envelope.Choices[0].Message.ToolCalls, payload["tools"].([]any), batchFunctions)
 			}
 			return nil, invalidModelOutput(ctx, detail)
 		}
