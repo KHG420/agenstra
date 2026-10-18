@@ -306,6 +306,8 @@ SDK 执行前保存 command，执行后保存结果，再提交 ACK。ACK 丢失
 
 页面读取或同步在发送 begin 请求前失败时，SDK 报告错误并移除本次尚未认领的本地记录，允许同步恢复后继续投递原命令；此时没有执行 handler，也不提交 unknown 业务结果。begin 请求一旦尝试发送，丢失响应仍保留 unknown，不能自动重跑。SDK 在 handler 返回时复制结果，后续页面状态变化不改写原回执；结果无法复制时仍视为未知，不能把已经执行的动作当作未执行。已缓存回执的重试错误通过 SDK 的 error 事件报告，并保留回执。
 
+begin 明确返回 HTTP 4xx 时，SDK 会读取原命令状态。只有命令、任务、会话、generation、profile、动作、参数摘要和页面修订全部一致，且服务端仍为 queued/dispatched，才移除尚未执行 handler 的本地起始记录；权限等条件恢复后，正常轮询可继续投递原命令，begin 仍重新核对当前授权。该路径不提交业务结果，也不把拒绝改成成功。网络中断、5xx、无法取得命令证明、身份不符或已进入 running/unknown 的命令仍保留不确定结果，不能据此重放。
+
 `client.on("action", listener)` 的 `succeeded` 事件只在服务端确认保存原成功回执后发出，不代表整个任务完成。首次上传丢失 ACK 后，SDK 重传原回执并在确认时补发该事件，不重新执行 handler；后续运行读取或恢复失败不会吞掉已确认成功的通知。同一 client 对同一命令只通知一次；新 client 恢复已确认回执时可能再次通知，宿主须按原命令身份处理自己的当前操作。缺失或与提交状态不符的结果 ACK 报告 `browser_result_ack_invalid` 并保留原回执重试；服务端已有 failed、expired、cancelled 命令的冲突不能成为成功事件。
 
 需要关闭页面或结束宿主登录态的动作，应先完成原业务函数并返回真实结果，在上述确认事件中核对当前 owner 和原命令后再清理当前页面。不能在 handler 返回前卸载 client，也不能用固定延时假充回执确认。这里采用与 [MCP Tasks](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks) 相同的持久状态与结果读取分离原则；MCP Tasks 本身仍属实验规范，并未作为本项目的新协议或依赖引入。

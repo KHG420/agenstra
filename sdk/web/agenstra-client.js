@@ -313,11 +313,19 @@ export class AgenstraClient {
       if (!this.closed && !this.actionSuccessNotifications.has(command.id)) this.emit("action", { command, status: "unknown" });
     } catch (error) {
       const receipt = this.receipts[command.id];
+      let unclaimed = !beginRequested;
+      if (receipt?.status === "starting" && beginRequested && error instanceof AgenstraError && error.status >= 400 && error.status < 500) {
+        try {
+          const current = await this.request("/browser/v1/commands/" + command.id, { browserKey: this.browser.key });
+          const sameCommand = ["id", "run_id", "session_id", "generation", "profile_digest", "action", "arguments_sha256", "context_revision"].every(field => current[field] === command[field]);
+          unclaimed = sameCommand && ["queued", "dispatched"].includes(current.status);
+        } catch { /* An unavailable command proof leaves the original outcome uncertain. */ }
+      }
       // A server-confirmed result stays confirmed when the following run read
       // or reconciliation fails. Retry that recovery work, not the result.
-      if (receipt?.status === "starting" && !beginRequested) {
-        // No claim was sent and no handler ran. Leave the original command
-        // available for dispatch after page synchronization recovers.
+      if (receipt?.status === "starting" && unclaimed) {
+        // No claim was sent, or the rejected begin is still authoritatively
+        // unclaimed. Normal dispatch can retry the same command after recovery.
         delete this.receipts[command.id]; this.save("receipts", this.receipts);
       } else if (receipt && !["succeeded", "confirmed", "acked"].includes(receipt.status)) {
         const definite = receipt.status === "running" && error instanceof AgenstraActionError;
