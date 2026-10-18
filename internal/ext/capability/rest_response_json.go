@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"unicode/utf8"
 )
 
-// validRESTResponseJSON rejects ambiguous properties before decoding can replace
-// a business status or result with the last duplicate value. Unknown fields and
-// non-object roots keep their existing response-contract behavior.
+// validRESTResponseJSON rejects invalid UTF-8 and ambiguous properties before
+// decoding can replace bytes or overwrite a business status or result. Unknown
+// fields and non-object roots keep their existing response-contract behavior.
 func validRESTResponseJSON(raw []byte) bool {
-	if !json.Valid(raw) {
+	if !utf8.Valid(raw) || !json.Valid(raw) {
 		return false
 	}
 	type objectKeys struct {
