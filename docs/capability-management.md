@@ -147,7 +147,7 @@ Web 页面可完成相同流程：发布版本、启用或回滚、选择用户�
 
 REST v2 和 legacy REST 响应必须是单个完整 JSON 文档，且每个对象内的字段名唯一。重复字段即使值相同、位于未投影的扩展对象中，或使用转义后相同的字段名，也会返回 `upstream_response_invalid`；不同对象中的同名字段仍然允许。写操作收到这种歧义回执时，沿用已有的结果未知与重放契约，不将最后一个重复值当成确定的业务结果。
 
-响应的原始 JSON 字节必须是有效 UTF-8。框架在解码和字段投影前拒绝非法字节，避免解码器自动替换字符后改变业务标识或返回内容；即使非法字节位于隐藏字段中，也返回 `upstream_response_invalid`。合法的中文、emoji 和真正的 Unicode 替换字符 `�` 保持原值。写操作沿用结果未知及原有重放规则，不将编码损坏的回执当作确定成功或自动重做。该边界遵循 [RFC 8259 §8.1](https://www.rfc-editor.org/rfc/rfc8259#section-8.1) 的跨系统 UTF-8 要求；它不改变 JSON 字符串转义及其他已有响应契约。
+响应的原始 JSON 字节必须是有效 UTF-8，字符串中的 UTF-16 代理项转义必须正确配对。框架在解码和字段投影前拒绝非法字节和未配对的代理项，避免解码器自动替换字符后改变业务标识或返回内容；即使损坏内容位于隐藏字段或字段名中，也返回 `upstream_response_invalid`。合法的中文、emoji、正确的转义对和真正的 Unicode 替换字符 `�` 保持原值；普通反斜杠文本（例如 JSON 字符串里的 `\\ud800`）不被误当作代理项。写操作沿用结果未知及原有重放规则，不将编码损坏的回执当作确定成功或自动重做。[RFC 8259 §8.1–8.2](https://www.rfc-editor.org/rfc/rfc8259#section-8) 要求跨系统 JSON 使用 UTF-8，并指出未配对代理项的处理不可预测；本框架明确拒绝后者。该取舍也与 [Pydantic 原始 JSON 字节校验](https://docs.pydantic.dev/latest/api/type_adapter/#pydantic.type_adapter.TypeAdapter.validate_json) 对此类转义的拒绝行为一致，不新增依赖或改变其他响应契约。
 
 ## 5. 运行边界与备份
 
