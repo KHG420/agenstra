@@ -163,7 +163,7 @@ go run ./cmd/agenstra-manage disable alice records-web
 }
 ```
 
-动作使用 `ui.*` 名称，每份 profile 最多 200 个动作，输入输出须为 object Schema；effect 为 `read`、`write` 或 `destructive`，超时 1–300 秒，默认 60。审批由 profile 或实时 policy 的 `ApprovalCapabilities` 要求。把多个业务操作合并为一个动作时，应按审批要求分别声明普通更新和破坏性操作，避免删除操作的审批要求扩散到普通更新。`ui.get_context`、`ui.command_status` 保留给框架。页面观察数据最多 16 KiB；结果的规范化 JSON 默认最多 1 MiB，普通 HTTP 请求体上限为 2 MiB。完整结果按原有路径保存为回执和 Fact，模型只收到既有上下文预算内的有界预览，必要时通过 `inspect_fact` 读取指定部分。profile 的 `context_schema`、浏览器对象的 `context` / `context_revision` 及模型能力 `ui.get_context` 保留现有契约名称，仅指当前页面观察数据，不是 Agent 会话上下文。
+动作使用 `ui.*` 名称，每份 profile 最多 512 个动作，浏览器会话可注册该 profile 中最多 512 个 handlers。提高 profile 容量不会自动增加用户授权或模型上下文中的可见能力数。输入输出须为 object Schema；effect 为 `read`、`write` 或 `destructive`，超时 1–300 秒，默认 60。审批由 profile 或实时 policy 的 `ApprovalCapabilities` 要求。把多个业务操作合并为一个动作时，应按审批要求分别声明普通更新和破坏性操作，避免删除操作的审批要求扩散到普通更新。`ui.get_context`、`ui.command_status` 保留给框架。页面观察数据最多 16 KiB；结果的规范化 JSON 默认最多 1 MiB，普通 HTTP 请求体上限为 2 MiB。完整结果按原有路径保存为回执和 Fact，模型只收到既有上下文预算内的有界预览，必要时通过 `inspect_fact` 读取指定部分。profile 的 `context_schema`、浏览器对象的 `context` / `context_revision` 及模型能力 `ui.get_context` 保留现有契约名称，仅指当前页面观察数据，不是 Agent 会话上下文。
 
 需要保留完整大结果时，可信 profile 可为指定 action 声明 `"max_result_bytes": 16777216`。该字段限定整个结果的规范化 JSON 字节数，显式范围为 1–67108864（64 MiB）；省略或 0 使用原 1 MiB，省略字段保持原 profile digest。声明参与原版本和命令绑定，模型和页面观察不能提高它。仅 browser command 的 `/result` 入口在读取请求体前核对可信 owner、command 和 session key，并按该命令固定的 profile/action 选择 HTTP 上限：至少保留原 2 MiB，较大结果增加 64 KiB 封装余量。generation、输出 Schema、结果精确上限、重复回执及不确定结果仍按原完成路径核验；未知字段、尾随 JSON、其他 HTTP 入口和有界模型预览的保护保留。结果超限不改变 command，也不授权重放业务操作。选择限额时应计入 base64 与 JSON 编码后的实际字节，并只为需要的动作提高限额。
 

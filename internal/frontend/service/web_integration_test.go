@@ -36,9 +36,18 @@ func frontendTestProfile(approval bool) agentcontract.FrontendProfile {
 }
 
 func TestFrontendLargeCatalogPreservesApprovalProperties(t *testing.T) {
+	for _, count := range []int{200, 512} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			testFrontendCatalogCapacity(t, count)
+		})
+	}
+}
+
+func testFrontendCatalogCapacity(t *testing.T, count int) {
+	t.Helper()
 	profile := frontendTestProfile(false)
 	base := profile.Actions[0]
-	profile.Actions = make([]agentcontract.FrontendAction, 200)
+	profile.Actions = make([]agentcontract.FrontendAction, count)
 	for i := range profile.Actions {
 		action := base
 		action.Name = fmt.Sprintf("ui.action_%d", i)
@@ -48,13 +57,21 @@ func TestFrontendLargeCatalogPreservesApprovalProperties(t *testing.T) {
 		}
 		profile.Actions[i] = action
 	}
+	expectedDigest := agentcontract.WebHash(profile)
 	compiled, err := compileFrontend(profile)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(compiled.profile.Actions) != count || len(compiled.inputs) != count || len(compiled.outputs) != count || compiled.digest != expectedDigest {
+		t.Fatal("catalog truncated or existing profile digest changed")
+	}
 	for i, action := range compiled.profile.Actions {
-		if action.ApprovalRequired != (i%2 == 1) {
-			t.Fatalf("action %d approval changed", i)
+		expectedEffect := "write"
+		if i%2 == 1 {
+			expectedEffect = "destructive"
+		}
+		if action.ApprovalRequired != (i%2 == 1) || action.Effect != expectedEffect {
+			t.Fatalf("action %d execution properties changed", i)
 		}
 	}
 	f := newWebFixture(t, &hostModel{}, false)
@@ -66,12 +83,33 @@ func TestFrontendLargeCatalogPreservesApprovalProperties(t *testing.T) {
 	if _, _, err := f.w.CreateBrowserSession(t.Context(), "alice", "records-web", "1", handlers); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := f.w.CreateBrowserSession(t.Context(), "alice", "records-web", "1", append(handlers, "ui.overflow")); agentcontract.ErrorCode(err) != "browser_handler_version_mismatch" {
+	expectedError := "browser_handler_unknown"
+	if count == 512 {
+		expectedError = "browser_handler_version_mismatch"
+	}
+	if _, _, err := f.w.CreateBrowserSession(t.Context(), "alice", "records-web", "1", append(handlers, "ui.overflow")); agentcontract.ErrorCode(err) != expectedError {
 		t.Fatalf("oversized handler registration: %v", err)
 	}
-	profile.Actions = append(profile.Actions, agentcontract.FrontendAction{Name: "ui.overflow"})
-	if _, err := compileFrontend(profile); err == nil {
-		t.Fatal("oversized profile accepted")
+	if count == 512 {
+		originalSchema := profile.Actions[count-1].InputSchema
+		profile.Actions[count-1].InputSchema = agentcontract.JSON{"type": "object", "properties": agentcontract.JSON{"id": agentcontract.JSON{"$ref": "https://example.com/schema"}}}
+		if _, err := compileFrontend(profile); err == nil {
+			t.Fatal("external schema reference accepted at capacity")
+		}
+		profile.Actions[count-1].InputSchema = originalSchema
+		for _, name := range []string{"ui.action_0", "ui.get_context", "ui.command_status", "invalid"} {
+			original := profile.Actions[count-1].Name
+			profile.Actions[count-1].Name = name
+			if _, err := compileFrontend(profile); err == nil {
+				t.Fatalf("invalid action %q accepted at capacity", name)
+			}
+			profile.Actions[count-1].Name = original
+		}
+		profile.Actions = append(profile.Actions, base)
+		profile.Actions[count].Name = "ui.overflow"
+		if _, err := compileFrontend(profile); err == nil {
+			t.Fatal("513-action profile accepted")
+		}
 	}
 }
 

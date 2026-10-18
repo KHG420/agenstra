@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exportActions } from "./export-actions.mjs";
@@ -9,14 +9,38 @@ test("large catalogs can separate ordinary and destructive actions up to the ser
   const dir = await mkdtemp(join(tmpdir(), "agenstra-large-catalog-"));
   try {
     const path = join(dir, "profile.json");
-    const profile = { schema: "agenstra.frontend-profile.v1", version: "1", handler_version: "1", context_schema: { type: "object" }, actions: Array.from({ length: 200 }, (_, i) => ({ name: `ui.action_${i}`, description: "Host operation", input_schema: { type: "object" }, output_schema: { type: "object" }, effect: i % 2 ? "destructive" : "write", approval_required: Boolean(i % 2) })) };
+    const profile = { schema: "agenstra.frontend-profile.v1", version: "1", handler_version: "1", context_schema: { type: "object" }, actions: [] };
+    const target = join(dir, "generated");
+    for (const count of [200, 512]) {
+      profile.actions = Array.from({ length: count }, (_, i) => ({ name: `ui.action_${i}`, description: "Host operation", input_schema: { type: "object" }, output_schema: { type: "object" }, effect: i % 2 ? "destructive" : "write", approval_required: Boolean(i % 2) }));
+      const source = JSON.stringify(profile);
+      await writeFile(path, source);
+      assert.deepEqual((await exportActions(path, target)).actions, profile.actions.map(action => action.name));
+      const types = await readFile(join(target, "agenstra-actions.d.ts"), "utf8");
+      assert.equal((types.match(/: \(args:/g) || []).length, count);
+      for (const action of profile.actions) assert.ok(types.includes(JSON.stringify(action.name)));
+      assert.equal(await readFile(path, "utf8"), source);
+    }
+    const filenames = await readdir(target);
+    const originals = await Promise.all(filenames.map(name => readFile(join(target, name), "utf8")));
+    profile.actions[511].input_schema = { type: "object", properties: { id: { $ref: "https://example.com/schema" } } };
     await writeFile(path, JSON.stringify(profile));
-    assert.equal((await exportActions(path, dir)).actions.length, 200);
-    const types = await readFile(join(dir, "agenstra-actions.d.ts"), "utf8");
+    await assert.rejects(exportActions(path, target));
+    profile.actions[511].input_schema = { type: "object" };
+    for (const name of ["ui.action_0", "ui.get_context", "ui.command_status", "invalid"]) {
+      const original = profile.actions[511].name;
+      profile.actions[511].name = name;
+      await writeFile(path, JSON.stringify(profile));
+      await assert.rejects(exportActions(path, target));
+      profile.actions[511].name = original;
+    }
     profile.actions.push({ ...profile.actions[0], name: "ui.overflow" });
     await writeFile(path, JSON.stringify(profile));
-    await assert.rejects(exportActions(path, dir), /Invalid frontend profile/);
-    assert.equal(await readFile(join(dir, "agenstra-actions.d.ts"), "utf8"), types);
+    await assert.rejects(exportActions(path, target), /Invalid frontend profile/);
+    assert.deepEqual(await Promise.all(filenames.map(name => readFile(join(target, name), "utf8"))), originals);
+    const absent = join(dir, "absent");
+    await assert.rejects(exportActions(path, absent), /Invalid frontend profile/);
+    await assert.rejects(readdir(absent), { code: "ENOENT" });
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
