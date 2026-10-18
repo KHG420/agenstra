@@ -713,7 +713,7 @@ func (p *RestPack) Invoke(ctx context.Context, name string, args map[string]any,
 		} else {
 			dec := json.NewDecoder(bytes.NewReader(raw))
 			dec.UseNumber()
-			if !json.Valid(raw) || dec.Decode(&data) != nil {
+			if !validRESTResponseJSON(raw) || dec.Decode(&data) != nil {
 				return agentcontract.CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
 			}
 		}
@@ -1006,7 +1006,7 @@ func (p *LegacyRestPack) Invoke(ctx context.Context, name string, args map[strin
 		var data any
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.UseNumber()
-		if !json.Valid(raw) || dec.Decode(&data) != nil {
+		if !validRESTResponseJSON(raw) || dec.Decode(&data) != nil {
 			return agentcontract.CapabilityResult{ErrorCode: "upstream_response_invalid"}, nil
 		}
 		data, err = traversePath(data, binding.Definition.ResponsePath)
