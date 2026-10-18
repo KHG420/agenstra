@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
@@ -48,34 +49,44 @@ func TestCompletionReviewGetsIndependentModelRequestTimeout(t *testing.T) {
 }
 
 func TestCompletionReviewCannotExtendRunDeadline(t *testing.T) {
-	provider := &hostProvider{caps: map[string]agentcontract.CapabilityDescription{"records.get": {
-		Name: "records.get", Effect: "write", Replay: "never", InputSchema: agentcontract.JSON{"type": "object"},
-	}}}
-	h := testHost(t, testStore(t), provider, &hostModel{})
-	h.Settings.ModelTimeoutSeconds = 0.3
-	h.Settings.MaxRunSeconds = 0.25
-	h.Model = decisionModelFunc(func(ctx context.Context, packet agentcontract.ContextPacket, _ string) (agentcontract.Decision, error) {
-		if len(packet.Facts) == 0 {
-			return callDecision("records.get"), nil
+	// Simulated time keeps SQLite setup and race-detector scheduling from using
+	// the run budget before the completion review can exercise its deadline.
+	synctest.Test(t, func(t *testing.T) {
+		provider := &hostProvider{caps: map[string]agentcontract.CapabilityDescription{"records.get": {
+			Name: "records.get", Effect: "write", Replay: "never", InputSchema: agentcontract.JSON{"type": "object"},
+		}}}
+		h := testHost(t, testStore(t), provider, &hostModel{})
+		h.Settings.ModelTimeoutSeconds = 0.3
+		h.Settings.MaxRunSeconds = 0.25
+		reviewStarted := false
+		h.Model = decisionModelFunc(func(ctx context.Context, packet agentcontract.ContextPacket, _ string) (agentcontract.Decision, error) {
+			if len(packet.Facts) == 0 {
+				return callDecision("records.get"), nil
+			}
+			if packet.CompletionReview != nil {
+				reviewStarted = true
+			}
+			timer := time.NewTimer(180 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return agentcontract.Decision{}, ctx.Err()
+			case <-timer.C:
+			}
+			if packet.CompletionReview != nil {
+				return agentcontract.Decision{Kind: "approve_completion"}, nil
+			}
+			return agentcontract.Decision{Kind: "final", AnswerMarkdown: "Record updated", FactIDs: []string{packet.Facts[0].FactID}}, nil
+		})
+		run := createTestHostRun(t, h)
+		started := time.Now()
+		run, err := h.Drive(t.Context(), run.RunID, "alice")
+		elapsed := time.Since(started)
+		state, restoreErr := h.Restore(run)
+		if err != nil || restoreErr != nil || run.Status != "failed" || state.ErrorCode == nil || *state.ErrorCode != "run_deadline_exceeded" || state.AnswerMarkdown != "" || provider.calls != 1 || !reviewStarted || elapsed != 250*time.Millisecond {
+			t.Fatalf("review extended run deadline or published draft: status=%s state=%+v calls=%d review=%t elapsed=%v err=%v restore=%v", run.Status, state, provider.calls, reviewStarted, elapsed, err, restoreErr)
 		}
-		timer := time.NewTimer(180 * time.Millisecond)
-		defer timer.Stop()
-		select {
-		case <-ctx.Done():
-			return agentcontract.Decision{}, ctx.Err()
-		case <-timer.C:
-		}
-		if packet.CompletionReview != nil {
-			return agentcontract.Decision{Kind: "approve_completion"}, nil
-		}
-		return agentcontract.Decision{Kind: "final", AnswerMarkdown: "Record updated", FactIDs: []string{packet.Facts[0].FactID}}, nil
 	})
-	run := createTestHostRun(t, h)
-	run, err := h.Drive(t.Context(), run.RunID, "alice")
-	state, restoreErr := h.Restore(run)
-	if err != nil || restoreErr != nil || run.Status != "failed" || state.ErrorCode == nil || *state.ErrorCode != "run_deadline_exceeded" || state.AnswerMarkdown != "" || provider.calls != 1 {
-		t.Fatalf("review extended run deadline or published draft: status=%s state=%+v calls=%d err=%v restore=%v", run.Status, state, provider.calls, err, restoreErr)
-	}
 }
 
 func TestIndependentModelTimeoutKeepsParentCancellation(t *testing.T) {
