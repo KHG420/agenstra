@@ -69,6 +69,8 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 原生业务函数的对象和数组参数保持对应 JSON 类型，不将它们编码成字符串。任何嵌套值使用符号 Fact 引用时，通过既有 `tool_call` 的 `arguments` 对象提交完整参数；运行时解析引用后仍按原始业务 Schema 校验。
 
+模型参数因本地 `$ref` 中的约束被拒绝时，格式恢复反馈保留实际参数位置和具体类型或约束原因，而不是只返回笼统的引用失败。反馈最多四项、合计 1000 字符，不包含校验器的本地 Schema URL；原始契约、拒绝结果、重试预算和审批路径继续生效。结构化校验反馈的取舍参考 [Pydantic AI 的 RetryPromptPart](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/messages.py#L1769-L1853)。
+
 `native_tools` 请求继续使用 `parallel_tool_calls=false`，优先让网关返回单个函数。若兼容网关仍返回多个直接业务函数，适配器逐项核对本轮真实声明的名称和原生 JSON 参数，最多四项，任一项解码失败则拒绝整个响应；不会选择其中一项执行，也不会把控制函数、`tool_call` 或 `tool_batch` 与其他函数拼接。每项业务参数和引用继续通过原校验，转换后的批次仍由运行内核核对身份、授权、审批、预算和执行顺序。用户要求收到上一项回执后再决定下一项时，仍须分轮提交。后续项的 Schema／JSON 错误及输出截断按该项实际参数诊断，不用先前合法项的参数替代失败依据。这种处理参考 [Pydantic AI 对同一响应逐项保留原生函数调用](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/models/openai.py#L1476-L1487)，不改变宿主业务接口或持久决策结构。
 
 原生工具模式将原样任务放在独立的用户消息中，运行上下文保留能力元数据、输出契约、用户补充和已有证据。当前已声明原生函数的输入契约只在工具定义中呈现；待检查或本轮未声明的能力继续保留原有上下文信息。已保存业务调用在协议允许时以符合原始契约的原生函数或引用提案及配对工具结果呈现，参数直接来自已有记录；要求原始推理内容且未保存该内容的协议继续使用数据形式的历史。所有消息与工具定义共用实际输入测量和预算，调用方上下文、公共运行数据与记忆提取协议保持原规则。此输入呈现方式参考 [Pydantic AI 的用户消息与工具结果映射](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/models/openai.py#L1965-L1980)。

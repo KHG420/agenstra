@@ -52,14 +52,24 @@ func modelValidationFeedback(err error) string {
 
 func validationFeedback(validation *jsonschema.ValidationError) string {
 	parts := []string{}
-	for _, detail := range validation.BasicOutput().Errors {
+	var visit func(jsonschema.OutputUnit)
+	visit = func(detail jsonschema.OutputUnit) {
+		if len(parts) == 4 {
+			return
+		}
+		// Detailed output retains concrete causes behind local references.
+		// Render only leaf messages and instance locations, never schema URLs.
+		if len(detail.Errors) > 0 {
+			for _, cause := range detail.Errors {
+				visit(cause)
+			}
+			return
+		}
 		if detail.Error != nil {
 			parts = append(parts, fmt.Sprintf("at %q: %s", detail.InstanceLocation, detail.Error.String()))
-			if len(parts) == 4 {
-				break
-			}
 		}
 	}
+	visit(*validation.DetailedOutput())
 	return boundedSchemaFeedback(strings.Join(parts, "; "))
 }
 
