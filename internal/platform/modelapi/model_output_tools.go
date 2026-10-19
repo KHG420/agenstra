@@ -29,7 +29,7 @@ func decisionOutputTools(completionReview bool) []any {
 		"arguments":  agentcontract.JSON{"type": "object", "additionalProperties": true},
 		"reason":     agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 500},
 	}, "capability", "arguments", "reason")
-	resultPath := agentcontract.JSON{"type": "array", "minItems": 1, "maxItems": 16, "items": path["items"], "description": "Path from the cited Fact.value to a nonempty scalar business ID (string or integer). Never point to an object, array or local Fact ID; include every actual response wrapper in the path."}
+	resultPath := agentcontract.JSON{"type": "array", "minItems": 1, "maxItems": 16, "items": path["items"], "description": "Path from cited Fact.value through actual response wrappers to the object's identifier (nonempty string/integer). Never link a status, boolean, metric, object, array or local Fact ID; cite supporting values with fact_ids."}
 	resultRef := object(agentcontract.JSON{
 		"fact_id": uuid, "path": resultPath, "label": agentcontract.JSON{"type": "string", "maxLength": 100},
 		"entity_type": agentcontract.JSON{"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
@@ -62,7 +62,7 @@ func decisionOutputTools(completionReview bool) []any {
 	final := agentcontract.JSON{
 		"answer_markdown": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 30000, "description": "User-facing business values and limitations in the requested format. Raw JSON means no code fences or prose. Put internal Fact IDs only in fact_ids and result_refs, never in the answer. Requested business record IDs are ordinary answer data."},
 		"fact_ids":        agentcontract.JSON{"type": "array", "maxItems": 50, "items": uuid, "description": "Supporting evidence identifiers from this run: copy full Fact IDs exactly here. Do not repeat these internal evidence identifiers in answer_markdown."},
-		"result_refs":     agentcontract.JSON{"type": "array", "maxItems": 20, "items": resultRef, "description": "Optional links to business objects, not generic evidence or statistics references. Every entry must point to a scalar business ID in an available Fact included in fact_ids. Use fact_ids for supporting evidence. Omit result_refs when the answer needs no object reference; never link a statistics or configuration object."},
+		"result_refs":     agentcontract.JSON{"type": "array", "maxItems": 20, "items": resultRef, "description": "Optional business-object links, separate from supporting evidence in fact_ids. Each path selects an actual object identifier in a cited model-visible Fact, never a status, boolean or metric. Omit when no object link is needed; never link a statistics or configuration object."},
 	}
 	required := []string{"answer_markdown", "fact_ids"}
 	if completionReview {
