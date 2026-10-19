@@ -25,7 +25,7 @@ func decisionOutputTools(completionReview bool) []any {
 	}
 	call := object(agentcontract.JSON{
 		"call_ref":   agentcontract.JSON{"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$", "description": "Optional local label; the adapter assigns the actual fresh call reference."},
-		"capability": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 330},
+		"capability": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 330, "description": "Exact business capability name from the authorized catalog or an inspected contract. Runtime control decisions such as search_capabilities, read_skill, inspect_capability and inspect_fact use their own decision kind, never this field."},
 		"arguments":  agentcontract.JSON{"type": "object", "additionalProperties": true},
 		"reason":     agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 500},
 	}, "capability", "arguments", "reason")
