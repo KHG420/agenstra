@@ -36,6 +36,36 @@ test("a known tool failure stays in its receipt without marking the composer as 
   assert.match(chat.feedback.textContent, /connection_error/, "unconfirmed exceptions must remain visible");
 });
 
+for (const unknown of ["核对原操作结果，不要重新提交。", "Check the original action result before continuing."]) test("an unconfirmed browser action shows result verification instead of connection retry: " + unknown, async t => {
+  const chat = Object.create(AgenstraChat.prototype);
+  chat.feedback = { textContent: "" };
+  chat.text = { error: "Check the connection or retry.", unknown };
+  const posted = [], errors = [];
+  let calls = 0;
+  const client = new AgenstraClient({ integration: "test", storage: null, getSession: async () => "ticket", fetch: async (path, options) => {
+    const body = JSON.parse(options.body);
+    if (path.endsWith("/result")) posted.push(body);
+    const data = path.endsWith("/begin") ? { accepted: true } : { status: body.status };
+    return { status: 200, ok: true, json: async () => data };
+  } });
+  t.after(() => client.destroy({ closeSession: false }));
+  client.browser = { id: "tab", generation: 1, key: "key", context_revision: 1 };
+  client.on("error", error => { errors.push(error);chat.showError(error); });
+  client.registerActions({ "ui.write": () => { calls++;throw new Error("private host failure detail"); } });
+  const command = { id: "write", run_id: "run", session_id: "tab", generation: 1, action: "ui.write", context_revision: 1, arguments: {} };
+  await client.executeCommand(command);
+  assert.equal(posted[0].status, "unknown");
+  assert.equal(posted[0].error_code, "browser_handler_outcome_unknown");
+  assert.equal(errors.length, 1);
+  assert.ok(errors[0] instanceof AgenstraError);
+  assert.equal(errors[0].code, "browser_handler_outcome_unknown");
+  assert.equal(chat.feedback.textContent, unknown);
+  assert.doesNotMatch(chat.feedback.textContent, /connection_error|retry|private host/);
+  await client.executeCommand(command);
+  assert.equal(calls, 1, "checking the original receipt must not replay the handler");
+  assert.ok(posted.every(body => body.status === "unknown" && body.error_code === "browser_handler_outcome_unknown"));
+});
+
 test("write receipts remain visible when a task fails and accepted is never success", () => {
   const previous = globalThis.document;
   class Element {

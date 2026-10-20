@@ -339,7 +339,7 @@ export class AgenstraClient {
         this.save("receipts", this.receipts);
         try { await this.flushReceipts(); } catch { /* Retain the receipt for reconnection. */ }
       }
-      this.emit("error", error);
+      this.emit("error", receipt?.status === "unknown" && error?.name !== "AbortError" ? new AgenstraError("browser_handler_outcome_unknown") : error);
     } finally { this.executing = false; this.activeCommand = null; }
   }
   async flushReceipts() {

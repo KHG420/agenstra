@@ -143,6 +143,10 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
     // Confirmed tool failures belong to the task's durable receipt and answer.
     // They do not mean the message submission or browser connection failed.
     if (error instanceof AgenstraActionError) return;
+    if (error?.code === "browser_handler_outcome_unknown") {
+      this.feedback.textContent = this.text.unknown;
+      return;
+    }
     const invalid = error?.status === 422 || error?.code === "input_invalid";
     const type = this.awaitingInput?.runtime?.input_schema?.type;
     const hint = type === "enum" ? this.text.invalidChoice : type === "date" ? this.text.invalidDate : this.text.invalidInput;
