@@ -22,6 +22,7 @@ import (
 	capabilitypack "github.com/KHG420/agenstra/internal/ext/capability"
 	reactcore "github.com/KHG420/agenstra/internal/runtime/react"
 	packregistry "github.com/KHG420/agenstra/internal/state/registry"
+	"github.com/KHG420/agenstra/internal/state/runstore"
 )
 
 // DeploymentError carries the safe deployment or connection error code.
@@ -71,7 +72,17 @@ func LoadDeployment(path string) (*Deployment, error) {
 			return nil, err
 		}
 	}
-	if c.DatabasePath == "" {
+	if c.Database != nil {
+		if err := c.Database.Validate(c.WebIntegration != nil); err != nil {
+			return nil, err
+		}
+		if c.DatabasePath != "" || (c.WebIntegration != nil && c.WebIntegration.DatabasePath != "") {
+			return nil, fmt.Errorf("database and SQLite database_path cannot be combined")
+		}
+		if c.Management != nil {
+			return nil, fmt.Errorf("PostgreSQL deployment currently requires static packs; management uses SQLite")
+		}
+	} else if c.DatabasePath == "" {
 		return nil, fmt.Errorf("database_path required")
 	}
 	if c.Management != nil && !agentcontract.DeploymentEnvName.MatchString(c.Management.AdminAPIKeyEnv) {
@@ -103,6 +114,14 @@ func (d *Deployment) Resolve(p string) string {
 
 // DatabasePath resolves the configured run database relative to the deployment file.
 func (d *Deployment) DatabasePath() string { return d.Resolve(d.Config.DatabasePath) }
+
+// OpenRunStore selects the configured backend. The caller owns Close and Initialize.
+func (d *Deployment) OpenRunStore() (*runstore.Store, error) {
+	if c := d.Config.Database; c != nil {
+		return runstore.NewPostgresStore(d.Environment[c.DSNEnv], c.Schema)
+	}
+	return runstore.NewSQLiteStore(d.DatabasePath())
+}
 
 // Authenticate checks a token without a request context.
 // HTTP callers should use AuthenticateContext to propagate request cancellation.

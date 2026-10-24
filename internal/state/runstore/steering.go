@@ -24,7 +24,7 @@ func steeringCursor(envelope agentcontract.JSON) int {
 
 func latestSteering(q SQLQueryer, id string) (int, error) {
 	var sequence int
-	err := q.QueryRow("SELECT coalesce(max(sequence),0) FROM events WHERE run_id=? AND event_json->>'kind'='steering_requested'", id).Scan(&sequence)
+	err := q.QueryRow("SELECT coalesce(max(sequence),0) FROM events WHERE run_id=$1 AND event_json->>'kind'='steering_requested'", id).Scan(&sequence)
 	return sequence, err
 }
 
@@ -39,7 +39,7 @@ func (s *SQLiteStore) QueueSteering(id, owner, requestID, text string, revision 
 			return e
 		}
 		var previous string
-		e = tx.QueryRow("SELECT event_json->>'text' FROM events WHERE run_id=? AND event_json->>'kind'='steering_requested' AND event_json->>'request_id'=?", id, requestID).Scan(&previous)
+		e = tx.QueryRow("SELECT event_json->>'text' FROM events WHERE run_id=$1 AND event_json->>'kind'='steering_requested' AND event_json->>'request_id'=$2", id, requestID).Scan(&previous)
 		if e == nil {
 			if previous != text {
 				return agentcontract.NewHostError("steering_request_conflict")
@@ -56,7 +56,7 @@ func (s *SQLiteStore) QueueSteering(id, owner, requestID, text string, revision 
 			return agentcontract.NewHostError("steering_not_available")
 		}
 		var pending int
-		if e = tx.QueryRow("SELECT count(*) FROM events WHERE run_id=? AND sequence>? AND event_json->>'kind'='steering_requested'", id, steeringCursor(run.State)).Scan(&pending); e != nil {
+		if e = tx.QueryRow("SELECT count(*) FROM events WHERE run_id=$1 AND sequence>$2 AND event_json->>'kind'='steering_requested'", id, steeringCursor(run.State)).Scan(&pending); e != nil {
 			return e
 		}
 		if pending >= 32 {
@@ -66,11 +66,11 @@ func (s *SQLiteStore) QueueSteering(id, owner, requestID, text string, revision 
 		if e != nil {
 			return e
 		}
-		if _, e = tx.Exec("INSERT INTO events(run_id,created_at,event_json) VALUES(?,?,?)", id, s.Now(), string(payload)); e != nil {
+		if _, e = tx.Exec("INSERT INTO events(run_id,created_at,event_json) VALUES($1,$2,$3)", id, s.Now(), string(payload)); e != nil {
 			return e
 		}
 		if run.LeaseUntil == nil || *run.LeaseUntil <= s.Now() {
-			if _, e = tx.Exec("UPDATE runs SET status='queued',next_wake_at=?,updated_at=? WHERE run_id=?", s.Now(), s.Now(), id); e != nil {
+			if _, e = tx.Exec("UPDATE runs SET status='queued',next_wake_at=$1,updated_at=$2 WHERE run_id=$3", s.Now(), s.Now(), id); e != nil {
 				return e
 			}
 		}
@@ -85,7 +85,7 @@ func (s *SQLiteStore) PendingSteering(id, owner string, after int) (result []ste
 	if _, err := s.GetRun(id, owner); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.Query("SELECT sequence,event_json->>'request_id',event_json->>'text' FROM events WHERE run_id=? AND sequence>? AND event_json->>'kind'='steering_requested' ORDER BY sequence LIMIT 32", id, after)
+	rows, err := s.DB.Query("SELECT sequence,event_json->>'request_id',event_json->>'text' FROM events WHERE run_id=$1 AND sequence>$2 AND event_json->>'kind'='steering_requested' ORDER BY sequence LIMIT 32", id, after)
 	if err != nil {
 		return nil, err
 	}

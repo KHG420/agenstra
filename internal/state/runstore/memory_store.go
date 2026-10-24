@@ -9,8 +9,8 @@ import (
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
 
-func initializeMemoryTables(tx *sql.Tx) error {
-	_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS memories (
+func (s *SQLiteStore) initializeMemoryTables(tx *sql.Tx) error {
+	_, err := tx.Exec(s.SchemaSQL(`CREATE TABLE IF NOT EXISTS memories (
  id TEXT PRIMARY KEY, owner TEXT NOT NULL, scope TEXT NOT NULL, topic TEXT NOT NULL,
  payload TEXT NOT NULL, evidence_floor INTEGER NOT NULL DEFAULT 0,
  invalidated_revision INTEGER NOT NULL DEFAULT 0, UNIQUE(owner,scope,topic));
@@ -23,7 +23,7 @@ func initializeMemoryTables(tx *sql.Tx) error {
  PRIMARY KEY(memory,revision));
  CREATE TABLE IF NOT EXISTS memory_inputs (
  owner TEXT NOT NULL, source TEXT NOT NULL, hash TEXT NOT NULL, error_code TEXT NOT NULL,
- PRIMARY KEY(owner,source));`)
+ PRIMARY KEY(owner,source));`))
 	return err
 }
 
@@ -49,12 +49,16 @@ func scanMemory(row scanner) (agentcontract.Memory, error) {
 
 // GetMemory reads a memory under its owner and user-or-pack scope. Host policy checks precede storage access.
 func (s *SQLiteStore) GetMemory(owner, pack, id string) (agentcontract.Memory, error) {
-	return scanMemory(s.DB.QueryRow("SELECT payload FROM memories WHERE id=? AND owner=? AND (scope='' OR scope=?)", id, owner, pack))
+	return scanMemory(s.DB.QueryRow("SELECT payload FROM memories WHERE id=$1 AND owner=$2 AND (scope='' OR scope=$3)", id, owner, pack))
 }
 
 // ListMemories lists owner-scoped memories with the requested pagination.
 func (s *SQLiteStore) ListMemories(owner, pack string, limit, offset int) (result []agentcontract.Memory, resultErr error) {
-	rows, err := s.DB.Query("SELECT payload FROM memories WHERE owner=? AND (scope='' OR scope=?) ORDER BY scope,topic LIMIT ? OFFSET ?", owner, pack, limit, offset)
+	var bound any = limit
+	if s.Postgres && limit < 0 {
+		bound = nil // PostgreSQL LIMIT NULL matches SQLite's unlimited LIMIT -1.
+	}
+	rows, err := s.DB.Query("SELECT payload FROM memories WHERE owner=$1 AND (scope='' OR scope=$2) ORDER BY scope,topic LIMIT $3 OFFSET $4", owner, pack, bound, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -75,17 +79,17 @@ func writeMemory(tx *sql.Tx, owner string, m agentcontract.Memory) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec("INSERT INTO memories(id,owner,scope,topic,payload) VALUES(?,?,?,?,?) ON CONFLICT(owner,scope,topic) DO UPDATE SET payload=excluded.payload", m.ID, owner, memoryScope(m.Scope, m.PackID), m.Key, raw)
+	_, err = tx.Exec("INSERT INTO memories(id,owner,scope,topic,payload) VALUES($1,$2,$3,$4,$5) ON CONFLICT(owner,scope,topic) DO UPDATE SET payload=excluded.payload", m.ID, owner, memoryScope(m.Scope, m.PackID), m.Key, raw)
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec("INSERT INTO memory_revisions(memory,revision,payload) VALUES(?,?,?)", m.ID, m.Revision, raw)
+	_, err = tx.Exec("INSERT INTO memory_revisions(memory,revision,payload) VALUES($1,$2,$3)", m.ID, m.Revision, raw)
 	return err
 }
 
 func evidenceFloor(tx *sql.Tx, id string) (int64, error) {
 	var floor int64
-	err := tx.QueryRow("SELECT coalesce(max(sequence),0) FROM memory_evidence WHERE memory=?", id).Scan(&floor)
+	err := tx.QueryRow("SELECT coalesce(max(sequence),0) FROM memory_evidence WHERE memory=$1", id).Scan(&floor)
 	return floor, err
 }
 
@@ -94,7 +98,7 @@ func invalidateMemory(tx *sql.Tx, m agentcontract.Memory) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec("UPDATE memories SET evidence_floor=?,invalidated_revision=? WHERE id=?", floor, m.Revision, m.ID)
+	_, err = tx.Exec("UPDATE memories SET evidence_floor=$1,invalidated_revision=$2 WHERE id=$3", floor, m.Revision, m.ID)
 	return err
 }
 
@@ -110,10 +114,10 @@ func forgetStoredMemory(tx *sql.Tx, owner string, m agentcontract.Memory, now fl
 	if err := invalidateMemory(tx, m); err != nil {
 		return m, err
 	}
-	if _, err := tx.Exec("DELETE FROM memory_evidence WHERE memory=?", m.ID); err != nil {
+	if _, err := tx.Exec("DELETE FROM memory_evidence WHERE memory=$1", m.ID); err != nil {
 		return m, err
 	}
-	if _, err := tx.Exec("DELETE FROM memory_revisions WHERE memory=?", m.ID); err != nil {
+	if _, err := tx.Exec("DELETE FROM memory_revisions WHERE memory=$1", m.ID); err != nil {
 		return m, err
 	}
 	return m, writeMemory(tx, owner, m)
@@ -122,7 +126,7 @@ func forgetStoredMemory(tx *sql.Tx, owner string, m agentcontract.Memory, now fl
 // SetMemory saves an owner-scoped manual memory with revision checking and retained history.
 func (s *SQLiteStore) SetMemory(owner, pack string, u agentcontract.MemoryUpdate) (m agentcontract.Memory, err error) {
 	err = s.Transaction(func(tx *sql.Tx) error {
-		current, e := scanMemory(tx.QueryRow("SELECT payload FROM memories WHERE owner=? AND scope=? AND topic=?", owner, memoryScope(u.Scope, pack), u.Key))
+		current, e := scanMemory(tx.QueryRow("SELECT payload FROM memories WHERE owner=$1 AND scope=$2 AND topic=$3", owner, memoryScope(u.Scope, pack), u.Key))
 		if e != nil && agentcontract.ErrorCode(e) != "not_found" {
 			return e
 		}
@@ -156,7 +160,7 @@ func (s *SQLiteStore) SetMemory(owner, pack string, u agentcontract.MemoryUpdate
 func (s *SQLiteStore) ForgetMemory(owner, pack, id string, revision int) (m agentcontract.Memory, err error) {
 	err = s.Transaction(func(tx *sql.Tx) error {
 		var e error
-		m, e = scanMemory(tx.QueryRow("SELECT payload FROM memories WHERE owner=? AND id=? AND (scope='' OR scope=?)", owner, id, pack))
+		m, e = scanMemory(tx.QueryRow("SELECT payload FROM memories WHERE owner=$1 AND id=$2 AND (scope='' OR scope=$3)", owner, id, pack))
 		if e != nil {
 			return e
 		}
@@ -174,7 +178,7 @@ func (s *SQLiteStore) MemoryHistory(owner, pack, id string) (result agentcontrac
 	out := agentcontract.MemoryHistory{Revisions: []agentcontract.Memory{}, Evidence: []agentcontract.MemoryEvidence{}}
 
 	// Ownership is part of each query, including concurrent delete/update races.
-	rows, err := s.DB.Query("SELECT r.payload FROM memory_revisions r JOIN memories m ON m.id=r.memory WHERE m.id=? AND m.owner=? AND (m.scope='' OR m.scope=?) ORDER BY r.revision DESC LIMIT 100", id, owner, pack)
+	rows, err := s.DB.Query("SELECT r.payload FROM memory_revisions r JOIN memories m ON m.id=r.memory WHERE m.id=$1 AND m.owner=$2 AND (m.scope='' OR m.scope=$3) ORDER BY r.revision DESC LIMIT 100", id, owner, pack)
 	if err != nil {
 		return out, err
 	}
@@ -189,7 +193,7 @@ func (s *SQLiteStore) MemoryHistory(owner, pack, id string) (result agentcontrac
 	if err != nil {
 		return out, err
 	}
-	rows, err = s.DB.Query("SELECT e.payload FROM memory_evidence e JOIN memories m ON m.id=e.memory WHERE m.id=? AND m.owner=? AND (m.scope='' OR m.scope=?) ORDER BY e.sequence DESC LIMIT 100", id, owner, pack)
+	rows, err = s.DB.Query("SELECT e.payload FROM memory_evidence e JOIN memories m ON m.id=e.memory WHERE m.id=$1 AND m.owner=$2 AND (m.scope='' OR m.scope=$3) ORDER BY e.sequence DESC LIMIT 100", id, owner, pack)
 	if err != nil {
 		return out, err
 	}
@@ -211,7 +215,7 @@ func (s *SQLiteStore) MemoryHistory(owner, pack, id string) (result agentcontrac
 // MemoryInputDone reports whether a learning input was already consumed by this run.
 func (s *SQLiteStore) MemoryInputDone(owner string, input MemoryInput) (bool, error) {
 	var hash string
-	err := s.DB.QueryRow("SELECT hash FROM memory_inputs WHERE owner=? AND source=?", owner, input.ID).Scan(&hash)
+	err := s.DB.QueryRow("SELECT hash FROM memory_inputs WHERE owner=$1 AND source=$2", owner, input.ID).Scan(&hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -230,7 +234,7 @@ func (s *SQLiteStore) ApplyMemoryInput(run agentcontract.StoredRun, input Memory
 		if _, err := s.leased(tx, run.RunID, run.OwnerID, run.LeaseToken); err != nil {
 			return err
 		}
-		result, err := tx.Exec("INSERT INTO memory_inputs(owner,source,hash,error_code) VALUES(?,?,?,?) ON CONFLICT(owner,source) DO NOTHING", run.OwnerID, input.ID, agentcontract.WebHash(input.Text), code)
+		result, err := tx.Exec("INSERT INTO memory_inputs(owner,source,hash,error_code) VALUES($1,$2,$3,$4) ON CONFLICT(owner,source) DO NOTHING", run.OwnerID, input.ID, agentcontract.WebHash(input.Text), code)
 		if err != nil {
 			return err
 		}
@@ -248,7 +252,7 @@ func (s *SQLiteStore) ApplyMemoryInput(run agentcontract.StoredRun, input Memory
 			if temporaryMemoryInput(input.Text) && (p.Mode == "habit" || p.Mode == "explicit" && !lastingMemoryQuote(p.Quote)) {
 				continue
 			}
-			m, e := scanMemory(tx.QueryRow("SELECT payload FROM memories WHERE owner=? AND scope=? AND topic=?", run.OwnerID, memoryScope(p.Scope, run.PackID), p.Key))
+			m, e := scanMemory(tx.QueryRow("SELECT payload FROM memories WHERE owner=$1 AND scope=$2 AND topic=$3", run.OwnerID, memoryScope(p.Scope, run.PackID), p.Key))
 			if e != nil && agentcontract.ErrorCode(e) != "not_found" {
 				return e
 			}
@@ -277,7 +281,7 @@ func (s *SQLiteStore) ApplyMemoryInput(run agentcontract.StoredRun, input Memory
 			if e != nil {
 				return e
 			}
-			result, e = tx.Exec("INSERT INTO memory_evidence(memory,source,value,payload) VALUES(?,?,?,?) ON CONFLICT(memory,source) DO NOTHING", m.ID, input.ID, p.Value, raw)
+			result, e = tx.Exec("INSERT INTO memory_evidence(memory,source,value,payload) VALUES($1,$2,$3,$4) ON CONFLICT(memory,source) DO NOTHING", m.ID, input.ID, p.Value, raw)
 			if e != nil {
 				return e
 			}
@@ -289,7 +293,7 @@ func (s *SQLiteStore) ApplyMemoryInput(run agentcontract.StoredRun, input Memory
 				continue
 			}
 			count := 0
-			if e = tx.QueryRow("SELECT count(*) FROM memory_evidence e JOIN memories m ON m.id=e.memory WHERE e.memory=? AND e.value=? AND e.sequence>m.evidence_floor", m.ID, p.Value).Scan(&count); e != nil {
+			if e = tx.QueryRow("SELECT count(*) FROM memory_evidence e JOIN memories m ON m.id=e.memory WHERE e.memory=$1 AND e.value=$2 AND e.sequence>m.evidence_floor", m.ID, p.Value).Scan(&count); e != nil {
 				return e
 			}
 			activate := p.Mode == "explicit" || count >= memoryHabitEvidence && (m.Status != "active" || m.Origin == "inferred")
@@ -360,7 +364,7 @@ func (s *SQLiteStore) VisibleMemorySnapshot(owner, pack string, views []agentcon
 	for _, v := range views {
 		var raw string
 		var invalidated int
-		err := s.DB.QueryRow("SELECT payload,invalidated_revision FROM memories WHERE id=? AND owner=? AND (scope='' OR scope=?)", v.ID, owner, pack).Scan(&raw, &invalidated)
+		err := s.DB.QueryRow("SELECT payload,invalidated_revision FROM memories WHERE id=$1 AND owner=$2 AND (scope='' OR scope=$3)", v.ID, owner, pack).Scan(&raw, &invalidated)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -381,7 +385,7 @@ func (s *SQLiteStore) VisibleMemorySnapshot(owner, pack string, views []agentcon
 // MemoryInputError records a bounded learning error and input consumption under the live lease.
 func (s *SQLiteStore) MemoryInputError(owner, source string) (string, error) {
 	var code string
-	err := s.DB.QueryRow("SELECT error_code FROM memory_inputs WHERE owner=? AND source=?", owner, source).Scan(&code)
+	err := s.DB.QueryRow("SELECT error_code FROM memory_inputs WHERE owner=$1 AND source=$2", owner, source).Scan(&code)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}

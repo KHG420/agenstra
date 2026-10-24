@@ -79,7 +79,7 @@ func (h *AgentHost) SetContextPolicy(ctx context.Context, id, owner, requestID s
 }
 
 func (h *AgentHost) applyContextPolicy(run agentcontract.StoredRun, state *agentcontract.RuntimeState) (agentcontract.StoredRun, error) {
-	rows, err := h.Store.DB.Query("SELECT sequence,event_json->>'policy_json' FROM events WHERE run_id=? AND sequence>? AND event_json->>'kind'='context_policy_requested' ORDER BY sequence LIMIT 32", run.RunID, state.ContextPolicyCursor)
+	rows, err := h.Store.DB.Query("SELECT sequence,event_json->>'policy_json' FROM events WHERE run_id=$1 AND sequence>$2 AND event_json->>'kind'='context_policy_requested' ORDER BY sequence LIMIT 32", run.RunID, state.ContextPolicyCursor)
 	if err != nil {
 		return run, err
 	}

@@ -26,7 +26,7 @@ Skill 提供工作流指导；接入是否完成仍由宿主测试、真实业�
 
 按[部署指南](deployment.md)准备模型网关、持久盘和 `deployment.json`，启动 `agenstra-serve --config deployment.json`。需要接入管理界面时，配置 `management`；需要聊天入口时，配置 `web_integration.chat`。页面动作另行开启 `browser_bridge`。
 
-模型和业务凭据由部署方配置。当前运行范围是单节点和 SQLite WAL。服务端账户映射可使用静态用户 API key，也可配置 `host_auth` 验证宿主已有登录凭证并取得稳定 owner ID。动态用户通过管理绑定获得授权，无需逐个修改静态用户配置；宿主票据助手负责换票，授权仍由服务端绑定决定。
+模型和业务凭据由部署方配置。当前按单节点部署，默认 SQLite WAL；静态能力包接入可选择 [PostgreSQL](postgresql.md) 保存全部运行与 Web 数据。服务端账户映射可使用静态用户 API key，也可配置 `host_auth` 验证宿主已有登录凭证并取得稳定 owner ID。动态用户通过管理绑定获得授权，无需逐个修改静态用户配置；宿主票据助手负责换票，授权仍由服务端绑定决定。
 
 ## 2. 连接与选择能力
 

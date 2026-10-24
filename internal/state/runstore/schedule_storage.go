@@ -10,8 +10,8 @@ import (
 
 // Schedules extend the database without changing the v1 runs schema or version.
 // Existing Python/Go runs and checkpoints remain readable.
-func initializeScheduleTables(tx *sql.Tx) error {
-	_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS scheduled_tasks (
+func (s *SQLiteStore) initializeScheduleTables(tx *sql.Tx) error {
+	_, err := tx.Exec(s.SchemaSQL(`CREATE TABLE IF NOT EXISTS scheduled_tasks (
 	 schedule_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, status TEXT NOT NULL,
 	 next_run_at REAL, revision INTEGER NOT NULL, created_at REAL NOT NULL, payload_json TEXT NOT NULL);
 	 CREATE INDEX IF NOT EXISTS scheduled_tasks_due ON scheduled_tasks(status,next_run_at);
@@ -22,14 +22,14 @@ func initializeScheduleTables(tx *sql.Tx) error {
 	 owner_id TEXT NOT NULL, scheduled_at REAL NOT NULL, triggered_at REAL NOT NULL,
 	 run_id TEXT REFERENCES runs(run_id), status TEXT NOT NULL, error_code TEXT NOT NULL);
 	 CREATE INDEX IF NOT EXISTS schedule_executions_task ON schedule_executions(schedule_id,sequence);
-	 CREATE INDEX IF NOT EXISTS schedule_executions_run ON schedule_executions(run_id);`)
+	 CREATE INDEX IF NOT EXISTS schedule_executions_run ON schedule_executions(run_id);`))
 	return err
 }
 
 func ownedSchedule(q SQLQueryer, id, owner string) (agentcontract.ScheduledTask, error) {
 	var task agentcontract.ScheduledTask
 	var raw string
-	err := q.QueryRow("SELECT payload_json FROM scheduled_tasks WHERE schedule_id=? AND owner_id=?", id, owner).Scan(&raw)
+	err := q.QueryRow("SELECT payload_json FROM scheduled_tasks WHERE schedule_id=$1 AND owner_id=$2", id, owner).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return task, agentcontract.NewHostError("not_found")
 	}
@@ -45,7 +45,7 @@ func saveSchedule(tx *sql.Tx, task agentcontract.ScheduledTask) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec("UPDATE scheduled_tasks SET status=?,next_run_at=?,revision=?,payload_json=? WHERE schedule_id=? AND owner_id=?", task.Status, task.NextRunAt, task.Revision, string(raw), task.ScheduleID, task.OwnerID)
+	_, err = tx.Exec("UPDATE scheduled_tasks SET status=$1,next_run_at=$2,revision=$3,payload_json=$4 WHERE schedule_id=$5 AND owner_id=$6", task.Status, task.NextRunAt, task.Revision, string(raw), task.ScheduleID, task.OwnerID)
 	return err
 }
 
@@ -56,7 +56,7 @@ func (s *SQLiteStore) InsertSchedule(task agentcontract.ScheduledTask) error {
 		return err
 	}
 	return s.Transaction(func(tx *sql.Tx) error {
-		_, err := tx.Exec("INSERT INTO scheduled_tasks(schedule_id,owner_id,status,next_run_at,revision,created_at,payload_json) VALUES(?,?,?,?,?,?,?)", task.ScheduleID, task.OwnerID, task.Status, task.NextRunAt, task.Revision, task.CreatedAt, string(raw))
+		_, err := tx.Exec("INSERT INTO scheduled_tasks(schedule_id,owner_id,status,next_run_at,revision,created_at,payload_json) VALUES($1,$2,$3,$4,$5,$6,$7)", task.ScheduleID, task.OwnerID, task.Status, task.NextRunAt, task.Revision, task.CreatedAt, string(raw))
 		return err
 	})
 }
@@ -97,7 +97,7 @@ func (s *SQLiteStore) querySchedules(query string, args ...any) (output []agentc
 
 // ListSchedules lists saved schedules belonging to an owner.
 func (s *SQLiteStore) ListSchedules(owner string, limit int) ([]agentcontract.ScheduledTask, error) {
-	tasks, err := s.querySchedules("SELECT payload_json FROM scheduled_tasks WHERE owner_id=? ORDER BY created_at DESC,schedule_id LIMIT ?", owner, limit)
+	tasks, err := s.querySchedules("SELECT payload_json FROM scheduled_tasks WHERE owner_id=$1 ORDER BY created_at DESC,schedule_id LIMIT $2", owner, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func (s *SQLiteStore) ListSchedules(owner string, limit int) ([]agentcontract.Sc
 
 // DueSchedules returns scheduled tasks eligible for dispatch at the supplied Unix-seconds time.
 func (s *SQLiteStore) DueSchedules(now float64, limit int) ([]agentcontract.ScheduledTask, error) {
-	return s.querySchedules("SELECT payload_json FROM scheduled_tasks WHERE status='active' AND next_run_at<=? ORDER BY next_run_at,schedule_id LIMIT ?", now, limit)
+	return s.querySchedules("SELECT payload_json FROM scheduled_tasks WHERE status='active' AND next_run_at<=$1 ORDER BY next_run_at,schedule_id LIMIT $2", now, limit)
 }
 
 // ReplaceSchedule replaces the complete owner-bound definition under its expected revision.
@@ -148,7 +148,7 @@ func (s *SQLiteStore) DeleteSchedule(id, owner string, revision int) error {
 		if revision < 0 || task.Revision != revision {
 			return agentcontract.NewHostError("revision_conflict")
 		}
-		_, err = tx.Exec("DELETE FROM scheduled_tasks WHERE schedule_id=? AND owner_id=?", id, owner)
+		_, err = tx.Exec("DELETE FROM scheduled_tasks WHERE schedule_id=$1 AND owner_id=$2", id, owner)
 		return err
 	})
 }
@@ -171,7 +171,7 @@ func (s *SQLiteStore) DispatchSchedule(task agentcontract.ScheduledTask, runID s
 		} else {
 			var active int
 			if err = tx.QueryRow(`SELECT count(*) FROM schedule_executions e JOIN runs r ON r.run_id=e.run_id
-			 WHERE e.schedule_id=? AND r.status NOT IN ('completed','failed','cancelled')`, task.ScheduleID).Scan(&active); err != nil {
+			 WHERE e.schedule_id=$1 AND r.status NOT IN ('completed','failed','cancelled')`, task.ScheduleID).Scan(&active); err != nil {
 				return err
 			}
 			if active > 0 {
@@ -181,14 +181,14 @@ func (s *SQLiteStore) DispatchSchedule(task agentcontract.ScheduledTask, runID s
 				if err != nil {
 					return err
 				}
-				if _, err = tx.Exec("INSERT INTO runs(run_id,owner_id,pack_id,status,state_json,revision,created_at,updated_at) VALUES(?,?,?,'queued',?,0,?,?)", runID, task.OwnerID, task.PackID, string(raw), now, now); err != nil {
+				if _, err = tx.Exec("INSERT INTO runs(run_id,owner_id,pack_id,status,state_json,revision,created_at,updated_at) VALUES($1,$2,$3,'queued',$4,0,$5,$6)", runID, task.OwnerID, task.PackID, string(raw), now, now); err != nil {
 					return err
 				}
 				event, err := agentcontract.CanonicalJSON(map[string]any{"kind": "schedule_triggered", "schedule_id": task.ScheduleID, "scheduled_at": *task.NextRunAt})
 				if err != nil {
 					return err
 				}
-				if _, err = tx.Exec("INSERT INTO events(run_id,created_at,event_json) VALUES(?,?,?)", runID, now, string(event)); err != nil {
+				if _, err = tx.Exec("INSERT INTO events(run_id,created_at,event_json) VALUES($1,$2,$3)", runID, now, string(event)); err != nil {
 					return err
 				}
 				storedRunID = runID
@@ -198,7 +198,7 @@ func (s *SQLiteStore) DispatchSchedule(task agentcontract.ScheduledTask, runID s
 				task.Status = "completed"
 			}
 		}
-		if _, err = tx.Exec("INSERT INTO schedule_executions(schedule_id,owner_id,scheduled_at,triggered_at,run_id,status,error_code) VALUES(?,?,?,?,?,?,?)", task.ScheduleID, task.OwnerID, *current.NextRunAt, now, storedRunID, status, errorCode); err != nil {
+		if _, err = tx.Exec("INSERT INTO schedule_executions(schedule_id,owner_id,scheduled_at,triggered_at,run_id,status,error_code) VALUES($1,$2,$3,$4,$5,$6,$7)", task.ScheduleID, task.OwnerID, *current.NextRunAt, now, storedRunID, status, errorCode); err != nil {
 			return err
 		}
 		task.Revision++
@@ -215,7 +215,7 @@ func (s *SQLiteStore) ScheduleExecutions(id, owner string, after int64, limit in
 	}
 	rows, err := s.DB.Query(`SELECT e.sequence,e.schedule_id,e.scheduled_at,e.triggered_at,e.run_id,e.status,e.error_code,r.status,r.state_json
 	 FROM schedule_executions e LEFT JOIN runs r ON r.run_id=e.run_id AND r.owner_id=e.owner_id
-	 WHERE e.schedule_id=? AND e.owner_id=? AND e.sequence>? ORDER BY e.sequence `+order+` LIMIT ?`, id, owner, after, limit)
+	 WHERE e.schedule_id=$1 AND e.owner_id=$2 AND e.sequence>$3 ORDER BY e.sequence `+order+` LIMIT $4`, id, owner, after, limit)
 	if err != nil {
 		return nil, err
 	}

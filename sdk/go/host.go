@@ -128,6 +128,15 @@ type StoredRun = agent.StoredRun
 // prevent an expired worker from committing state.
 type SQLiteStore = runstore.SQLiteStore
 
+// Store holds run state on SQLite or PostgreSQL with the same owner and lease checks.
+type Store = runstore.Store
+
+// NewPostgresStore opens a dedicated schema in an existing database. Initialize
+// creates tables; the caller must close it after all users have stopped.
+func NewPostgresStore(dsn, schema string) (*Store, error) {
+	return runstore.NewPostgresStore(dsn, schema)
+}
+
 // NewSQLiteStore opens a single-connection disk store; Initialize sets up WAL and tables.
 // The caller owns the store and must close it.
 func NewSQLiteStore(path string) (*SQLiteStore, error) { return runstore.NewSQLiteStore(path) }
@@ -173,6 +182,12 @@ type WebStore = service.WebStore
 // NewWebStore opens and initializes the optional integration database.
 // The caller must close it after all integration requests have stopped.
 func NewWebStore(path string) (*WebStore, error) { return service.NewWebStore(path) }
+
+// NewPostgresWebStore opens the Web database in a dedicated PostgreSQL schema.
+// It must use a different schema from NewPostgresStore; the caller owns Close.
+func NewPostgresWebStore(dsn, schema string) (*WebStore, error) {
+	return service.NewPostgresWebStore(dsn, schema)
+}
 
 // BrowserSession is the persisted owner-bound browser generation and confirmed page snapshot.
 type BrowserSession = agent.BrowserSession

@@ -161,7 +161,7 @@ func (s *HTTPServer) webHTTP(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(p, "/web/v1")
 		id := strings.Split(strings.TrimPrefix(path, "/runs/"), "/")[0]
 		var count int
-		e = integration.Store.store.DB.QueryRow("SELECT (SELECT count(*) FROM web_bindings WHERE run=? AND owner=?)+(SELECT count(*) FROM web_messages WHERE payload->>'run_id'=? AND owner=?)", id, owner, id, owner).Scan(&count)
+		e = integration.Store.store.DB.QueryRow("SELECT (SELECT count(*) FROM web_bindings WHERE run=$1 AND owner=$2)+(SELECT count(*) FROM web_messages WHERE payload->>'run_id'=$3 AND owner=$4)", id, owner, id, owner).Scan(&count)
 		if e != nil {
 			serverError(w, e)
 			return

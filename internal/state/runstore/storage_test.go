@@ -2,7 +2,9 @@ package runstore
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -11,7 +13,13 @@ import (
 
 func testStore(t *testing.T) *SQLiteStore {
 	t.Helper()
-	s, e := NewSQLiteStore(filepath.Join(t.TempDir(), "runs.sqlite3"))
+	var s *Store
+	var e error
+	if os.Getenv("AGENSTRA_TEST_STORAGE_BACKEND") == "postgres" {
+		s, e = NewPostgresStore(os.Getenv("AGENSTRA_TEST_POSTGRES_DSN"), "test_runs_"+strings.ReplaceAll(agentcontract.NewID(), "-", ""))
+	} else {
+		s, e = NewSQLiteStore(filepath.Join(t.TempDir(), "runs.sqlite3"))
+	}
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -19,6 +27,11 @@ func testStore(t *testing.T) *SQLiteStore {
 		t.Fatal(e)
 	}
 	t.Cleanup(func() {
+		if s.Postgres {
+			if _, err := s.DB.Exec("DROP SCHEMA " + s.Path + " CASCADE"); err != nil {
+				t.Error(err)
+			}
+		}
 		if err := s.Close(); err != nil {
 			t.Error(err)
 		}
@@ -41,7 +54,13 @@ func TestStoreReopenOwnerScope(t *testing.T) {
 	if _, e := s.GetRun(r.RunID, "bob"); !errors.Is(e, ErrRunNotFound) {
 		t.Fatalf("owner scope: %v", e)
 	}
-	second, e := NewSQLiteStore(s.Path)
+	var second *Store
+	var e error
+	if s.Postgres {
+		second, e = NewPostgresStore(os.Getenv("AGENSTRA_TEST_POSTGRES_DSN"), s.Path)
+	} else {
+		second, e = NewSQLiteStore(s.Path)
+	}
 	if e != nil {
 		t.Fatal(e)
 	}

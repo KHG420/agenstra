@@ -14,6 +14,6 @@ func ContextPolicyCursor(envelope agentcontract.JSON) int {
 
 func latestContextPolicy(q SQLQueryer, id string) (int, error) {
 	var seq int
-	err := q.QueryRow("SELECT coalesce(max(sequence),0) FROM events WHERE run_id=? AND event_json->>'kind'='context_policy_requested'", id).Scan(&seq)
+	err := q.QueryRow("SELECT coalesce(max(sequence),0) FROM events WHERE run_id=$1 AND event_json->>'kind'='context_policy_requested'", id).Scan(&seq)
 	return seq, err
 }

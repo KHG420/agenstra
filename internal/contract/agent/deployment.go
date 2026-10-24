@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // DeploymentError carries a safe deployment or connection error code.
@@ -53,6 +54,7 @@ type ManagementConfig struct {
 
 // DeploymentConfig contains trusted host wiring, execution limits and optional integrations.
 type DeploymentConfig struct {
+	Database             *DatabaseConfig                          `json:"database,omitempty"`
 	Models               *ModelConfiguration                      `json:"models,omitempty"`
 	CompletionChecks     map[string][]FactRequirement             `json:"completion_checks,omitempty"`
 	ReconciliationChecks map[string]map[string]ReconciliationRule `json:"reconciliation_checks,omitempty"`
@@ -63,6 +65,32 @@ type DeploymentConfig struct {
 	Management           *ManagementConfig                        `json:"management"`
 	Settings             HostSettings                             `json:"settings"`
 	WebIntegration       *WebIntegrationConfig                    `json:"web_integration,omitempty"`
+}
+
+// DatabaseConfig selects PostgreSQL for run and optional Web persistence.
+// Credentials are resolved from an environment reference, never a manifest value.
+type DatabaseConfig struct {
+	Driver    string `json:"driver"`
+	DSNEnv    string `json:"dsn_env"`
+	Schema    string `json:"schema"`
+	WebSchema string `json:"web_schema,omitempty"`
+}
+
+// DatabaseSchemaName limits schema identifiers to unquoted, non-system names.
+var DatabaseSchemaName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
+
+// Validate rejects ambiguous or incomplete PostgreSQL configuration.
+func (c DatabaseConfig) Validate(web bool) error {
+	validSchema := func(s string) bool {
+		return DatabaseSchemaName.MatchString(s) && s != "public" && s != "information_schema" && !strings.HasPrefix(s, "pg_")
+	}
+	if c.Driver != "postgres" || !DeploymentEnvName.MatchString(c.DSNEnv) || !validSchema(c.Schema) {
+		return fmt.Errorf("database requires postgres driver, dsn_env and a dedicated schema")
+	}
+	if (web || c.WebSchema != "") && (!validSchema(c.WebSchema) || c.WebSchema == c.Schema) {
+		return fmt.Errorf("database web_schema must be a separate dedicated schema")
+	}
+	return nil
 }
 
 // DeploymentEnvName validates trusted environment reference names.

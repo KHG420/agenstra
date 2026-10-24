@@ -49,11 +49,11 @@ go run ./examples/web-integration
 
 Agenstra 可独立部署，通过 HTTP API 为现有系统提供 Agent 服务；Go 应用也可使用公开接口接入。接入方决定能力粒度、使用规则和授权策略，运行时根据任务与真实结果逐步选择下一步操作。
 
-当前持久宿主支持**单节点、持久本地磁盘和 SQLite WAL**。一个部署可以配置多个用户，每个用户有独立的能力授权和连接。一个项目拥有一个能力包；任务可以显式组合其他项目中已授权的能力，详见[跨项目任务](docs/cross-project-tasks.md)。包括读取在内的所有能力都需要明确授权。分布式高可用、自动保留期清理、真实模型质量和外部计算正确性仍需另行设计或验收。
+当前持久宿主按**单节点**部署，默认使用持久本地磁盘与 SQLite WAL；静态能力包也可选择 [PostgreSQL](docs/postgresql.md)，不创建 SQLite 文件。一个部署可以配置多个用户，每个用户有独立的能力授权和连接。一个项目拥有一个能力包；任务可以显式组合其他项目中已授权的能力，详见[跨项目任务](docs/cross-project-tasks.md)。包括读取在内的所有能力都需要明确授权。分布式高可用、自动保留期清理、真实模型质量和外部计算正确性仍需另行设计或验收。
 
 本仓库发布框架、通用测试、部署模板、教程和本地演示。生产使用时，需要提供自己的业务能力包、模型连接与凭据；`deploy/deployment.example.json` 用于配置接入。
 
-Go 宿主导入 `github.com/KHG420/agenstra/sdk/go`（包名 `agenstra`）。源码采用内核与 SDK 分离的目录：决策与持久运行分别位于 `internal/runtime/react` 和 `internal/runtime/host`，SQLite 位于 `internal/state`；共享契约、能力适配、模型协议和部署装配分别位于 `internal/contract`、`ext`、`platform` 和 `assembly`；HTTP/Web 服务位于 `internal/frontend/service`；管理控制台资源位于 `internal/frontend/admin`；浏览器接入位于 `sdk/web`。命令和示例使用同一个 Go SDK，完整目录与依赖方向见[源码模块映射](docs/architecture.md#源码模块与依赖方向)。
+Go 宿主导入 `github.com/KHG420/agenstra/sdk/go`（包名 `agenstra`）。源码采用内核与 SDK 分离的目录：决策与持久运行分别位于 `internal/runtime/react` 和 `internal/runtime/host`，存储后端位于 `internal/state`；共享契约、能力适配、模型协议和部署装配分别位于 `internal/contract`、`ext`、`platform` 和 `assembly`；HTTP/Web 服务位于 `internal/frontend/service`；管理控制台资源位于 `internal/frontend/admin`；浏览器接入位于 `sdk/web`。命令和示例使用同一个 Go SDK，完整目录与依赖方向见[源码模块映射](docs/architecture.md#源码模块与依赖方向)。
 
 ```mermaid
 flowchart LR

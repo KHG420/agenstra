@@ -127,6 +127,11 @@ func newWebFixture(t *testing.T, model *hostModel, approval bool) *webFixture {
 	h := testHost(t, testStore(t), p, model)
 	cfg := agentcontract.WebIntegrationConfig{DatabasePath: "web.sqlite3", Chat: true, BrowserBridge: true, SessionKeyEnv: "WEB_KEY", Integrations: map[string]agentcontract.WebProfileConfig{"records": {PackID: "records"}, "records-web": {PackID: "records", FrontendProfilePath: "frontend.json"}}}
 	d := &deployassembly.Deployment{BaseDir: dir, Environment: map[string]string{"WEB_KEY": strings.Repeat("k", 32), "ALICE_KEY": "alice-key"}, Config: agentcontract.DeploymentConfig{DatabasePath: h.Store.Path, Packs: map[string]agentcontract.PackConfig{"records": {Path: "unused"}}, Users: map[string]agentcontract.UserConfig{"alice": {APIKeyEnv: "ALICE_KEY", BrowserActions: map[string][]string{"records-web": {"ui.navigate"}}}}, WebIntegration: &cfg}}
+	if h.Store.Postgres {
+		d.Config.DatabasePath, cfg.DatabasePath = "", ""
+		d.Config.Database = &agentcontract.DatabaseConfig{Driver: "postgres", DSNEnv: "TEST_DSN", Schema: h.Store.Path, WebSchema: "test_web_" + strings.ReplaceAll(agentcontract.NewID(), "-", "")}
+		d.Environment["TEST_DSN"] = os.Getenv("AGENSTRA_TEST_POSTGRES_DSN")
+	}
 	w, e := NewWebIntegration(h, d, cfg)
 	if e != nil {
 		t.Fatal(e)
@@ -136,6 +141,11 @@ func newWebFixture(t *testing.T, model *hostModel, approval bool) *webFixture {
 	h.Store.Clock = h.Clock
 	w.Store.store.Clock = h.Clock
 	t.Cleanup(func() {
+		if w.Store.store.Postgres {
+			if _, err := h.Store.DB.Exec("DROP SCHEMA " + w.Store.store.Path + " CASCADE"); err != nil {
+				t.Error(err)
+			}
+		}
 		if err := w.Close(); err != nil {
 			t.Error(err)
 		}
@@ -434,7 +444,11 @@ func TestChatQueuePrebindingIdempotenceAndRecovery(t *testing.T) {
 		t.Fatal("cross owner", e)
 	}
 	var v int
-	if err := f.h.Store.DB.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+	versionQuery := "PRAGMA user_version"
+	if f.h.Store.Postgres {
+		versionQuery = "SELECT version FROM store_meta WHERE id=1"
+	}
+	if err := f.h.Store.DB.QueryRow(versionQuery).Scan(&v); err != nil {
 		t.Error(err)
 	}
 	if v != 1 {

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 	"github.com/KHG420/agenstra/internal/state/runstore"
@@ -19,13 +20,30 @@ func NewWebStore(path string) (*WebStore, error) {
 	if e != nil {
 		return nil, e
 	}
+	return newWebStore(s)
+}
+
+// NewPostgresWebStore persists Web sessions, conversations and browser receipts
+// in a schema separate from the run store. The caller owns Close.
+func NewPostgresWebStore(dsn, schema string) (*WebStore, error) {
+	s, e := runstore.NewPostgresStore(dsn, schema)
+	if e != nil {
+		return nil, e
+	}
+	return newWebStore(s)
+}
+
+func newWebStore(s *runstore.Store) (*WebStore, error) {
 	w := &WebStore{s}
-	var mode string
-	if e = s.DB.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode); e == nil && mode != "wal" {
-		e = errors.New("web store requires WAL")
+	var e error
+	if !s.Postgres {
+		var mode string
+		if e = s.DB.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode); e == nil && mode != "wal" {
+			e = errors.New("web store requires WAL")
+		}
 	}
 	if e == nil {
-		_, e = s.DB.Exec(`CREATE TABLE IF NOT EXISTS web_meta(version INTEGER NOT NULL);
+		ddl := `CREATE TABLE IF NOT EXISTS web_meta(version INTEGER NOT NULL);
  INSERT INTO web_meta SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM web_meta);
  CREATE TABLE IF NOT EXISTS web_sessions(id TEXT PRIMARY KEY,owner TEXT NOT NULL,payload TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS web_sessions_owner ON web_sessions(owner);
@@ -37,7 +55,15 @@ func NewWebStore(path string) (*WebStore, error) {
  CREATE INDEX IF NOT EXISTS web_commands_session ON web_commands(session,sequence);
  CREATE INDEX IF NOT EXISTS web_commands_run ON web_commands(run);
  CREATE TABLE IF NOT EXISTS web_bindings(run TEXT PRIMARY KEY,owner TEXT NOT NULL,payload TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS web_releases(id TEXT PRIMARY KEY,payload TEXT NOT NULL);`)
+ CREATE TABLE IF NOT EXISTS web_releases(id TEXT PRIMARY KEY,payload TEXT NOT NULL);`
+		if s.Postgres {
+			ddl = strings.ReplaceAll(ddl, "payload TEXT", "payload JSONB")
+			ddl = strings.Replace(ddl, "web_conversations(id", "web_conversations(rowid BIGSERIAL UNIQUE,id", 1)
+		}
+		e = s.Transaction(func(tx *sql.Tx) error {
+			_, err := tx.Exec(s.SchemaSQL(ddl))
+			return err
+		})
 	}
 	var version int
 	if e == nil {
@@ -58,7 +84,7 @@ func (w *WebStore) Close() error { return w.store.Close() }
 func webLoad(q sqlQueryer, table, id, owner string, v any) error {
 	// table is always an internal constant, never supplied by a request.
 	var raw string
-	e := q.QueryRow("SELECT payload FROM "+table+" WHERE id=? AND owner=?", id, owner).Scan(&raw)
+	e := q.QueryRow("SELECT payload FROM "+table+" WHERE id=$1 AND owner=$2", id, owner).Scan(&raw)
 	if errors.Is(e, sql.ErrNoRows) {
 		return agentcontract.NewHostError("not_found")
 	}
@@ -73,7 +99,7 @@ func webSave(tx *sql.Tx, table, id string, v any) error {
 	if e != nil {
 		return e
 	}
-	_, e = tx.Exec("UPDATE "+table+" SET payload=? WHERE id=?", raw, id)
+	_, e = tx.Exec("UPDATE "+table+" SET payload=$1 WHERE id=$2", raw, id)
 	return e
 }
 
@@ -82,14 +108,14 @@ func webInsert(tx *sql.Tx, table, id, owner string, v any) error {
 	if e != nil {
 		return e
 	}
-	_, e = tx.Exec("INSERT INTO "+table+"(id,owner,payload) VALUES(?,?,?)", id, owner, raw)
+	_, e = tx.Exec("INSERT INTO "+table+"(id,owner,payload) VALUES($1,$2,$3)", id, owner, raw)
 	return e
 }
 
 func (w *WebStore) binding(owner, run string) (agentcontract.WebRunBinding, error) {
 	var b agentcontract.WebRunBinding
 	var raw string
-	e := w.store.DB.QueryRow("SELECT payload FROM web_bindings WHERE run=? AND owner=?", run, owner).Scan(&raw)
+	e := w.store.DB.QueryRow("SELECT payload FROM web_bindings WHERE run=$1 AND owner=$2", run, owner).Scan(&raw)
 	if errors.Is(e, sql.ErrNoRows) {
 		return b, agentcontract.NewHostError("browser_binding_missing")
 	}
@@ -100,7 +126,7 @@ func (w *WebStore) binding(owner, run string) (agentcontract.WebRunBinding, erro
 }
 
 func (w *WebStore) commands(tx *sql.Tx, owner, session string) (output []agentcontract.BrowserCommand, resultErr error) {
-	rows, e := tx.Query("SELECT payload FROM web_commands WHERE owner=? AND session=? ORDER BY sequence", owner, session)
+	rows, e := tx.Query("SELECT payload FROM web_commands WHERE owner=$1 AND session=$2 ORDER BY sequence", owner, session)
 	if e != nil {
 		return nil, e
 	}
@@ -123,7 +149,7 @@ func (w *WebStore) commands(tx *sql.Tx, owner, session string) (output []agentco
 func (w *WebStore) messages(q interface {
 	Query(string, ...any) (*sql.Rows, error)
 }, owner, conversation string) (output []agentcontract.ChatMessage, resultErr error) {
-	rows, e := q.Query("SELECT payload FROM web_messages WHERE owner=? AND conversation=? ORDER BY sequence", owner, conversation)
+	rows, e := q.Query("SELECT payload FROM web_messages WHERE owner=$1 AND conversation=$2 ORDER BY sequence", owner, conversation)
 	if e != nil {
 		return nil, e
 	}

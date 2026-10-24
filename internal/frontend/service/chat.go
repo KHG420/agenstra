@@ -58,7 +58,7 @@ func (w *WebIntegration) ListConversations(ctx context.Context, owner, integrati
 		}
 		visible = append(visible, integration)
 	} else {
-		rows, e := w.Store.store.DB.Query("SELECT DISTINCT payload->>'integration_id' FROM web_conversations WHERE owner=?", owner)
+		rows, e := w.Store.store.DB.Query("SELECT DISTINCT payload->>'integration_id' FROM web_conversations WHERE owner=$1", owner)
 		if e != nil {
 			return nil, e
 		}
@@ -94,7 +94,11 @@ func (w *WebIntegration) ListConversations(ctx context.Context, owner, integrati
 	if e != nil {
 		return nil, e
 	}
-	rows, e := w.Store.store.DB.Query("SELECT payload FROM web_conversations WHERE owner=? AND payload->>'integration_id' IN (SELECT value FROM json_each(?)) ORDER BY rowid DESC LIMIT 100", owner, string(filter))
+	query := "SELECT payload FROM web_conversations WHERE owner=$1 AND payload->>'integration_id' IN (SELECT value FROM json_each($2)) ORDER BY rowid DESC LIMIT 100"
+	if w.Store.store.Postgres {
+		query = "SELECT payload FROM web_conversations WHERE owner=$1 AND payload->>'integration_id' IN (SELECT value FROM jsonb_array_elements_text($2::jsonb) AS items(value)) ORDER BY rowid DESC LIMIT 100"
+	}
+	rows, e := w.Store.store.DB.Query(query, owner, string(filter))
 	if e != nil {
 		return nil, e
 	}
@@ -148,7 +152,7 @@ func (w *WebIntegration) SubmitMessageWithSources(ctx context.Context, owner, co
 	}
 	e = w.Store.store.Transaction(func(tx *sql.Tx) error {
 		var raw string
-		existing := tx.QueryRow("SELECT payload FROM web_messages WHERE conversation=? AND client_id=? AND owner=?", conversation, clientID, owner).Scan(&raw)
+		existing := tx.QueryRow("SELECT payload FROM web_messages WHERE conversation=$1 AND client_id=$2 AND owner=$3", conversation, clientID, owner).Scan(&raw)
 		if existing == nil {
 			if e := agentcontract.DecodeDocument(raw, &m); e != nil {
 				return e
@@ -162,7 +166,7 @@ func (w *WebIntegration) SubmitMessageWithSources(ctx context.Context, owner, co
 			return existing
 		}
 		var count int
-		if e := tx.QueryRow("SELECT count(*) FROM web_messages WHERE conversation=?", conversation).Scan(&count); e != nil {
+		if e := tx.QueryRow("SELECT count(*) FROM web_messages WHERE conversation=$1", conversation).Scan(&count); e != nil {
 			return e
 		}
 		if count >= durablehost.NormalizedRunSettings(w.Host.Settings).MaxConversationMessages {
@@ -177,7 +181,7 @@ func (w *WebIntegration) SubmitMessageWithSources(ctx context.Context, owner, co
 		if e != nil {
 			return e
 		}
-		_, e = tx.Exec("INSERT INTO web_messages(id,owner,conversation,client_id,payload) VALUES(?,?,?,?,?)", m.ID, owner, conversation, clientID, raw)
+		_, e = tx.Exec("INSERT INTO web_messages(id,owner,conversation,client_id,payload) VALUES($1,$2,$3,$4,$5)", m.ID, owner, conversation, clientID, raw)
 		return e
 	})
 	return m, e
@@ -388,7 +392,7 @@ func (w *WebIntegration) Tick(ctx context.Context) error {
 	rows, e := w.Store.store.DB.Query(`SELECT c.id,c.owner FROM web_conversations c
 		WHERE EXISTS (SELECT 1 FROM web_messages m
 			WHERE m.conversation=c.id AND m.owner=c.owner
-				AND json_extract(m.payload,'$.status') IN ('queued','creating','active','cancelling'))
+				AND m.payload->>'status' IN ('queued','creating','active','cancelling'))
 		ORDER BY c.rowid`)
 	if e != nil {
 		return e
@@ -564,7 +568,7 @@ func (w *WebIntegration) cancelUnpublishedChatRun(owner, integration string, m a
 		run, err := runstore.Owned(tx, m.RunID, owner)
 		now := w.Host.Store.Now()
 		if errors.Is(err, runstore.ErrRunNotFound) {
-			_, err = tx.Exec("INSERT INTO runs(run_id,owner_id,pack_id,status,state_json,revision,created_at,updated_at,cancel_requested) VALUES(?,?,?,'cancelled',?,0,?,?,1)", m.RunID, owner, pack, string(payload), now, now)
+			_, err = tx.Exec("INSERT INTO runs(run_id,owner_id,pack_id,status,state_json,revision,created_at,updated_at,cancel_requested) VALUES($1,$2,$3,'cancelled',$4,0,$5,$6,1)", m.RunID, owner, pack, string(payload), now, now)
 			return err
 		}
 		if err != nil {
@@ -577,7 +581,7 @@ func (w *WebIntegration) cancelUnpublishedChatRun(owner, integration string, m a
 		if durablehost.Terminal(run.Status) {
 			return nil
 		}
-		_, err = tx.Exec("UPDATE runs SET cancel_requested=1,updated_at=? WHERE run_id=?", now, m.RunID)
+		_, err = tx.Exec("UPDATE runs SET cancel_requested=1,updated_at=$1 WHERE run_id=$2", now, m.RunID)
 		return err
 	})
 }
@@ -604,7 +608,7 @@ func (w *WebIntegration) CreateBrowserRunWithSources(ctx context.Context, owner,
 	run := durablehost.RequestRunID(owner, "browser:"+request)
 	e := w.Store.store.Transaction(func(tx *sql.Tx) error {
 		var raw string
-		e := tx.QueryRow("SELECT payload FROM web_bindings WHERE run=?", run).Scan(&raw)
+		e := tx.QueryRow("SELECT payload FROM web_bindings WHERE run=$1", run).Scan(&raw)
 		if e == nil {
 			var b agentcontract.WebRunBinding
 			if e = agentcontract.DecodeDocument(raw, &b); e != nil {

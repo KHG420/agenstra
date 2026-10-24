@@ -33,7 +33,7 @@ func run() (resultErr error) {
 	if e != nil {
 		return e
 	}
-	store, e := agenstra.NewSQLiteStore(dep.DatabasePath())
+	store, e := dep.OpenRunStore()
 	if e != nil {
 		return e
 	}

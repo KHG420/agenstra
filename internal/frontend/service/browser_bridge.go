@@ -124,7 +124,11 @@ func (w *WebIntegration) resumeBrowserSession(owner, id, key string, generation 
 		// Reconnect future calls without moving or replaying any old command.
 		// Their original generations and receipts remain independently fenced.
 		// The resumed page must be observed again before a new action can run.
-		if _, e := tx.Exec("UPDATE web_bindings SET payload=json_set(payload,'$.generation',?,'$.observed_revision',-1) WHERE owner=? AND payload->>'session_id'=? AND payload->>'profile_digest'=?", s.Generation, owner, s.ID, s.ProfileDigest); e != nil {
+		query := "UPDATE web_bindings SET payload=json_set(payload,'$.generation',$1,'$.observed_revision',-1) WHERE owner=$2 AND payload->>'session_id'=$3 AND payload->>'profile_digest'=$4"
+		if w.Store.store.Postgres {
+			query = "UPDATE web_bindings SET payload=jsonb_set(jsonb_set(payload,'{generation}',to_jsonb($1::bigint)),'{observed_revision}','-1'::jsonb) WHERE owner=$2 AND payload->>'session_id'=$3 AND payload->>'profile_digest'=$4"
+		}
+		if _, e := tx.Exec(query, s.Generation, owner, s.ID, s.ProfileDigest); e != nil {
 			return e
 		}
 		return webSave(tx, "web_sessions", id, s)
@@ -188,7 +192,7 @@ func (w *WebIntegration) RecoverBrowserSession(ctx context.Context, owner, id, k
 		}
 
 		// Check every bound run, including other conversations and unpublished chat.
-		rows, e := tx.Query("SELECT run FROM web_bindings WHERE owner=? AND payload->>'session_id'=?", owner, id)
+		rows, e := tx.Query("SELECT run FROM web_bindings WHERE owner=$1 AND payload->>'session_id'=$2", owner, id)
 		if e != nil {
 			return e
 		}
@@ -219,7 +223,7 @@ func (w *WebIntegration) RecoverBrowserSession(ctx context.Context, owner, id, k
 				return e
 			}
 			var status string
-			e = tx.QueryRow("SELECT payload->>'status' FROM web_messages WHERE owner=? AND payload->>'run_id'=?", owner, runID).Scan(&status)
+			e = tx.QueryRow("SELECT payload->>'status' FROM web_messages WHERE owner=$1 AND payload->>'run_id'=$2", owner, runID).Scan(&status)
 			if e == nil && !durablehost.Terminal(status) {
 				return agentcontract.NewHostError("browser_recovery_run_active")
 			}
@@ -321,7 +325,7 @@ func (w *WebIntegration) readContext(owner string, b agentcontract.WebRunBinding
 	var s agentcontract.BrowserSession
 	e := w.Store.store.Transaction(func(tx *sql.Tx) error {
 		var raw string
-		if e := tx.QueryRow("SELECT payload FROM web_bindings WHERE run=? AND owner=?", b.RunID, owner).Scan(&raw); e != nil {
+		if e := tx.QueryRow("SELECT payload FROM web_bindings WHERE run=$1 AND owner=$2", b.RunID, owner).Scan(&raw); e != nil {
 			return e
 		}
 		if e := agentcontract.DecodeDocument(raw, &b); e != nil {
@@ -338,7 +342,7 @@ func (w *WebIntegration) readContext(owner string, b agentcontract.WebRunBinding
 		if e != nil {
 			return e
 		}
-		_, e = tx.Exec("UPDATE web_bindings SET payload=? WHERE run=? AND owner=?", raw, b.RunID, owner)
+		_, e = tx.Exec("UPDATE web_bindings SET payload=$1 WHERE run=$2 AND owner=$3", raw, b.RunID, owner)
 		return e
 	})
 	return s, e
@@ -361,7 +365,7 @@ func (w *WebIntegration) enqueue(owner string, b agentcontract.WebRunBinding, id
 			return agentcontract.NewHostError("browser_argument_number_unsupported")
 		}
 		var raw string
-		if e := tx.QueryRow("SELECT payload FROM web_bindings WHERE run=? AND owner=?", b.RunID, owner).Scan(&raw); e != nil {
+		if e := tx.QueryRow("SELECT payload FROM web_bindings WHERE run=$1 AND owner=$2", b.RunID, owner).Scan(&raw); e != nil {
 			return e
 		}
 		if e := agentcontract.DecodeDocument(raw, &b); e != nil {
@@ -406,7 +410,7 @@ func (w *WebIntegration) enqueue(owner string, b agentcontract.WebRunBinding, id
 		if e != nil {
 			return e
 		}
-		_, e = tx.Exec("INSERT INTO web_commands(id,owner,session,run,payload) VALUES(?,?,?,?,?)", c.ID, owner, s.ID, b.RunID, raw)
+		_, e = tx.Exec("INSERT INTO web_commands(id,owner,session,run,payload) VALUES($1,$2,$3,$4,$5)", c.ID, owner, s.ID, b.RunID, raw)
 		return e
 	})
 	return c, e
@@ -609,7 +613,7 @@ func (w *WebIntegration) CloseBrowserSession(owner, id, key string, generation i
 
 func (w *WebIntegration) cancelCommands(owner, run string) error {
 	return w.Store.store.Transaction(func(tx *sql.Tx) error {
-		rows, e := tx.Query("SELECT payload FROM web_commands WHERE owner=? AND run=?", owner, run)
+		rows, e := tx.Query("SELECT payload FROM web_commands WHERE owner=$1 AND run=$2", owner, run)
 		if e != nil {
 			return e
 		}
@@ -703,7 +707,7 @@ func (w *WebIntegration) bindRun(tx *sql.Tx, owner, run, request, integration, s
 	if e != nil {
 		return e
 	}
-	_, e = tx.Exec("INSERT INTO web_bindings(run,owner,payload) VALUES(?,?,?)", run, owner, raw)
+	_, e = tx.Exec("INSERT INTO web_bindings(run,owner,payload) VALUES($1,$2,$3)", run, owner, raw)
 	return e
 }
 

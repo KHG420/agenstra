@@ -31,6 +31,9 @@ type ManagementConfig = agent.ManagementConfig
 // DeploymentConfig contains trusted host wiring, execution limits and optional integrations.
 type DeploymentConfig = agent.DeploymentConfig
 
+// DatabaseConfig selects optional PostgreSQL persistence by environment reference.
+type DatabaseConfig = agent.DatabaseConfig
+
 // Deployment resolves trusted configuration and per-owner connections.
 // Treat Config and Environment as read-only while requests are active.
 type Deployment = deployassembly.Deployment

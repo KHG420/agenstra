@@ -15,6 +15,21 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+const runSchema = `CREATE TABLE IF NOT EXISTS runs (
+		 run_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, pack_id TEXT NOT NULL,
+		 status TEXT NOT NULL, state_json TEXT NOT NULL, revision INTEGER NOT NULL,
+		 next_wake_at REAL, lease_token TEXT, lease_until REAL, created_at REAL NOT NULL,
+		 updated_at REAL NOT NULL, cancel_requested INTEGER NOT NULL DEFAULT 0);
+		 CREATE INDEX IF NOT EXISTS runs_due ON runs(status,next_wake_at,lease_until);
+		 CREATE INDEX IF NOT EXISTS runs_owner ON runs(owner_id,created_at);
+		 CREATE TABLE IF NOT EXISTS invocations (run_id TEXT NOT NULL REFERENCES runs(run_id),
+		 invocation_id TEXT NOT NULL,payload_json TEXT NOT NULL,PRIMARY KEY(run_id,invocation_id));
+		 CREATE TABLE IF NOT EXISTS artifacts (run_id TEXT NOT NULL REFERENCES runs(run_id),
+		 artifact_id TEXT NOT NULL,payload_json TEXT NOT NULL,sha256 TEXT NOT NULL,PRIMARY KEY(run_id,artifact_id));
+		 CREATE TABLE IF NOT EXISTS events (sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+		 run_id TEXT NOT NULL REFERENCES runs(run_id),created_at REAL NOT NULL,event_json TEXT NOT NULL);
+		 CREATE INDEX IF NOT EXISTS events_run ON events(run_id,sequence);`
+
 var
 // ErrStoreConflict reports that a run cannot be claimed in its current state.
 ErrStoreConflict = errors.New("store conflict")
@@ -33,9 +48,10 @@ ErrLeaseLost = errors.New("lease lost")
 // IMMEDIATE transactions serialize claims and checkpoint writes; fencing tokens
 // prevent an expired worker from committing state.
 type SQLiteStore struct {
-	Path  string
-	DB    *sql.DB
-	Clock func() float64
+	Path     string
+	DB       *sql.DB
+	Clock    func() float64
+	Postgres bool
 }
 
 // UnixNow returns fractional Unix seconds from the system clock.
@@ -76,6 +92,9 @@ func (s *SQLiteStore) Close() error { return s.DB.Close() }
 
 // Initialize verifies WAL and prepares the supported existing schema.
 func (s *SQLiteStore) Initialize() error {
+	if s.Postgres {
+		return s.initializePostgres()
+	}
 	var mode string
 	if err := s.DB.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode); err != nil {
 		return err
@@ -92,33 +111,19 @@ func (s *SQLiteStore) Initialize() error {
 			return fmt.Errorf("unsupported SQLite store schema version %d", version)
 		}
 		if version == 1 {
-			if err := initializeScheduleTables(tx); err != nil {
+			if err := s.initializeScheduleTables(tx); err != nil {
 				return err
 			}
-			return initializeMemoryTables(tx)
+			return s.initializeMemoryTables(tx)
 		}
-		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS runs (
-		 run_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, pack_id TEXT NOT NULL,
-		 status TEXT NOT NULL, state_json TEXT NOT NULL, revision INTEGER NOT NULL,
-		 next_wake_at REAL, lease_token TEXT, lease_until REAL, created_at REAL NOT NULL,
-		 updated_at REAL NOT NULL, cancel_requested INTEGER NOT NULL DEFAULT 0);
-		 CREATE INDEX IF NOT EXISTS runs_due ON runs(status,next_wake_at,lease_until);
-		 CREATE INDEX IF NOT EXISTS runs_owner ON runs(owner_id,created_at);
-		 CREATE TABLE IF NOT EXISTS invocations (run_id TEXT NOT NULL REFERENCES runs(run_id),
-		 invocation_id TEXT NOT NULL,payload_json TEXT NOT NULL,PRIMARY KEY(run_id,invocation_id));
-		 CREATE TABLE IF NOT EXISTS artifacts (run_id TEXT NOT NULL REFERENCES runs(run_id),
-		 artifact_id TEXT NOT NULL,payload_json TEXT NOT NULL,sha256 TEXT NOT NULL,PRIMARY KEY(run_id,artifact_id));
-		 CREATE TABLE IF NOT EXISTS events (sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-		 run_id TEXT NOT NULL REFERENCES runs(run_id),created_at REAL NOT NULL,event_json TEXT NOT NULL);
-		 CREATE INDEX IF NOT EXISTS events_run ON events(run_id,sequence);
-		 PRAGMA user_version=1;`)
+		_, err := tx.Exec(runSchema + "PRAGMA user_version=1;")
 		if err != nil {
 			return err
 		}
-		if err := initializeScheduleTables(tx); err != nil {
+		if err := s.initializeScheduleTables(tx); err != nil {
 			return err
 		}
-		return initializeMemoryTables(tx)
+		return s.initializeMemoryTables(tx)
 	})
 }
 
@@ -135,6 +140,12 @@ func (s *SQLiteStore) Transaction(action func(*sql.Tx) error) (resultErr error) 
 			resultErr = errors.Join(resultErr, rollbackErr)
 		}
 	}()
+	if s.Postgres {
+		// Match SQLite IMMEDIATE write serialization across independent connections.
+		if _, err = tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(current_database() || ':' || $1, 0))", s.Path); err != nil {
+			return err
+		}
+	}
 	if err = action(tx); err != nil {
 		return err
 	}
@@ -173,7 +184,7 @@ func scanRun(row scanner) (agentcontract.StoredRun, error) {
 
 // Owned loads a saved run only when its owner identity matches the query.
 func Owned(q SQLQueryer, runID, ownerID string) (agentcontract.StoredRun, error) {
-	return scanRun(q.QueryRow("SELECT "+runColumns+" FROM runs WHERE run_id=? AND owner_id=?", runID, ownerID))
+	return scanRun(q.QueryRow("SELECT "+runColumns+" FROM runs WHERE run_id=$1 AND owner_id=$2", runID, ownerID))
 }
 
 func (s *SQLiteStore) leased(tx *sql.Tx, runID, ownerID, token string) (agentcontract.StoredRun, error) {
@@ -198,14 +209,14 @@ func (s *SQLiteStore) CreateRun(ownerID, packID string, state map[string]any, ru
 	}
 	err = s.Transaction(func(tx *sql.Tx) error {
 		var count int
-		if e := tx.QueryRow("SELECT count(*) FROM runs WHERE run_id=?", runID).Scan(&count); e != nil {
+		if e := tx.QueryRow("SELECT count(*) FROM runs WHERE run_id=$1", runID).Scan(&count); e != nil {
 			return e
 		}
 		if count > 0 {
 			return ErrStoreConflict
 		}
 		now := s.Now()
-		if _, e := tx.Exec("INSERT INTO runs(run_id,owner_id,pack_id,status,state_json,revision,created_at,updated_at) VALUES(?,?,?,'queued',?,0,?,?)", runID, ownerID, packID, string(payload), now, now); e != nil {
+		if _, e := tx.Exec("INSERT INTO runs(run_id,owner_id,pack_id,status,state_json,revision,created_at,updated_at) VALUES($1,$2,$3,'queued',$4,0,$5,$6)", runID, ownerID, packID, string(payload), now, now); e != nil {
 			return e
 		}
 		var e error
@@ -235,7 +246,7 @@ func (s *SQLiteStore) Claim(runID, ownerID string, seconds float64) (r agentcont
 		if r.LeaseUntil != nil && *r.LeaseUntil > now {
 			return ErrStoreConflict
 		}
-		if _, e = tx.Exec("UPDATE runs SET lease_token=?,lease_until=?,updated_at=? WHERE run_id=?", agentcontract.NewID(), now+seconds, now, runID); e != nil {
+		if _, e = tx.Exec("UPDATE runs SET lease_token=$1,lease_until=$2,updated_at=$3 WHERE run_id=$4", agentcontract.NewID(), now+seconds, now, runID); e != nil {
 			return e
 		}
 		r, e = Owned(tx, runID, ownerID)
@@ -254,7 +265,7 @@ func (s *SQLiteStore) Renew(runID, ownerID, token string, seconds float64) error
 			return e
 		}
 		now := s.Now()
-		_, e := tx.Exec("UPDATE runs SET lease_until=?,updated_at=? WHERE run_id=?", now+seconds, now, runID)
+		_, e := tx.Exec("UPDATE runs SET lease_until=$1,updated_at=$2 WHERE run_id=$3", now+seconds, now, runID)
 		return e
 	})
 }
@@ -265,7 +276,7 @@ func (s *SQLiteStore) Release(runID, ownerID, token string) error {
 		if _, e := s.leased(tx, runID, ownerID, token); e != nil {
 			return e
 		}
-		_, e := tx.Exec("UPDATE runs SET lease_token=NULL,lease_until=NULL,updated_at=? WHERE run_id=?", s.Now(), runID)
+		_, e := tx.Exec("UPDATE runs SET lease_token=NULL,lease_until=NULL,updated_at=$1 WHERE run_id=$2", s.Now(), runID)
 		return e
 	})
 }
@@ -280,10 +291,10 @@ func (s *SQLiteStore) RequestCancel(runID, ownerID string) (r agentcontract.Stor
 		}
 		if !r.CancelRequested {
 			now := s.Now()
-			if _, e = tx.Exec("UPDATE runs SET cancel_requested=1,updated_at=? WHERE run_id=?", now, runID); e != nil {
+			if _, e = tx.Exec("UPDATE runs SET cancel_requested=1,updated_at=$1 WHERE run_id=$2", now, runID); e != nil {
 				return e
 			}
-			if _, e = tx.Exec("INSERT INTO events(run_id,created_at,event_json) VALUES(?,?,?)", runID, now, `{"kind":"cancel_requested"}`); e != nil {
+			if _, e = tx.Exec("INSERT INTO events(run_id,created_at,event_json) VALUES($1,$2,$3)", runID, now, `{"kind":"cancel_requested"}`); e != nil {
 				return e
 			}
 		}
@@ -322,7 +333,7 @@ func (s *SQLiteStore) Checkpoint(runID, ownerID, token string, state map[string]
 			}
 		}
 		now := s.Now()
-		if _, e := tx.Exec("UPDATE runs SET state_json=?,status=?,next_wake_at=?,revision=revision+1,updated_at=? WHERE run_id=?", string(payload), status, wake, now, runID); e != nil {
+		if _, e := tx.Exec("UPDATE runs SET state_json=$1,status=$2,next_wake_at=$3,revision=revision+1,updated_at=$4 WHERE run_id=$5", string(payload), status, wake, now, runID); e != nil {
 			return e
 		}
 		for _, i := range invocations {
@@ -334,7 +345,7 @@ func (s *SQLiteStore) Checkpoint(runID, ownerID, token string, state map[string]
 			if e != nil {
 				return e
 			}
-			if _, e = tx.Exec("INSERT INTO invocations VALUES(?,?,?) ON CONFLICT(run_id,invocation_id) DO UPDATE SET payload_json=excluded.payload_json", runID, id, string(b)); e != nil {
+			if _, e = tx.Exec("INSERT INTO invocations(run_id,invocation_id,payload_json) VALUES($1,$2,$3) ON CONFLICT(run_id,invocation_id) DO UPDATE SET payload_json=excluded.payload_json", runID, id, string(b)); e != nil {
 				return e
 			}
 		}
@@ -346,7 +357,7 @@ func (s *SQLiteStore) Checkpoint(runID, ownerID, token string, state map[string]
 			sum := sha256.Sum256(b)
 			digest := hex.EncodeToString(sum[:])
 			var prior string
-			e = tx.QueryRow("SELECT sha256 FROM artifacts WHERE run_id=? AND artifact_id=?", runID, id).Scan(&prior)
+			e = tx.QueryRow("SELECT sha256 FROM artifacts WHERE run_id=$1 AND artifact_id=$2", runID, id).Scan(&prior)
 			if e == nil {
 				if prior != digest {
 					return ErrStoreConflict
@@ -356,7 +367,7 @@ func (s *SQLiteStore) Checkpoint(runID, ownerID, token string, state map[string]
 			if !errors.Is(e, sql.ErrNoRows) {
 				return e
 			}
-			if _, e = tx.Exec("INSERT INTO artifacts VALUES(?,?,?,?)", runID, id, string(b), digest); e != nil {
+			if _, e = tx.Exec("INSERT INTO artifacts VALUES($1,$2,$3,$4)", runID, id, string(b), digest); e != nil {
 				return e
 			}
 		}
@@ -365,7 +376,7 @@ func (s *SQLiteStore) Checkpoint(runID, ownerID, token string, state map[string]
 			if e != nil {
 				return e
 			}
-			if _, e = tx.Exec("INSERT INTO events(run_id,created_at,event_json) VALUES(?,?,?)", runID, now, string(b)); e != nil {
+			if _, e = tx.Exec("INSERT INTO events(run_id,created_at,event_json) VALUES($1,$2,$3)", runID, now, string(b)); e != nil {
 				return e
 			}
 		}
@@ -382,7 +393,7 @@ func (s *SQLiteStore) GetInvocation(runID, invocationID, ownerID string) (map[st
 		return nil, e
 	}
 	var payload string
-	e := s.DB.QueryRow("SELECT payload_json FROM invocations WHERE run_id=? AND invocation_id=?", runID, invocationID).Scan(&payload)
+	e := s.DB.QueryRow("SELECT payload_json FROM invocations WHERE run_id=$1 AND invocation_id=$2", runID, invocationID).Scan(&payload)
 	if errors.Is(e, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -397,7 +408,7 @@ func (s *SQLiteStore) ListInvocations(runID, ownerID string) (output []map[strin
 	if _, e := s.GetRun(runID, ownerID); e != nil {
 		return nil, e
 	}
-	rows, e := s.DB.Query("SELECT payload_json FROM invocations WHERE run_id=? ORDER BY rowid", runID)
+	rows, e := s.DB.Query("SELECT payload_json FROM invocations WHERE run_id=$1 ORDER BY rowid", runID)
 	if e != nil {
 		return nil, e
 	}
@@ -423,7 +434,7 @@ func (s *SQLiteStore) GetArtifact(runID, artifactID, ownerID string) (map[string
 		return nil, e
 	}
 	var payload string
-	e := s.DB.QueryRow("SELECT payload_json FROM artifacts WHERE run_id=? AND artifact_id=?", runID, artifactID).Scan(&payload)
+	e := s.DB.QueryRow("SELECT payload_json FROM artifacts WHERE run_id=$1 AND artifact_id=$2", runID, artifactID).Scan(&payload)
 	if errors.Is(e, sql.ErrNoRows) {
 		return nil, ErrRunNotFound
 	}
@@ -438,7 +449,7 @@ func (s *SQLiteStore) ListEvents(runID, ownerID string, after, limit int) (outpu
 	if _, e := s.GetRun(runID, ownerID); e != nil {
 		return nil, e
 	}
-	rows, e := s.DB.Query("SELECT sequence,created_at,event_json FROM events WHERE run_id=? AND sequence>? ORDER BY sequence LIMIT ?", runID, after, limit)
+	rows, e := s.DB.Query("SELECT sequence,created_at,event_json FROM events WHERE run_id=$1 AND sequence>$2 ORDER BY sequence LIMIT $3", runID, after, limit)
 	if e != nil {
 		return nil, e
 	}
@@ -480,10 +491,10 @@ func (s *SQLiteStore) queryRuns(query string, args ...any) (output []agentcontra
 // DueRuns selects a bounded set of runs eligible for a worker claim.
 func (s *SQLiteStore) DueRuns(limit int) ([]agentcontract.StoredRun, error) {
 	now := s.Now()
-	return s.queryRuns("SELECT "+runColumns+" FROM runs WHERE (lease_until IS NULL OR lease_until<=?) AND (status IN ('queued','running') OR (cancel_requested=1 AND status NOT IN ('completed','failed','cancelled')) OR (status='waiting' AND next_wake_at IS NOT NULL AND next_wake_at<=?)) ORDER BY created_at,run_id LIMIT ?", now, now, limit)
+	return s.queryRuns("SELECT "+runColumns+" FROM runs WHERE (lease_until IS NULL OR lease_until<=$1) AND (status IN ('queued','running') OR (cancel_requested=1 AND status NOT IN ('completed','failed','cancelled')) OR (status='waiting' AND next_wake_at IS NOT NULL AND next_wake_at<=$2)) ORDER BY created_at,run_id LIMIT $3", now, now, limit)
 }
 
 // ListRuns returns a bounded list of the owner's newest runs.
 func (s *SQLiteStore) ListRuns(ownerID string, limit int) ([]agentcontract.StoredRun, error) {
-	return s.queryRuns("SELECT "+runColumns+" FROM runs WHERE owner_id=? ORDER BY created_at DESC,run_id LIMIT ?", ownerID, limit)
+	return s.queryRuns("SELECT "+runColumns+" FROM runs WHERE owner_id=$1 ORDER BY created_at DESC,run_id LIMIT $2", ownerID, limit)
 }

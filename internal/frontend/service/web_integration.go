@@ -117,7 +117,7 @@ func NewWebIntegration(h *durablehost.AgentHost, d *deployassembly.Deployment, c
 	if !c.Chat && !c.BrowserBridge {
 		return nil, errors.New("web integration must enable chat or browser_bridge")
 	}
-	if c.DatabasePath == "" || !agentcontract.DeploymentEnvName.MatchString(c.SessionKeyEnv) || len(d.Environment[c.SessionKeyEnv]) < 32 || len(c.Integrations) == 0 {
+	if (d.Config.Database == nil && c.DatabasePath == "") || !agentcontract.DeploymentEnvName.MatchString(c.SessionKeyEnv) || len(d.Environment[c.SessionKeyEnv]) < 32 || len(c.Integrations) == 0 {
 		return nil, errors.New("web integration requires database_path, integrations and a session key of at least 32 bytes")
 	}
 	path := d.Resolve(c.DatabasePath)
@@ -127,7 +127,7 @@ func NewWebIntegration(h *durablehost.AgentHost, d *deployassembly.Deployment, c
 			return nil, errors.New("allowed_origins must contain exact HTTP(S) origins")
 		}
 	}
-	if path == d.DatabasePath() || (d.Registry != nil && path == d.Registry.DatabasePath) {
+	if d.Config.Database == nil && (path == d.DatabasePath() || (d.Registry != nil && path == d.Registry.DatabasePath)) {
 		return nil, errors.New("web database must be separate")
 	}
 	if c.SessionTTLSeconds == 0 {
@@ -163,7 +163,15 @@ func NewWebIntegration(h *durablehost.AgentHost, d *deployassembly.Deployment, c
 			w.profiles[id] = compiled
 		}
 	}
-	store, e := NewWebStore(path)
+	var store *WebStore
+	var e error
+	if db := d.Config.Database; db != nil {
+		if e = db.Validate(true); e == nil {
+			store, e = NewPostgresWebStore(d.Environment[db.DSNEnv], db.WebSchema)
+		}
+	} else {
+		store, e = NewWebStore(path)
+	}
 	if e != nil {
 		return nil, e
 	}
@@ -335,7 +343,7 @@ func (w *WebIntegration) release(ctx context.Context, owner, pack string) (strin
 	if e != nil {
 		return "", e
 	}
-	_, e = w.Store.store.DB.Exec("INSERT OR IGNORE INTO web_releases(id,payload) VALUES(?,?)", id, raw)
+	_, e = w.Store.store.DB.Exec("INSERT INTO web_releases(id,payload) VALUES($1,$2) ON CONFLICT(id) DO NOTHING", id, raw)
 	return id, e
 }
 
@@ -358,7 +366,7 @@ func (w *WebIntegration) releaseProvider(ctx context.Context, owner, pack, relea
 		return w.baseFactory(ctx, owner, pack)
 	}
 	var raw string
-	if e := w.Store.store.DB.QueryRow("SELECT payload FROM web_releases WHERE id=?", release).Scan(&raw); e != nil {
+	if e := w.Store.store.DB.QueryRow("SELECT payload FROM web_releases WHERE id=$1", release).Scan(&raw); e != nil {
 		return nil, agentcontract.NewHostError("web_release_missing")
 	}
 	var r webRelease

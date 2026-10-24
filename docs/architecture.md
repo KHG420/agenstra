@@ -62,7 +62,7 @@ agenstra/
 │   │   ├── react/                # 临时决策、上下文、Fact 引用和执行证据
 │   │   └── host/                 # 授权、审批、租约、检查点和恢复
 │   └── state/
-│       ├── runstore/             # 运行、回执、产物、记忆和定时任务 SQLite
+│       ├── runstore/             # 运行、回执、产物、记忆和定时任务 SQLite / PostgreSQL
 │       └── registry/             # 不可变发布、绑定、草稿和模型配置修订
 ├── sdk/
 │   ├── go/                       # 公开 Go 类型与构造/接入函数
@@ -194,7 +194,7 @@ stateDiagram-v2
 
 REST v2 清单支持嵌套 JSON Schema、路径/查询/请求头/请求体绑定、响应状态码契约、服务错误码、token 环境变量和可选技能。OpenAPI 导入仅生成选定 operationId 的草稿，不猜测审批、幂等和任务结果状态。MCP 清单选定工具并固定完整工具契约的 SHA-256，远端契约漂移会阻断导入。特殊协议可以实现 `CapabilityProvider`，保持 ReAct 和 Host 不变。
 
-当前可验证的软件边界是单节点部署、SQLite WAL 持久盘、已有 HTTP/MCP 能力和兼容 JSON 决策的模型。上线前仍需用目标环境验证真实凭据、权限撤销、代表性多接口任务、幂等与作业查询、容量及备份恢复。多节点调度、自动数据保留清理、外部算法的正确性和模型回答质量不由框架单元测试保证。
+当前可验证的软件边界是单节点部署、SQLite WAL 或静态能力包的 PostgreSQL 存储、已有 HTTP/MCP 能力和兼容 JSON 决策的模型。PostgreSQL 的配置、事务及注册表限制见 [PostgreSQL 存储](postgresql.md)。上线前仍需用目标环境验证真实凭据、权限撤销、代表性多接口任务、幂等与作业查询、容量及备份恢复。多节点调度、自动数据保留清理、外部算法的正确性和模型回答质量不由框架单元测试保证。
 
 接入过程见[从零接入教程](tutorial.md)，具体部署与状态处理见[部署与运维](deployment.md)。
 

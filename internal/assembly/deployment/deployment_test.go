@@ -1,6 +1,7 @@
 package deployment
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,49 @@ import (
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
+
+func TestPostgresDeploymentSelection(t *testing.T) {
+	base := `{"database":{"driver":"postgres","dsn_env":"TEST_DSN","schema":"agent_runs","web_schema":"agent_web"},"users":{}}`
+	for _, test := range []struct {
+		name    string
+		replace func(string) string
+		valid   bool
+	}{
+		{"postgres", func(s string) string { return s }, true},
+		{"invalid_driver", func(s string) string { return strings.Replace(s, "postgres", "mysql", 1) }, false},
+		{"invalid_schema", func(s string) string { return strings.Replace(s, "agent_runs", "public", 1) }, false},
+		{"shared_schema", func(s string) string { return strings.Replace(s, "agent_web", "agent_runs", 1) }, false},
+		{"invalid_reference", func(s string) string { return strings.Replace(s, "TEST_DSN", "password-in-json", 1) }, false},
+		{"sqlite_conflict", func(s string) string {
+			return strings.Replace(s, `"users":{}`, `"users":{},"database_path":"runs.sqlite3"`, 1)
+		}, false},
+		{"registry_rejected", func(s string) string { return strings.Replace(s, `"users":{}`, `"users":{},"management":{}`, 1) }, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "deployment.json")
+			if err := os.WriteFile(path, []byte(test.replace(base)), 0600); err != nil {
+				t.Fatal(err)
+			}
+			dep, err := LoadDeployment(path)
+			if (err == nil) != test.valid {
+				t.Fatalf("valid=%v error=%v", test.valid, err)
+			}
+			if test.valid {
+				if dep.Config.Database.Driver != "postgres" {
+					t.Fatal("backend lost")
+				}
+				dep.Environment["TEST_DSN"] = ""
+				if _, err = dep.OpenRunStore(); err == nil {
+					t.Fatal("missing PostgreSQL DSN accepted")
+				}
+				// The parsed deployment remains an ordinary key/value JSON object.
+				if _, err = json.Marshal(dep.Config); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
 
 func TestLoadDeploymentDefaultsAndValidation(t *testing.T) {
 	dir := t.TempDir()
