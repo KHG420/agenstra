@@ -53,7 +53,7 @@ func TestModelCheckUsesSelectedOutputProtocol(t *testing.T) {
 						t.Error("check did not declare the selected output function", string(tools), err)
 					}
 					choice, err := agentcontract.CanonicalJSON(payload["tool_choice"])
-					if err != nil || string(choice) != `{"function":{"name":"submit_decision"},"type":"function"}` || payload["parallel_tool_calls"] != false || payload["response_format"] != nil {
+					if err != nil || string(choice) != `"auto"` || payload["parallel_tool_calls"] != false || payload["response_format"] != nil {
 						t.Error("check changed selected output transport", string(choice), err)
 					}
 				} else if tc.mode == "native_tools" && tc.purpose != "memory_extraction" {
@@ -69,7 +69,7 @@ func TestModelCheckUsesSelectedOutputProtocol(t *testing.T) {
 							t.Error("native check declared the wrong transport")
 						}
 					}
-					if !finalDeclared || payload["tool_choice"] != "required" || payload["parallel_tool_calls"] != false || payload["response_format"] != nil {
+					if !finalDeclared || payload["tool_choice"] != "auto" || payload["parallel_tool_calls"] != false || payload["response_format"] != nil {
 						t.Error("native check changed output channel")
 					}
 				} else {

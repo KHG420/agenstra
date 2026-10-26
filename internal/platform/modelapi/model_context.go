@@ -327,12 +327,21 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 			}
 		}
 		tools = retainedTools
+		var toolChoice any = agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_decision"}}
+		if m.DecisionOutputMode == "native_tools" {
+			toolChoice = "required"
+		}
+		// DeepSeek rejects forced tool choices while thinking is enabled (also
+		// the default). Keep the declared tools and strict local output checks.
+		if m.APIType == "deepseek_chat" && m.Thinking != "disabled" {
+			toolChoice = "auto"
+		}
 		if m.DecisionOutputMode == "native_tools" {
 			nativeTools, err := nativeDecisionOutputTools(tools, packet)
 			if err != nil {
 				return nil, err
 			}
-			payload["tools"], payload["tool_choice"], payload["parallel_tool_calls"] = nativeTools, "required", false
+			payload["tools"], payload["tool_choice"], payload["parallel_tool_calls"] = nativeTools, toolChoice, false
 			delete(payload, "response_format")
 			messages[0] = agentcontract.JSON{"role": "system", "content": nativeDecisionToolPrompt(prompt, packet.CompletionReview != nil)}
 			for _, item := range messages[1:] {
@@ -365,7 +374,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		}
 		toolPrompt = strings.Join(retained, "\n")
 		payload["tools"] = []any{singleDecisionOutputTool(tools)}
-		payload["tool_choice"] = agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "submit_decision"}}
+		payload["tool_choice"] = toolChoice
 		payload["parallel_tool_calls"] = false
 		delete(payload, "response_format")
 		messages[0] = agentcontract.JSON{"role": "system", "content": toolPrompt}

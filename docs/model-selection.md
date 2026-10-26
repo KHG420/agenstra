@@ -118,6 +118,8 @@ model.DecisionPrompt = func(packet agenstra.ContextPacket, prompt string) string
 
 参数留空时不发送，对应默认由服务决定。DeepSeek 开启或默认推理时温度不生效，因此框架拒绝同时配置温度；关闭推理时不能设置推理强度。OpenAI 显式设置非 none 推理强度时也拒绝同时配置温度。具体模型是否接受某个强度必须通过服务验证；通用接口不会静默转发未知推理字段。
 
+DeepSeek 开启或默认推理时，`output_tools` 与 `native_tools` 使用 `tool_choice: "auto"`，因为其接口拒绝 `required` 和命名函数选择；显式关闭推理时保持原有的强制工具选择。该适配只依据 `api_type` 与 `thinking`，不根据模型名或业务场景分支。工具定义、`parallel_tool_calls: false`、输出上限及本地严格校验保持不变：普通正文不能替代已声明的工具输出，未知或多个不兼容工具仍被拒绝，不自动关闭推理或切换输出格式。依据为 [DeepSeek Chat Completions 协议](https://api-docs.deepseek.com/api/create-chat-completion/)；处理方式参考 [Pydantic AI 的 DeepSeek 工具选择约束](https://github.com/pydantic/pydantic-ai/blob/7f7f265ea4c7dc828d970d4ec266544bed49f8f8/pydantic_ai_slim/pydantic_ai/providers/deepseek.py)，未引入其依赖。
+
 输出策略适用于所有使用本适配器的兼容 Chat Completions 模型，由各模型配置及实际网关能力决定，不按模型名分支。相同模型经过不同网关时，支持程度也可能不同。管理员应分别验证连接、决策输出格式、业务输入契约和完整任务；单次合成检查通过或 HTTP 200 不能证明网关严格执行 Schema，也不能证明任务正确完成。
 
 可选 `decision_output_mode` 选择业务决策输出：省略或 `json_object` 保持现有 JSON 内容；`output_tools` 提供一个类型化输出函数 `submit_decision`，通过明确的 `tool_choice` 选择该函数，并设置 `parallel_tool_calls=false`。参数形如 `{"kind":"final","answer_markdown":"...","fact_ids":[]}`；参数在根部声明原生字段类型，并用带固定 `kind` 的对象联合约束每种决策，各决策保留原有字段和类型约束。模型不能设置 `schema`；适配器校验决策种类和调用引用后，赋予固定 `schema`，继续使用原有 `agenstra.decision.v1` 校验。此设置不影响记忆提取。仅对已实测支持该协议的网关启用；接受参数不等于网关严格执行 Schema。未知或多个输出工具、错误类型、重复键和不匹配的决策均被拒绝，仍使用原有本地校验、授权与预算。工具定义和输出提示计入实际请求预算。不会从普通文字中提取或修复 JSON，也不会自动改用另一种输出方式掩盖异常。已有任务继续使用创建时冻结的模型配置。
