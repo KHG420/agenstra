@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -187,5 +188,56 @@ func TestModelProtocolCheckRejectsSuffixAndDoesNotRetry(t *testing.T) {
 				t.Fatal(result, requests, err)
 			}
 		})
+	}
+}
+
+func TestDecisionPromptMeasurementMatchesExecutionAndMemoryIsUnchanged(t *testing.T) {
+	requests := make(chan []byte, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		actual, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+		}
+		requests <- actual
+		if err = json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{agentcontract.JSON{"message": agentcontract.JSON{"content": `{"kind":"final","answer_markdown":"ok","fact_ids":[]}`}}}}); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer upstream.Close()
+	d := selectionTestDeployment(t, upstream.URL)
+	manager, err := d.NewModel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.DecisionPrompt = func(packet agentcontract.ContextPacket, prompt string) string {
+		packet.Followups[0] = "mutated policy input"
+		return prompt + "\nTrusted language policy"
+	}
+	p := agentcontract.ContextPacket{Schema: "agenstra.context.v1", Instruction: "Reply", Followups: []string{"original"}}
+	measured, err := manager.MeasureInput(p, "Return JSON")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = manager.Decide(t.Context(), p, "Return JSON"); err != nil {
+		t.Fatal(err)
+	}
+	actual := <-requests
+	if p.Followups[0] != "original" {
+		t.Fatal("policy mutated caller packet")
+	}
+	if measured.Tokens != int64(len(actual)+128) || !bytes.Contains(actual, []byte("Trusted language policy")) || bytes.Contains(actual, []byte(`"stream"`)) {
+		t.Fatal("measurement or default transport changed", measured, len(actual))
+	}
+	manager.StreamAnswers = true
+	selected, err := manager.selectedModel(manager.Snapshot().Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !selected.decision.StreamAnswers || selected.memory.StreamAnswers {
+		t.Fatal("streaming option escaped the decision instance")
+	}
+	// Keep the real manager: its configuration management and revision guards still work.
+	if _, err = manager.Configure(manager.Snapshot().Config, 0); err != nil {
+		t.Fatal(err)
 	}
 }

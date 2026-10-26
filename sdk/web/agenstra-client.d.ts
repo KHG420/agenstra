@@ -6,6 +6,9 @@ export interface ProjectBinding extends RunSource { release: string; subject: st
 export interface Run { run_id: string; status: string; revision: number; state: JSONObject & { runtime: RuntimeState; project_sources?: ProjectBinding[] }; telemetry?: RunTelemetry }
 export interface RunEvent { sequence: number; created_at: number; event: JSONObject & { kind: string; metrics?: ModelCallMetrics; context?: ContextTelemetry | null; budget?: RunBudget; progress?: RunProgress; attempt?: number; retry_at?: number } }
 export interface RunProgressSnapshot { run: Run; telemetry: RunTelemetry | null; events: RunEvent[]; cursor: number }
+/** Replacement snapshot; reconnecting is client-local, completed is durable. */
+export interface AnswerUpdate { run_id: string; text: string; phase: "waiting" | "generating" | "checking" | "completed" | "failed" | "cancelled" | "reconnecting" }
+export interface AnswerSubscription { (): void; readonly done: Promise<void> }
 export interface ChatConversation { id: string; integration_id: string; created_at: number }
 export interface ChatInput { field?: string; prompt?: string; text: string }
 export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; sources?: RunSource[]; run_id: string; status: string; answer_markdown?: string; result_refs?: ResultObjectRef[]; input_history?: ChatInput[]; context_selection?: ConversationContextSelection; run?: Run }
@@ -77,6 +80,8 @@ export class AgenstraClient {
   /** Applied at a safe boundary; reuse requestId when retrying a lost response. */
   steerRun(id: string, text: string, revision: number, options?: { requestId?: string }): Promise<Run>;
   watchRun(id: string, callback: (snapshot: RunProgressSnapshot) => void, options?: { after?: number }): () => void;
+  /** Authenticated SSE with ticket renewal and reconnection. Stop/destroy abort the read, never the run. */
+  watchAnswerStream(id: string, callback: (update: AnswerUpdate) => void, options?: { signal?: AbortSignal }): AnswerSubscription;
   supplyInput(id: string, field: string, text: string, revision: number): Promise<Run>;
   approve(id: string, invocation: JSONObject, revision: number, approved: boolean): Promise<Run>;
   cancelMessage(id: string): Promise<ChatMessage>;

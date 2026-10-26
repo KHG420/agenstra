@@ -578,6 +578,14 @@ func DeterministicInvocationID(runID, ref string) string {
 // Step performs one bounded decision round and prepares calls without invoking them.
 // The driver may checkpoint a model reservation through beforeModel.
 func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeState, beforeModel func() error) error {
+	ctx = answerContext(ctx, state)
+	defer func() {
+		update := agentcontract.AnswerUpdate{Phase: "waiting"}
+		if state.Status == "completed" && ctx.Err() == nil {
+			update.Text, update.Phase = state.AnswerMarkdown, "checking"
+		}
+		agentcontract.ObserveAnswer(ctx, update)
+	}()
 	r.defaults()
 	if err := r.contextPolicy(state).Validate(); err != nil {
 		return err
@@ -933,6 +941,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 				}
 				recordDecision(state, frozen)
 				review = &frozen
+				agentcontract.ObserveAnswer(ctx, agentcontract.AnswerUpdate{Text: frozen.AnswerMarkdown, Phase: "checking"})
 				feedback = ""
 				formatRecovery = false
 				attempt = -1

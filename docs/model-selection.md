@@ -45,6 +45,29 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 新任务会固定所选配置及其版本，包含默认、业务决策、记忆提取所需的连接引用。修改默认模型、模型 ID、参数或删除配置只影响新任务。已有任务从快照恢复配置；凭据引用在调用时解析，因此凭据更新仍由部署管理。直接使用既有单模型接口的任务保留原 `model_changed` 校验。
 
+## 嵌入式答案流与提示策略
+
+Go 宿主可在启动 HTTP 服务与工作线程之前配置模型管理实例：
+
+```go
+model, err := deployment.NewModel()
+if err != nil {
+    return err
+}
+model.StreamAnswers = true
+model.DecisionPrompt = func(packet agenstra.ContextPacket, prompt string) string {
+    return prompt + "\nRespond in the language requested by the user."
+}
+```
+
+`StreamAnswers` 默认关闭。开启后仅该实例的业务决策使用 Chat Completions SSE，并请求 `stream_options.include_usage`；记忆提取仍使用原 JSON 请求。直接构造 `HTTPJSONDecisionModel` 时也可设置这个字段。网关须支持此协议；断流、格式错误和输出截断仍按原错误与预算规则处理，不自动切换传输或修补 JSON。实现不会替换全局 HTTP transport，也不修改调用方提供的 client。
+
+流式分片重组为原响应后，继续经过用量核算、严格决策校验、完成复核、证据检查和宿主 `CompletionValidator`。展示中的答案是可撤回候选；正式结果仍来自已保存的 run。推理、工具参数与已知内部 Fact ID 不进入答案流。浏览器接线见 [Web 答案订阅](web-integration.md#答案流订阅)。
+
+`DecisionPrompt` 是可信服务端启动策略，必须确定、无副作用且并发安全；计量和执行调用同一策略，传入的 packet 为独立副本。它只返回系统提示字符串，不改变授权、预算或能力契约，也不应用于记忆提取。业务语言判断与包裹格式解析由宿主实现。配置在服务启动后保持不变；仍直接向 Host 提供 `ModelManager`，保留模型管理 API 与原配置快照行为。
+
+拒绝非法决策 JSON 时，内部日志只增加 `bytes`、`offset` 和稳定的语法原因类别，不记录模型原文；原严格拒绝及纠错预算保持不变。
+
 ## 参数适配
 
 | API 接口 | 推理参数 | 输出上限默认字段 |

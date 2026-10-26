@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 	"github.com/KHG420/agenstra/internal/platform/modelapi"
 	durablehost "github.com/KHG420/agenstra/internal/runtime/host"
@@ -14,9 +15,14 @@ import (
 // ModelManager owns deployment selection. Runs retain a connection-reference
 // snapshot, so editing the catalog cannot reroute an in-progress task.
 type ModelManager struct {
-	mu         sync.RWMutex
-	deployment *Deployment
-	selection  agentcontract.ModelSelectionSnapshot
+	// Configure before serving runs. Streaming is opt-in and affects decisions only.
+	StreamAnswers bool
+	// DecisionPrompt is a trusted, deterministic startup policy. Measurement and
+	// execution both apply it; business-specific parsing remains in the host app.
+	DecisionPrompt func(agentcontract.ContextPacket, string) string
+	mu             sync.RWMutex
+	deployment     *Deployment
+	selection      agentcontract.ModelSelectionSnapshot
 }
 
 // NewModel uses the catalog when configured and retains the existing three
@@ -128,6 +134,7 @@ func (m *ModelManager) profile(id string, p agentcontract.ModelProfile) (*modela
 
 type selectedModels struct {
 	decision, memory *modelapi.HTTPJSONDecisionModel
+	prompt           func(agentcontract.ContextPacket, string) string
 }
 
 func (m *ModelManager) selectedModel(c agentcontract.ModelConfiguration) (*selectedModels, error) {
@@ -142,7 +149,8 @@ func (m *ModelManager) selectedModel(c agentcontract.ModelConfiguration) (*selec
 	if err != nil {
 		return nil, err
 	}
-	return &selectedModels{decision: d, memory: mem}, nil
+	d.StreamAnswers = m.StreamAnswers
+	return &selectedModels{decision: d, memory: mem, prompt: m.DecisionPrompt}, nil
 }
 
 // SelectModel opens adapters for a frozen run configuration using trusted
@@ -153,6 +161,13 @@ func (m *ModelManager) SelectModel(c agentcontract.ModelConfiguration) (agentcon
 
 // Decide delegates to the decision adapter selected for this frozen configuration.
 func (s *selectedModels) Decide(ctx context.Context, p agentcontract.ContextPacket, prompt string) (agentcontract.Decision, error) {
+	if s.prompt != nil {
+		packet, err := jsonvalue.Clone(p)
+		if err != nil {
+			return agentcontract.Decision{}, err
+		}
+		prompt = s.prompt(packet, prompt)
+	}
 	return s.decision.Decide(ctx, p, prompt)
 }
 
@@ -161,6 +176,13 @@ func (s *selectedModels) ModelInfo() agentcontract.ModelInfo { return s.decision
 
 // MeasureInput measures the selected decision model payload without executing a decision.
 func (s *selectedModels) MeasureInput(p agentcontract.ContextPacket, prompt string) (agentcontract.InputMeasurement, error) {
+	if s.prompt != nil {
+		packet, err := jsonvalue.Clone(p)
+		if err != nil {
+			return agentcontract.InputMeasurement{}, err
+		}
+		prompt = s.prompt(packet, prompt)
+	}
 	return s.decision.MeasureInput(p, prompt)
 }
 

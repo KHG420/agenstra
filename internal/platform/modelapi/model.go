@@ -21,6 +21,9 @@ import (
 // HTTPJSONDecisionModel adapts a compatible JSON chat endpoint to typed decisions.
 // Configure it before concurrent use; supplied HTTP clients remain caller-owned.
 type HTTPJSONDecisionModel struct {
+	// StreamAnswers opts this instance into strict SSE transport for decisions.
+	// It does not change validation, output budgets or memory extraction.
+	StreamAnswers bool
 	// DecisionOutputMode selects JSON content or typed output tools for decisions.
 	// Empty retains JSON content; memory extraction always uses JSON content.
 	DecisionOutputMode         string
@@ -77,6 +80,7 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet agentcontract
 		metrics.ElapsedMilliseconds = time.Since(started).Milliseconds()
 		if resultErr != nil {
 			metrics.ErrorCode = agentcontract.Strptr(agentcontract.ModelErrorCode(resultErr))
+			agentcontract.ObserveAnswer(ctx, agentcontract.AnswerUpdate{Phase: "waiting"})
 		}
 		decision.ModelCall = metrics
 	}()
@@ -212,6 +216,15 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		client.Timeout = m.Timeout
 	}
 	attempts, delay, maxDelay := m.retrySettings()
+	var packet agentcontract.ContextPacket
+	showAnswer := payload["stream"] == true && json.Unmarshal(input, &packet) == nil && packet.CompletionReview == nil
+	allowedOutput := map[string]bool{}
+	if output, ok := payload["tools"].([]any); ok {
+		for _, tool := range output {
+			function := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)
+			allowedOutput[function["name"].(string)] = true
+		}
+	}
 	var body []byte
 	for attempt := 0; attempt < attempts; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -251,11 +264,22 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 			code, retry = modelHTTPError(res.StatusCode)
 			retryAfter = modelRetryAfter(res.Header.Get("Retry-After"), time.Now())
 			if code == "" {
-				body, requestErr = io.ReadAll(io.LimitReader(res.Body, (8<<20)+1))
+				if payload["stream"] == true {
+					body, requestErr = readModelStream(res.Body, func(text, phase string) {
+						if showAnswer {
+							agentcontract.ObserveAnswer(ctx, agentcontract.AnswerUpdate{Text: text, Phase: phase})
+						}
+					}, allowedOutput)
+				} else {
+					body, requestErr = io.ReadAll(io.LimitReader(res.Body, (8<<20)+1))
+				}
 				if requestErr != nil {
 					code, retry = "model_unavailable", true
+					var modelError agentcontract.ModelDecisionError
 					var timeout net.Error
-					if errors.As(requestErr, &timeout) && timeout.Timeout() {
+					if errors.As(requestErr, &modelError) {
+						code, retry = modelError.Kind, false
+					} else if errors.As(requestErr, &timeout) && timeout.Timeout() {
 						code = "model_timeout"
 					} else if packetTokenBudget(ctx) > 0 {
 						code = "model_outcome_unknown"
@@ -271,6 +295,7 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		if code == "" {
 			break
 		}
+		agentcontract.ObserveAnswer(ctx, agentcontract.AnswerUpdate{Phase: "waiting"})
 		// An interrupted request may still consume its allowance upstream. A bounded
 		// run cannot safely replay that request without a settled usage receipt.
 		if (code == "model_timeout" || code == "model_outcome_unknown") && packetTokenBudget(ctx) > 0 {
@@ -557,6 +582,16 @@ func invalidModelJSON(ctx context.Context, detail string, body []byte) error {
 		var value json.RawMessage
 		var syntax *json.SyntaxError
 		if err := json.Unmarshal(body, &value); errors.As(err, &syntax) {
+			reason := "invalid_syntax"
+			switch {
+			case strings.Contains(syntax.Error(), "unexpected end"):
+				reason = "unexpected_end"
+			case strings.Contains(syntax.Error(), "escape"):
+				reason = "invalid_escape"
+			case strings.Contains(syntax.Error(), "invalid character"):
+				reason = "invalid_character"
+			}
+			log.Printf("model JSON rejected: bytes=%d offset=%d reason=%s", len(body), syntax.Offset, reason)
 			return errors.Join(invalid, syntax)
 		}
 	}

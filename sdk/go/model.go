@@ -78,3 +78,6 @@ type ModelCallMetrics = agent.ModelCallMetrics
 
 // ModelUsage aggregates reported and estimated token use across model requests and purposes.
 type ModelUsage = agent.ModelUsage
+
+// AnswerUpdate is an owner-scoped replacement answer snapshot.
+type AnswerUpdate = agent.AnswerUpdate

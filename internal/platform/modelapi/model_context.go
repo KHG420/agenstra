@@ -278,6 +278,10 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		}
 	}
 	payload := agentcontract.JSON{"model": m.Model, "response_format": agentcontract.JSON{"type": "json_object"}, "messages": messages}
+	if m.StreamAnswers && decisionPacket {
+		payload["stream"] = true
+		payload["stream_options"] = agentcontract.JSON{"include_usage": true}
+	}
 	if m.Thinking != "" {
 		payload["thinking"] = agentcontract.JSON{"type": m.Thinking}
 	}

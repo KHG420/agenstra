@@ -439,6 +439,15 @@ func (s *HTTPServer) runHTTP(w http.ResponseWriter, r *http.Request, owner strin
 		return
 	}
 	switch parts[1] {
+	case "answer-stream":
+		if len(parts) != 2 || r.Method != "GET" {
+			w.WriteHeader(405)
+			return
+		}
+		s.answerHTTP(w, r, owner, func() bool {
+			current, err := s.owner(r)
+			return err == nil && current == owner
+		})
 	case "diagnostics":
 		if len(parts) != 2 || r.Method != "GET" {
 			w.WriteHeader(405)

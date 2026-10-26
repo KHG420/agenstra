@@ -393,6 +393,35 @@ stop();
 
 `getRunEvents(id, { after, limit })` 可手动读取事件。`watchRun` 使用现有认证与轮询连接，按游标去重、故障后重试、排空终态事件后停止；取消订阅会屏蔽迟到结果，destroy 会清理订阅并中止请求。补充指令返回 202 表示已持久接收，`steering_applied` 事件表示已进入运行上下文。响应丢失时使用相同 requestId 重试；错误对象也保留 requestId。指令在安全边界生效，不中断已发出的动作。
 
+## 答案流订阅
+
+宿主在框架模型实例上启用 `StreamAnswers` 后，自有聊天界面可直接使用无 UI 客户端订阅：
+
+```js
+const stop = client.watchAnswerStream(run.run_id, update => {
+  answerElement.textContent = update.text;
+  // phase 为 completed 时才是已校验、已保存的正式答案。
+}, { signal: controller.signal });
+
+// 页面组件卸载时仅停止本地读取，不取消服务端任务。
+stop();
+await stop.done;
+```
+
+`GET /web/v1/runs/{id}/answer-stream` 使用既有 web ticket、owner 和 Web run 绑定校验，持续重新检查当前授权。Go/服务端接入也可使用原身份认证下的 `GET /runs/{id}/answer-stream`，或 `host.AnswerSnapshot(ctx, runID, owner)`。HTTP 是 `text/event-stream`，每条 `event: answer` 的数据只有 `{run_id, text, phase}`；`text` 是当前完整文本，应替换旧文本，不能追加。
+
+| phase | 含义 |
+| --- | --- |
+| `waiting` | 尚无候选，或原候选已撤回；文本为空 |
+| `generating` | 正在生成可撤回的答案候选 |
+| `checking` | 候选正接受严格决策、证据、完成复核或宿主校验 |
+| `completed` | 从已持久化的 run 读取正式答案 |
+| `failed` / `cancelled` | 任务失败、访问失效或取消；清空候选 |
+
+候选按 owner、run、执行租约与当前步骤隔离；旧执行回调不能复活已撤回候选。进程内最多保留 128 个候选，每项最多 120,000 UTF-8 字节，闲置 10 分钟后惰性淘汰。候选不是持久化结果；服务重启、跨实例重连或淘汰后可能先看到 `waiting`，任务完成后仍能读取正式答案。框架保持原任务、引用、审批和用量渠道，流数据不携带推理或工具参数。
+
+连接最长 25 秒，SDK 自动重连并在 `401 unauthorized` 时沿用 `getSession` 续期；不会重放业务请求。连接暂时不可用时，SDK 额外回调客户端状态 `reconnecting`（空文本），该状态不由 HTTP 服务发送。`403`、`404` 或无效流终止订阅并清空候选，错误通过现有 `error` 事件报告。`stop()`、外部 AbortSignal 和 `client.destroy()` 会中止读取并释放 reader、定时器与监听器；BFCache 暂停期间不重连，恢复页面后继续读取。取消订阅不会发送取消 run 的 POST；结束服务端任务仍使用 `cancelRun`。
+
 ## 最小接入套件与验收
 
 独立服务、票据助手、标准组件、页面动作类型生成、任务诊断和验收 CLI 的完整路径见[快速接入指南](quick-integration.md)。`client.getRunDiagnostics(id)` 使用同样的 owner 和 integration 绑定检查。

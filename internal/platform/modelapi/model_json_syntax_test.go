@@ -1,10 +1,12 @@
 package modelapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +19,17 @@ import (
 )
 
 const misplacedArgumentJSON = `{"kind":"tool_batch","calls":[{"arguments":{"body":{"title":"private-invalid-output-marker"}}},"path":{"id":"fixture"}}]}`
+
+func TestInvalidModelJSONLogsOnlySafeLocation(t *testing.T) {
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	err := invalidModelJSON(t.Context(), "model_output_invalid_json", []byte(misplacedArgumentJSON))
+	if err == nil || !strings.Contains(output.String(), "bytes=") || !strings.Contains(output.String(), "offset=") || !strings.Contains(output.String(), "reason=invalid_character") || strings.Contains(output.String(), "private-invalid-output-marker") || strings.Contains(output.String(), "fixture") {
+		t.Fatal("unsafe or missing JSON diagnostic", output.String())
+	}
+}
 
 func replyDecisionChannel(t *testing.T, w http.ResponseWriter, mode, body string) {
 	t.Helper()

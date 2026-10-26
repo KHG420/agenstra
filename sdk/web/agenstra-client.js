@@ -37,6 +37,7 @@ export class AgenstraClient {
     this.browserConnected = false;
     this.pageSuspended = false;
     this.chatPollAborters = new Set();
+    this.answerReadAborters = new Set();
     // A frozen page cannot consume a large history response. Cancel only that
     // read; preserve writes, receipts, handlers and the original binding.
     this.pagehide = event => {
@@ -44,6 +45,7 @@ export class AgenstraClient {
       this.pageSuspended = true;
       clearTimeout(this.chatTimer);
       for (const aborter of this.chatPollAborters) aborter.abort();
+      for (const aborter of this.answerReadAborters) aborter.abort();
     };
     this.pageshow = event => {
       if (!event.persisted || !this.pageSuspended || this.closed) return;
@@ -69,7 +71,7 @@ export class AgenstraClient {
     const hex = Array.from(bytes, n => n.toString(16).padStart(2, "0")).join("");
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
-  async request(path, { method = "GET", body, browserKey, retry = true, signal } = {}) {
+  async request(path, { method = "GET", body, browserKey, retry = true, signal, consume } = {}) {
     if (this.closed) throw new AgenstraError("client_closed");
     signal?.throwIfAborted();
     if (!this.token) {
@@ -78,7 +80,15 @@ export class AgenstraClient {
           this.token = typeof session === "string" ? session : session.token;
         }).finally(() => { this.sessionPromise = null; });
       }
-      await this.sessionPromise;
+      if (!signal) await this.sessionPromise;
+      else await new Promise((resolve, reject) => {
+        const abort = () => reject(signal.reason || new DOMException("Aborted", "AbortError"));
+        signal.addEventListener("abort", abort, { once: true });
+        this.sessionPromise.then(
+          value => { signal.removeEventListener("abort", abort); resolve(value); },
+          error => { signal.removeEventListener("abort", abort); reject(error); },
+        );
+      });
     }
     if (this.closed) throw new AgenstraError("client_closed");
     signal?.throwIfAborted();
@@ -92,6 +102,7 @@ export class AgenstraClient {
       if (body !== undefined) headers["Content-Type"] = "application/json";
       if (browserKey) headers["X-Agenstra-Browser-Key"] = browserKey;
       const response = await this.fetch(this.endpoint + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: aborter.signal, credentials: "same-origin" });
+      if (response.ok && consume) return await consume(response, aborter.signal);
       let data;
       try { data = await response.json(); }
       catch (error) { if (response.ok) throw error; }
@@ -105,10 +116,10 @@ export class AgenstraClient {
       if (response.status === 401 && retry && rawCode === "unauthorized") {
         // A late rejection only invalidates the credential used by this request.
         if (this.token === token) this.token = null;
-        return await this.request(path, { method, body, browserKey, retry: false, signal });
+        return await this.request(path, { method, body, browserKey, retry: false, signal, consume });
       }
       throw new AgenstraError(code, response.status);
-    } finally { signal?.removeEventListener("abort", abort); this.aborters.delete(aborter); }
+    } finally { if (consume) aborter.abort(); signal?.removeEventListener("abort", abort); this.aborters.delete(aborter); }
   }
   registerActions(actions) {
     if (this.browserPromise) throw new AgenstraError("register_actions_before_connect");
@@ -551,6 +562,72 @@ export class AgenstraClient {
     void poll();
     return stop;
   }
+  /** Subscribe to replacement answer snapshots. Stopping only closes this read. */
+  watchAnswerStream(id, callback, { signal } = {}) {
+    if (this.closed) throw new AgenstraError("client_closed");
+    const controller = new AbortController();
+    let stopped = false, timer, wake;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      controller.abort();
+      clearTimeout(timer); wake?.();
+      signal?.removeEventListener("abort", stop);
+      this.runWatchers.delete(stop);
+    };
+    const notify = update => {
+      if (stopped || this.closed) return;
+      try { callback(update); } catch (error) { this.options.onListenerError?.(error); }
+    };
+    const watch = async () => {
+      let delay = 250;
+      try {
+        while (!stopped && !this.closed) {
+          if (this.pageSuspended) {
+            await new Promise(resolve => { wake = resolve; timer = setTimeout(resolve, 250); });
+            wake = null;
+            continue;
+          }
+          const readController = new AbortController();
+          const abortRead = () => readController.abort();
+          controller.signal.addEventListener("abort", abortRead, { once: true });
+          this.answerReadAborters.add(readController);
+          try {
+            const terminal = await this.request("/web/v1/runs/" + encodeURIComponent(id) + "/answer-stream", {
+              signal: readController.signal,
+              consume: (response, readSignal) => consumeAnswerStream(response, id, update => {
+                delay = 250;
+                notify(update);
+              }, readSignal),
+            });
+            if (terminal || stopped || this.closed) return;
+          } catch (error) {
+            if (stopped || this.closed) return;
+            if (this.pageSuspended) continue;
+            if (error.code === "answer_stream_invalid" || error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+              notify({ run_id: id, text: "", phase: "failed" });
+              this.emit("error", error);
+              return;
+            }
+            this.emit("error", error);
+          } finally {
+            controller.signal.removeEventListener("abort", abortRead);
+            this.answerReadAborters.delete(readController);
+          }
+          if (stopped || this.closed) return;
+          notify({ run_id: id, text: "", phase: "reconnecting" });
+          await new Promise(resolve => { wake = resolve; timer = setTimeout(resolve, delay); });
+          wake = null;
+          delay = Math.min(delay * 2, 5000);
+        }
+      } finally { stop(); }
+    };
+    this.runWatchers.add(stop);
+    signal?.addEventListener("abort", stop, { once: true });
+    if (signal?.aborted) stop();
+    stop.done = watch();
+    return stop;
+  }
   supplyInput(id, field, text, revision) { return this.request("/web/v1/runs/" + id + "/input", { method: "POST", body: { field, text, revision } }); }
   approve(id, invocation, revision, approved) { return this.request("/web/v1/runs/" + id + "/approval", { method: "POST", body: { invocation_id: invocation.invocation_id, arguments_sha256: invocation.arguments_sha256, revision, approved } }); }
   cancelMessage(id) { return this.request("/chat/v1/messages/" + id + "/cancel", { method: "POST", body: {} }); }
@@ -595,3 +672,51 @@ export class AgenstraClient {
   }
 }
 export function createAgenstraClient(options) { return new AgenstraClient(options); }
+
+async function consumeAnswerStream(response, id, callback, signal) {
+  if (!response.body || !/^text\/event-stream\b/i.test(response.headers.get("content-type") || "")) throw new AgenstraError("answer_stream_invalid");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let buffer = "", data = "", event = "";
+  const cancel = () => { void reader.cancel().catch(() => { /* The disconnected read is already closed. */ }); };
+  signal.addEventListener("abort", cancel, { once: true });
+  const consume = line => {
+    if (line === "") {
+      if (event === "answer" && data) {
+        let update;
+        try { update = JSON.parse(data); } catch { throw new AgenstraError("answer_stream_invalid"); }
+        if (update?.run_id !== id || typeof update.text !== "string" || update.text.length > 120000 || !["waiting", "generating", "checking", "completed", "failed", "cancelled"].includes(update.phase)) throw new AgenstraError("answer_stream_invalid");
+        const terminal = ["completed", "failed", "cancelled"].includes(update.phase);
+        if (["waiting", "failed", "cancelled"].includes(update.phase)) update.text = "";
+        callback({ run_id: id, text: update.text, phase: update.phase });
+        data = ""; event = "";
+        return terminal;
+      }
+      data = ""; event = "";
+    } else if (line.startsWith("event:")) event = line.slice(6).replace(/^ /, "");
+    else if (line.startsWith("data:")) data += line.slice(5).replace(/^ /, "") + "\n";
+    if (data.length > 1 << 20) throw new AgenstraError("answer_stream_invalid");
+    return false;
+  };
+  try {
+    while (!signal.aborted) {
+      const { value, done } = await reader.read();
+      if (signal.aborted) return false;
+      try { buffer += decoder.decode(value, { stream: !done }); } catch { throw new AgenstraError("answer_stream_invalid"); }
+      let end;
+      while ((end = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, end).replace(/\r$/, "");
+        buffer = buffer.slice(end + 1);
+        if (line.length > 1 << 20) throw new AgenstraError("answer_stream_invalid");
+        if (consume(line)) return true;
+      }
+      if (buffer.length > 1 << 20) throw new AgenstraError("answer_stream_invalid");
+      if (done) return false;
+    }
+    return false;
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    try { await reader.cancel(); } catch { /* The transport may already be disconnected. */ }
+    reader.releaseLock();
+  }
+}

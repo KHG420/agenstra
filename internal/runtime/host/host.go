@@ -35,6 +35,7 @@ type AgentHost struct {
 	Clock                  func() float64
 	once                   sync.Once
 	slots                  chan struct{}
+	answers                answerStreams
 }
 
 // NewAgentHost wires host services with default limits without opening or owning their resources.
@@ -430,7 +431,11 @@ func (h *AgentHost) Cancel(ctx context.Context, id, owner string) (agentcontract
 	if e != nil || Terminal(r.Status) {
 		return r, e
 	}
-	return h.Store.RequestCancel(id, owner)
+	r, e = h.Store.RequestCancel(id, owner)
+	if e == nil {
+		h.answers.clear(owner, id, "")
+	}
+	return r, e
 }
 
 // Fingerprint reads the provider's optional pinned-contract fingerprint.
@@ -1173,6 +1178,7 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 		}
 		remaining := h.runSettings(run).MaxRunSeconds - (h.Now() - run.CreatedAt)
 		stepCtx, cancel := context.WithTimeout(ctx, time.Duration(remaining*1e9))
+		stepCtx = h.answers.begin(stepCtx, run)
 		stepCtx = agentcontract.WithModelRequestObserver(stepCtx, func(progress agentcontract.ModelRequestProgress) error {
 			var err error
 			run, err = h.save(run, state, "", nil, agentcontract.JSON{"kind": progress.Kind, "attempt": progress.Attempt, "error_code": progress.ErrorCode, "retry_at": progress.RetryAt})
@@ -1251,6 +1257,7 @@ func (h *AgentHost) Drive(ctx context.Context, id, owner string) (agentcontract.
 	if e != nil {
 		return run, e
 	}
+	defer h.answers.clear(owner, id, run.LeaseToken)
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	done := make(chan struct{})

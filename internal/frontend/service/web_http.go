@@ -180,6 +180,14 @@ func (s *HTTPServer) webHTTP(w http.ResponseWriter, r *http.Request) {
 		u := *r.URL
 		u.Path = path
 		copy.URL = &u
+		if strings.HasSuffix(path, "/answer-stream") && len(strings.Split(path, "/")) == 4 && r.Method == "GET" {
+			token := webBearer(r)
+			s.answerHTTP(w, copy, owner, func() bool {
+				current, err := integration.ticketOwner(token)
+				return err == nil && current == owner
+			})
+			return
+		}
 		s.runHTTP(w, copy, owner)
 		return
 	}
