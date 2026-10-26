@@ -36,12 +36,15 @@ type AgentRuntime struct {
 	MaxContextCharacters       int
 	MaxContextCapabilities     int
 	Memories                   []agentcontract.MemoryView
-	CompletionValidator        agentcontract.CompletionValidator
-	CompletionReviewPolicy     agentcontract.CompletionReviewPolicy
-	MaxModelTokens             int64
-	MaxModelOutputTokens       int
-	MaxStagnantRounds          int
-	MaxConcurrentTools         int
+	// CompletionPreflight optionally rejects invalid drafts before model review.
+	// It is read-only and does not replace the final CompletionValidator.
+	CompletionPreflight    agentcontract.CompletionValidator
+	CompletionValidator    agentcontract.CompletionValidator
+	CompletionReviewPolicy agentcontract.CompletionReviewPolicy
+	MaxModelTokens         int64
+	MaxModelOutputTokens   int
+	MaxStagnantRounds      int
+	MaxConcurrentTools     int
 	// ModelTimeout bounds each model request when positive; the caller context
 	// still bounds the whole step, including completion review and recovery.
 	ModelTimeout time.Duration
@@ -949,6 +952,24 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 						break
 					}
 				}
+				if r.CompletionPreflight != nil {
+					completion, err := jsonvalue.Clone(agentcontract.CompletionContext{RunID: state.RunID, OriginPackID: r.OriginPackID, Instruction: state.Instruction, AnswerMarkdown: d.AnswerMarkdown, FactIDs: d.FactIDs, Facts: state.Facts, Observations: state.Observations, Followups: state.Followups})
+					if err != nil {
+						state.Status = "failed"
+						state.ErrorCode = agentcontract.Strptr("run_state_invalid")
+						return nil
+					}
+					err = r.CompletionPreflight(ctx, completion)
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
+					if err != nil {
+						code, feedback := completionValidationFeedback(err)
+						recordDecision(state, d)
+						Reject(state, "final", "agent.final", code, agentcontract.JSON{"feedback": feedback}, "")
+						return nil
+					}
+				}
 				// Save the proposal for audit/checkpointing, but never publish it.
 				// The reviewer has no path to executing another business action.
 				frozen, err := jsonvalue.Clone(d)
@@ -1075,16 +1096,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 				return ctx.Err()
 			}
 			if err != nil {
-				code, feedback := "completion_validation_failed", "The final answer did not satisfy the host's completion checks."
-				var validation agentcontract.CompletionValidationError
-				if errors.As(err, &validation) {
-					if agentcontract.SafeCodePattern.MatchString(validation.Kind) {
-						code = validation.Kind
-					}
-					if len(validation.Feedback) <= 1000 && validation.Feedback != "" {
-						feedback = validation.Feedback
-					}
-				}
+				code, feedback := completionValidationFeedback(err)
 				Reject(state, "final", "agent.final", code, agentcontract.JSON{"feedback": feedback}, "")
 			} else {
 				state.Status = "completed"

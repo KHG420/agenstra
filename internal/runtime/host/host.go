@@ -23,9 +23,12 @@ import (
 // AgentHost owns run scheduling, authorization, leases and durable checkpoints.
 // It must not be copied after use; its store and model are supplied by the host app.
 type AgentHost struct {
-	Store                  *runstore.SQLiteStore
-	ProviderFactory        agentcontract.ProviderFactory
-	Model                  agentcontract.DecisionModel
+	Store           *runstore.SQLiteStore
+	ProviderFactory agentcontract.ProviderFactory
+	Model           agentcontract.DecisionModel
+	// CompletionPreflight optionally checks drafts before expensive model review.
+	// Configure it before serving runs and retain it when resuming them.
+	CompletionPreflight    agentcontract.CompletionValidator
 	CompletionValidator    agentcontract.CompletionValidator
 	CompletionReviewPolicy agentcontract.CompletionReviewPolicy
 	Reconciler             agentcontract.InvocationReconciler
@@ -1039,6 +1042,7 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 	runtime := &reactcore.AgentRuntime{Provider: provider, Model: runModel, Grants: policy.GrantedCapabilities, OriginPackID: run.PackID, ConnectionID: agentcontract.NewID(), Durable: true, MaxModelRounds: h.runSettings(run).MaxModelRounds, MaxToolCalls: h.runSettings(run).MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.runSettings(run).MaxContextCharacters}
 	runtime.ModelTimeout = time.Duration(h.runSettings(run).ModelTimeoutSeconds * 1e9)
 	runtime.CompletionValidator = h.CompletionValidator
+	runtime.CompletionPreflight = h.CompletionPreflight
 	runtime.CompletionReviewPolicy = h.CompletionReviewPolicy
 	runtime.ContextPolicy = h.runSettings(run).ContextPolicy
 	runtime.ModelContextWindowTokens = h.runSettings(run).ModelContextWindowTokens

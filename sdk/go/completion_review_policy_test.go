@@ -28,7 +28,7 @@ func TestSDKCompletionReviewPolicyUsesDurableEvidence(t *testing.T) {
 		func(context.Context, string, string) (agenstra.ExecutionPolicy, error) {
 			return agenstra.ExecutionPolicy{GrantedCapabilities: map[string]bool{"records.get": true}, AllowModelData: true}, nil
 		})
-	policyCalls, validationCalls := 0, 0
+	policyCalls, preflightCalls, validationCalls := 0, 0, 0
 	var policy agenstra.CompletionReviewPolicy = func(ctx context.Context, c agenstra.CompletionContext) bool {
 		policyCalls++
 		if ctx.Err() != nil || c.OriginPackID != "records" || c.Instruction != "Read record R-1" || len(c.Facts) != 1 || len(c.Observations) != 1 || c.Observations[0].Status != "succeeded" || c.Observations[0].FactID == nil || *c.Observations[0].FactID != c.Facts[0].FactID || c.Facts[0].SourceCapability != "records.get" {
@@ -37,6 +37,13 @@ func TestSDKCompletionReviewPolicyUsesDurableEvidence(t *testing.T) {
 		return true
 	}
 	host.CompletionReviewPolicy = policy
+	host.CompletionPreflight = func(_ context.Context, c agenstra.CompletionContext) error {
+		preflightCalls++
+		if len(c.Facts) != 1 || c.Facts[0].SourceCapability != "records.get" {
+			t.Fatal("durable preflight lost retained evidence")
+		}
+		return nil
+	}
 	host.CompletionValidator = func(context.Context, agenstra.CompletionContext) error {
 		validationCalls++
 		return nil
@@ -46,7 +53,7 @@ func TestSDKCompletionReviewPolicyUsesDurableEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	run, err = host.Drive(t.Context(), run.RunID, "alice")
-	if err != nil || run.Status != "completed" || provider.calls != 1 || policyCalls != 1 || validationCalls != 1 {
+	if err != nil || run.Status != "completed" || provider.calls != 1 || policyCalls != 1 || preflightCalls != 1 || validationCalls != 1 {
 		t.Fatal("embedded review replayed a read or bypassed final validation", run.Status, provider.calls, policyCalls, validationCalls, err)
 	}
 	telemetry, err := host.GetTelemetry(t.Context(), run.RunID, "alice")

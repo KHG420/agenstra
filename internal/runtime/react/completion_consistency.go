@@ -1,10 +1,25 @@
 package react
 
 import (
+	"errors"
 	"slices"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
+
+func completionValidationFeedback(err error) (string, string) {
+	code, feedback := "completion_validation_failed", "The final answer did not satisfy the host's completion checks."
+	var validation agentcontract.CompletionValidationError
+	if errors.As(err, &validation) {
+		if agentcontract.SafeCodePattern.MatchString(validation.Kind) {
+			code = validation.Kind
+		}
+		if len(validation.Feedback) <= 1000 && validation.Feedback != "" {
+			feedback = validation.Feedback
+		}
+	}
+	return code, feedback
+}
 
 // completionNeedsReview also covers final answers based on incomplete cited
 // previews. Complete reads and unrelated omitted evidence need no extra request.

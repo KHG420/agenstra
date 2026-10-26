@@ -16,7 +16,7 @@
 
 已处理所有请求，或有明确缺失前提、审批拒绝或不确定操作阻止推进时，复核返回空字符串并如实说明结果和限制；不能凭空增加验收要求。旧的自定义 `DecisionModel` 可省略该字段；内置 HTTP 模型适配器在 JSON 正文、JSON Schema 和输出工具模式下都要求复核的 `final` 显式返回该字符串，缺失字段或返回其他决策种类时拒绝响应，沿用原格式纠正预算。普通决策阶段不能提交非空复核反馈或 `approve_completion`。例：写入后用户明确要求独立读回，但本轮只有写入回执时，复核返回 `{"kind":"final","answer_markdown":"尚未发布的草稿","fact_ids":["真实证据 UUID"],"completion_feedback":"缺少原请求要求的独立读回。"}`，下一轮再由模型通过正常能力调用补做读回。
 
-草稿和复核结果都进入现有决策审计。框架先检查草稿的 Fact 引用、标量业务对象引用及正文中的内部 Fact ID；这些本地规则已能确定无效的草稿直接返回普通决策纠正，保留原错误码、执行证据和预算，不发送无效草稿进行模型复核。有效草稿仍须复核，复核结果再次通过同一组本地规则和已有 `CompletionValidator` 检查后才发布。宿主完成校验不在草稿阶段执行。先验证输出再处理有效输出的顺序参考 [Pydantic AI 输出工具处理](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/tool_manager.py#L968-L982)。
+草稿和复核结果都进入现有决策审计。框架先检查草稿的 Fact 引用、标量业务对象引用及正文中的内部 Fact ID；这些本地规则已能确定无效的草稿直接返回普通决策纠正，保留原错误码、执行证据和预算，不发送无效草稿进行模型复核。有效草稿仍须复核，复核结果再次通过同一组本地规则和已有 `CompletionValidator` 检查后才发布。宿主最终 `CompletionValidator` 的调用语义不变；需要在昂贵复核前拒绝确定无效草稿时，可显式配置下述 `CompletionPreflight`。先验证输出再处理有效输出的顺序参考 [Pydantic AI 输出工具处理](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/tool_manager.py#L968-L982)。
 
 同一份回答同时违反多项本地证据规则时，一次反馈所有已发现的问题，避免模型改好一处后才收到另一处已知错误。观察仍保留原有首个错误码优先级，不新增响应字段；所有问题修正后仍须正常复核，纠正消耗原预算且不重放业务调用。这参考 [Pydantic AI 在重试反馈中保留完整校验错误列表](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/messages.py#L1809-L1854)，不保证模型首次输出或下一次纠正一定正确。
 
@@ -64,6 +64,17 @@ host.CompletionReviewPolicy = func(ctx context.Context, c agenstra.CompletionCon
 ```
 
 策略只决定是否增加复核，不改变授权、工具执行或证据。原模型轮次、Token、上下文和超时限制继续生效；预算不足或复核拒绝时，流式候选撤回，草稿不会变成正式回答。可从任务诊断的 `budget.usage_by_purpose.completion_review.requests` 核对实际复核请求，不能仅凭总轮次增加推定已复核。最终结果仍经过已有 `CompletionValidator`，该校验与选择复核的策略分开执行。
+
+## 复核前预检
+
+嵌入式 `AgentHost` 和临时 `AgentRuntime` 可设置 `CompletionPreflight`，类型沿用 `CompletionValidator`。仅在草稿已经通过通用引用校验且确定需要模型复核时调用。预检接收独立复制的完整本轮证据；回调必须只读、快速并响应取消。返回错误时不请求模型复核，按原完成校验的错误脱敏和反馈规则回到普通决策；已成功调用、Fact、授权和预算均保留。`nil` 保持原有宿主行为，不新增部署或持久字段。
+
+```go
+host.CompletionPreflight = checkDraft
+host.CompletionValidator = checkFinal
+```
+
+可将同一组确定性校验显式绑定到两个阶段，但框架不会自动提前或重复执行已有最终回调。复核改写后的答案仍须通过 `CompletionValidator`，预检不能代替终审或授予执行权限。重启及恢复任务时保留同一预检配置。该顺序借鉴 [OpenAI 在相应执行边界放置 guardrails](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals)，不引入业务规则、外部依赖或新的模型调用。
 
 ## 宿主业务完成校验
 
