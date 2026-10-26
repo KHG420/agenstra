@@ -24,9 +24,9 @@
     function option(value, text) { const node = document.createElement("option"); node.value = value; node.textContent = text; return node; }
     function selectors() {
       const ids = Object.keys(config.profiles).sort();
-      for (const [id, field, inherit] of [["model-default", "default_profile", false], ["model-decision", "decision_profile", true], ["model-memory", "memory_extraction_profile", true]]) {
+      for (const [id, field, inherit] of [["model-default", "default_profile", false], ["model-decision", "decision_profile", true], ["model-memory", "memory_extraction_profile", true], ["model-review", "completion_review_profile", true]]) {
         const select = $(id); select.replaceChildren();
-        if (inherit) select.append(option("", "使用默认模型配置"));
+        if (inherit) select.append(option("", field === "completion_review_profile" ? "使用业务决策模型配置" : "使用默认模型配置"));
         ids.forEach(name => select.append(option(name, name)));
         select.value = config[field] || "";
       }
@@ -95,6 +95,7 @@
       config.default_profile = $("model-default").value;
       config.decision_profile = $("model-decision").value;
       config.memory_extraction_profile = $("model-memory").value;
+      config.completion_review_profile = $("model-review").value;
       return config;
     }
     async function action(fn) {
@@ -123,10 +124,10 @@
       catch (error) { $("model-profile-list").value = editing; feedback(error.message, "error", "models-feedback"); }
     });
     $("model-profile-form").addEventListener("submit", event => { event.preventDefault(); action(async () => { selectedConfig(); applyProfile(); feedback("已应用到草稿，请保存全部配置。", "info", "models-feedback"); }); });
-    for (const id of ["model-default", "model-decision", "model-memory"]) $(id).addEventListener("change", () => { selectedConfig(); status("用途选择尚未保存。请保存全部配置。"); });
+    for (const id of ["model-default", "model-decision", "model-memory", "model-review"]) $(id).addEventListener("change", () => { selectedConfig(); status("用途选择尚未保存。请保存全部配置。"); });
     $("model-remove").addEventListener("click", () => action(async () => {
       selectedConfig();
-      if ([config.default_profile, config.decision_profile, config.memory_extraction_profile].includes(editing)) throw new Error("此配置仍被默认或用途选择引用，请先选择其他配置。");
+      if ([config.default_profile, config.decision_profile, config.memory_extraction_profile, config.completion_review_profile].includes(editing)) throw new Error("此配置仍被默认或用途选择引用，请先选择其他配置。");
       delete config.profiles[editing]; editing = ""; selectors(); loadProfile(""); dirty = false; status("配置已从草稿移除，请保存全部配置。");
     }));
     $("models-reload").addEventListener("click", () => action(async () => { config = null; await refresh(); feedback("已重新读取服务端配置。", "success", "models-feedback"); }));

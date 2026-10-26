@@ -682,7 +682,7 @@ func (r *CapabilityRegistry) SaveModelConfiguration(config agentcontract.ModelCo
 	if _, err = tx.Exec(`INSERT INTO model_configuration(id,revision,config_json) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,config_json=excluded.config_json`, revision+1, string(raw)); err != nil {
 		return result, err
 	}
-	if err = registryAudit(tx, "models_configured", "", agentcontract.JSON{"revision": revision + 1, "default_profile": config.DefaultProfile, "decision_profile": config.ProfileID("decision"), "memory_extraction_profile": config.ProfileID("memory_extraction")}); err != nil {
+	if err = registryAudit(tx, "models_configured", "", agentcontract.JSON{"revision": revision + 1, "default_profile": config.DefaultProfile, "decision_profile": config.ProfileID("decision"), "memory_extraction_profile": config.ProfileID("memory_extraction"), "completion_review_profile": config.ProfileID("completion_review")}); err != nil {
 		return result, err
 	}
 	if err = tx.Commit(); err != nil {

@@ -25,6 +25,10 @@ func NewHTTPJSONDecisionModel(model, baseURL, apiKey string, timeout time.Durati
 // ModelInfoProvider is optional. Unknown capacities stay nil; no model-name guesses.
 type ModelInfoProvider = agent.ModelInfoProvider
 
+// CompletionReviewModelInfoProvider optionally reports review adapter capacity;
+// the saved run limits continue to bound each request.
+type CompletionReviewModelInfoProvider = agent.CompletionReviewModelInfoProvider
+
 // ModelInfo describes known model capacities; nil limits mean unknown capacity.
 type ModelInfo = agent.ModelInfo
 
@@ -52,7 +56,7 @@ func WithModelRequestObserver(ctx context.Context, observer func(ModelRequestPro
 type ModelOutput = agent.ModelOutput
 
 // ModelConfiguration contains connection references, never resolved API keys.
-// Empty purpose selections inherit DefaultProfile.
+// Empty decision/memory selections inherit DefaultProfile; review inherits decision.
 type ModelConfiguration = agent.ModelConfiguration
 
 // ModelProfile configures one model adapter using connection references rather than resolved secrets.

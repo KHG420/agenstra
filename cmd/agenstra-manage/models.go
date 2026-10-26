@@ -10,7 +10,7 @@ import (
 
 func modelCommand(args []string, request func(string, string, any) (any, error)) (any, error) {
 	if len(args) == 0 {
-		return nil, errors.New("model list | configure FILE --revision N | check PROFILE [--purpose decision|memory_extraction] [--config FILE]")
+		return nil, errors.New("model list | configure FILE --revision N | check PROFILE [--purpose decision|memory_extraction|completion_review] [--config FILE]")
 	}
 	switch args[0] {
 	case "list":
@@ -25,7 +25,7 @@ func modelCommand(args []string, request func(string, string, any) (any, error))
 		fs := flag.NewFlagSet("model "+args[0], flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		revision := fs.Int("revision", -1, "expected catalog revision")
-		purpose := fs.String("purpose", "decision", "decision or memory_extraction")
+		purpose := fs.String("purpose", "decision", "decision, memory_extraction or completion_review")
 		configPath := fs.String("config", "", "optional unsaved configuration")
 		if err := fs.Parse(args[2:]); err != nil {
 			return nil, err
@@ -53,7 +53,7 @@ func modelCommand(args []string, request func(string, string, any) (any, error))
 			}
 			return request("PUT", "/admin/api/models", map[string]any{"expected_revision": *revision, "config": config})
 		}
-		if *revision != -1 || *purpose != "decision" && *purpose != "memory_extraction" {
+		if *revision != -1 || *purpose != "decision" && *purpose != "memory_extraction" && *purpose != "completion_review" {
 			return nil, errors.New("invalid model check purpose or revision")
 		}
 		body := map[string]any{"profile": args[1], "purpose": *purpose}

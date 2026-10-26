@@ -133,8 +133,8 @@ func (m *ModelManager) profile(id string, p agentcontract.ModelProfile) (*modela
 }
 
 type selectedModels struct {
-	decision, memory *modelapi.HTTPJSONDecisionModel
-	prompt           func(agentcontract.ContextPacket, string) string
+	decision, memory, review *modelapi.HTTPJSONDecisionModel
+	prompt                   func(agentcontract.ContextPacket, string) string
 }
 
 func (m *ModelManager) selectedModel(c agentcontract.ModelConfiguration) (*selectedModels, error) {
@@ -149,8 +149,23 @@ func (m *ModelManager) selectedModel(c agentcontract.ModelConfiguration) (*selec
 	if err != nil {
 		return nil, err
 	}
+	review := d
+	if c.ProfileID("completion_review") != c.ProfileID("decision") {
+		review, err = m.profile(c.ProfileID("completion_review"), c.Profiles[c.ProfileID("completion_review")])
+		if err != nil {
+			return nil, err
+		}
+	}
 	d.StreamAnswers = m.StreamAnswers
-	return &selectedModels{decision: d, memory: mem, prompt: m.DecisionPrompt}, nil
+	review.StreamAnswers = m.StreamAnswers
+	return &selectedModels{decision: d, memory: mem, review: review, prompt: m.DecisionPrompt}, nil
+}
+
+func (s *selectedModels) decisionAdapter(p agentcontract.ContextPacket) *modelapi.HTTPJSONDecisionModel {
+	if p.CompletionReview != nil {
+		return s.review
+	}
+	return s.decision
 }
 
 // SelectModel opens adapters for a frozen run configuration using trusted
@@ -168,13 +183,18 @@ func (s *selectedModels) Decide(ctx context.Context, p agentcontract.ContextPack
 		}
 		prompt = s.prompt(packet, prompt)
 	}
-	return s.decision.Decide(ctx, p, prompt)
+	return s.decisionAdapter(p).Decide(ctx, p, prompt)
 }
 
 // ModelInfo reports the selected decision model capacity without making a request.
 func (s *selectedModels) ModelInfo() agentcontract.ModelInfo { return s.decision.ModelInfo() }
 
-// MeasureInput measures the selected decision model payload without executing a decision.
+// CompletionReviewModelInfo reports the frozen review profile's capacity.
+func (s *selectedModels) CompletionReviewModelInfo() agentcontract.ModelInfo {
+	return s.review.ModelInfo()
+}
+
+// MeasureInput measures the same phase-specific adapter used by Decide.
 func (s *selectedModels) MeasureInput(p agentcontract.ContextPacket, prompt string) (agentcontract.InputMeasurement, error) {
 	if s.prompt != nil {
 		packet, err := jsonvalue.Clone(p)
@@ -183,7 +203,7 @@ func (s *selectedModels) MeasureInput(p agentcontract.ContextPacket, prompt stri
 		}
 		prompt = s.prompt(packet, prompt)
 	}
-	return s.decision.MeasureInput(p, prompt)
+	return s.decisionAdapter(p).MeasureInput(p, prompt)
 }
 
 // ExtractMemories validates extracted preferences from the supplied input.
@@ -219,7 +239,16 @@ func (m *ModelManager) ModelInfo() agentcontract.ModelInfo {
 	return s.ModelInfo()
 }
 
-// MeasureInput measures the current decision profile's request payload.
+// CompletionReviewModelInfo reports the current review profile's capacity.
+func (m *ModelManager) CompletionReviewModelInfo() agentcontract.ModelInfo {
+	s, err := m.selectedModel(m.Snapshot().Config)
+	if err != nil {
+		return agentcontract.ModelInfo{}
+	}
+	return s.CompletionReviewModelInfo()
+}
+
+// MeasureInput measures the current phase-specific profile's request payload.
 func (m *ModelManager) MeasureInput(p agentcontract.ContextPacket, prompt string) (agentcontract.InputMeasurement, error) {
 	s, err := m.selectedModel(m.Snapshot().Config)
 	if err != nil {
@@ -266,7 +295,7 @@ func (m *ModelManager) Check(ctx context.Context, id, purpose string, config *ag
 		return agentcontract.ModelCheckResult{}, err
 	}
 	p, ok := c.Profiles[id]
-	if !ok || purpose != "decision" && purpose != "memory_extraction" {
+	if !ok || purpose != "decision" && purpose != "memory_extraction" && purpose != "completion_review" {
 		return agentcontract.ModelCheckResult{}, agentcontract.NewRegistryError("model_selection_invalid")
 	}
 	model, err := m.profile(id, p)
@@ -281,11 +310,18 @@ func (m *ModelManager) Check(ctx context.Context, id, purpose string, config *ag
 		_, result.Metrics, err = model.ExtractMemoriesMeasured(ctx, agentcontract.MemoryExtractionRequest{Text: "Remember: all my reports should use Chinese."})
 	} else {
 		var d agentcontract.Decision
-		d, err = model.Decide(ctx, agentcontract.ContextPacket{Schema: "agenstra.context.v1"}, `This is a synthetic protocol check, with no business capabilities. Return a final decision with answer_markdown set to "ok" and fact_ids set to an empty array, using the configured output protocol.`)
+		packet := agentcontract.ContextPacket{Schema: "agenstra.context.v1"}
+		prompt := `This is a synthetic protocol check, with no business capabilities. Return a final decision with answer_markdown set to "ok" and fact_ids set to an empty array, using the configured output protocol.`
+		if purpose == "completion_review" {
+			packet.Instruction = "Reply ok."
+			packet.CompletionReview = &agentcontract.Decision{Schema: "agenstra.decision.v1", Kind: "final", AnswerMarkdown: "ok", FactIDs: []string{}}
+			prompt = `This is a synthetic completion-review protocol check, with no business capabilities. Verify the frozen proposal against the task. Return approve_completion if correct, or final with the corrected answer, fact_ids and completion_feedback, using the configured output protocol.`
+		}
+		d, err = model.Decide(ctx, packet, prompt)
 		if d.ModelCall != nil {
 			result.Metrics = *d.ModelCall
 		}
-		if err == nil && d.Kind != "final" {
+		if err == nil && d.Kind != "final" && !(purpose == "completion_review" && d.Kind == "approve_completion") {
 			err = agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
 			result.Metrics.FormatError = "model_decision_schema_invalid"
 		}

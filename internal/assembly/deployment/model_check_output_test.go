@@ -15,6 +15,11 @@ func TestModelCheckUsesSelectedOutputProtocol(t *testing.T) {
 		name, mode, purpose, content, tool, arguments, want string
 	}{
 		{"json decision", "json_object", "decision", final, "", "", ""},
+		{"json review", "json_object", "completion_review", `{"kind":"approve_completion"}`, "", "", ""},
+		{"schema review", "json_schema", "completion_review", `{"schema":"agenstra.decision.v1","kind":"approve_completion"}`, "", "", ""},
+		{"typed review", "output_tools", "completion_review", "", "submit_decision", `{"kind":"approve_completion"}`, ""},
+		{"native review", "native_tools", "completion_review", "", "approve_completion", `{}`, ""},
+		{"review final requires feedback", "json_object", "completion_review", final, "", "", "model_decision_schema_invalid"},
 		{"native schema decision", "json_schema", "decision", `{"schema":"agenstra.decision.v1","kind":"final","answer_markdown":"ok","fact_ids":[]}`, "", "", ""},
 		{"native schema missing identity", "json_schema", "decision", final, "", "", "model_decision_schema_invalid"},
 		{"typed decision", "output_tools", "decision", "", "submit_decision", final, ""},
@@ -36,7 +41,7 @@ func TestModelCheckUsesSelectedOutputProtocol(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 					t.Error(err)
 				}
-				typed := tc.mode == "output_tools" && tc.purpose == "decision"
+				typed := tc.mode == "output_tools" && tc.purpose != "memory_extraction"
 				if typed {
 					tools, err := agentcontract.CanonicalJSON(payload["tools"])
 					var functions []struct {
@@ -51,7 +56,7 @@ func TestModelCheckUsesSelectedOutputProtocol(t *testing.T) {
 					if err != nil || string(choice) != `{"function":{"name":"submit_decision"},"type":"function"}` || payload["parallel_tool_calls"] != false || payload["response_format"] != nil {
 						t.Error("check changed selected output transport", string(choice), err)
 					}
-				} else if tc.mode == "native_tools" && tc.purpose == "decision" {
+				} else if tc.mode == "native_tools" && tc.purpose != "memory_extraction" {
 					var functions []struct{ Function struct{ Name string } }
 					raw, err := agentcontract.CanonicalJSON(payload["tools"])
 					if err != nil || json.Unmarshal(raw, &functions) != nil || len(functions) == 0 {
@@ -69,7 +74,7 @@ func TestModelCheckUsesSelectedOutputProtocol(t *testing.T) {
 					}
 				} else {
 					format := "json_object"
-					if tc.mode == "json_schema" && tc.purpose == "decision" {
+					if tc.mode == "json_schema" && tc.purpose != "memory_extraction" {
 						format = "json_schema"
 					}
 					if payload["tools"] != nil || payload["tool_choice"] != nil || payload["response_format"].(map[string]any)["type"] != format {

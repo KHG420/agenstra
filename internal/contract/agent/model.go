@@ -55,6 +55,10 @@ func ModelErrorCode(err error) string {
 // ModelInfoProvider is optional. Unknown capacities stay nil; no model-name guesses.
 type ModelInfoProvider interface{ ModelInfo() ModelInfo }
 
+// CompletionReviewModelInfoProvider optionally reports the review adapter's
+// capacity. Runtime still applies the saved run limits to every review request.
+type CompletionReviewModelInfoProvider interface{ CompletionReviewModelInfo() ModelInfo }
+
 // ModelInfo describes known model capacities; nil limits mean unknown capacity.
 type ModelInfo struct {
 	ProtocolReserveTokens int64  `json:"protocol_reserve_tokens"`
@@ -178,11 +182,12 @@ func ValidDecisionOutputMode(mode string) bool {
 }
 
 // ModelConfiguration contains connection references, never resolved API keys.
-// Empty purpose selections inherit DefaultProfile.
+// Empty decision/memory selections inherit DefaultProfile; review inherits decision.
 type ModelConfiguration struct {
 	DefaultProfile          string                  `json:"default_profile"`
 	DecisionProfile         string                  `json:"decision_profile,omitempty"`
 	MemoryExtractionProfile string                  `json:"memory_extraction_profile,omitempty"`
+	CompletionReviewProfile string                  `json:"completion_review_profile,omitempty"`
 	Profiles                map[string]ModelProfile `json:"profiles"`
 }
 
@@ -256,8 +261,15 @@ func ValidModelURL(value string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
 }
 
-// ProfileID resolves a purpose selection, falling back to the default profile.
+// ProfileID resolves a purpose selection. Review falls back to decision; other
+// empty selections fall back to the default profile.
 func (c ModelConfiguration) ProfileID(purpose string) string {
+	if purpose == "completion_review" {
+		if c.CompletionReviewProfile != "" {
+			return c.CompletionReviewProfile
+		}
+		return c.ProfileID("decision")
+	}
 	id := c.DefaultProfile
 	if purpose == "decision" && c.DecisionProfile != "" {
 		id = c.DecisionProfile
@@ -273,7 +285,7 @@ func (c ModelConfiguration) Validate() error {
 	if len(c.Profiles) < 1 || len(c.Profiles) > 32 {
 		return NewRegistryError("model_configuration_invalid")
 	}
-	for _, id := range []string{c.DefaultProfile, c.ProfileID("decision"), c.ProfileID("memory_extraction")} {
+	for _, id := range []string{c.DefaultProfile, c.ProfileID("decision"), c.ProfileID("memory_extraction"), c.ProfileID("completion_review")} {
 		if _, exists := c.Profiles[id]; !exists {
 			return NewRegistryError("model_selection_invalid")
 		}

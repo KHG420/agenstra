@@ -19,6 +19,7 @@ func TestModelCLIUsesRevisionAndPurpose(t *testing.T) {
 		{[]string{"list"}, "GET", "/admin/api/models", true},
 		{[]string{"configure", path, "--revision", "3"}, "PUT", "/admin/api/models", true},
 		{[]string{"check", "memory", "--purpose", "memory_extraction", "--config", path}, "POST", "/admin/api/models/check", true},
+		{[]string{"check", "review", "--purpose", "completion_review", "--config", path}, "POST", "/admin/api/models/check", true},
 		{[]string{"configure", path}, "", "", false}, {[]string{"check", "business", "--purpose", "unknown"}, "", "", false},
 	} {
 		called := false
@@ -30,7 +31,7 @@ func TestModelCLIUsesRevisionAndPurpose(t *testing.T) {
 			if method == "PUT" && body.(map[string]any)["expected_revision"] != 3 {
 				t.Fatal("missing expected revision")
 			}
-			if method == "POST" && body.(map[string]any)["purpose"] != "memory_extraction" {
+			if method == "POST" && body.(map[string]any)["purpose"] != tc.args[3] {
 				t.Fatal("missing purpose")
 			}
 			return nil, nil

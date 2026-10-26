@@ -138,7 +138,7 @@ func (h *AgentHost) prepareRun(ctx context.Context, owner, pack, instruction, id
 	if manager, ok := h.Model.(runModelSelector); ok {
 		snapshot := manager.Snapshot()
 		profiles := map[string]agentcontract.ModelProfile{}
-		for _, id := range []string{snapshot.Config.DefaultProfile, snapshot.Config.ProfileID("decision"), snapshot.Config.ProfileID("memory_extraction")} {
+		for _, id := range []string{snapshot.Config.DefaultProfile, snapshot.Config.ProfileID("decision"), snapshot.Config.ProfileID("memory_extraction"), snapshot.Config.ProfileID("completion_review")} {
 			profiles[id] = snapshot.Config.Profiles[id]
 		}
 		snapshot.Config.Profiles = profiles
@@ -149,15 +149,20 @@ func (h *AgentHost) prepareRun(ctx context.Context, owner, pack, instruction, id
 		runModel, selection = selected, &snapshot
 	}
 	info := agentcontract.DescribeModel(runModel)
-	settings.ModelProtocolReserveTokens = max(settings.ModelProtocolReserveTokens, info.ProtocolReserveTokens)
-	if info.ContextWindowTokens != nil && (settings.ModelContextWindowTokens == 0 || *info.ContextWindowTokens < settings.ModelContextWindowTokens) {
-		settings.ModelContextWindowTokens = *info.ContextWindowTokens
-	}
-	if info.MaxInputTokens != nil && (settings.MaxModelInputTokens == 0 || *info.MaxInputTokens < settings.MaxModelInputTokens) {
-		settings.MaxModelInputTokens = *info.MaxInputTokens
-	}
-	if info.MaxOutputTokens != nil && (settings.MaxModelOutputTokens == 0 || *info.MaxOutputTokens < int64(settings.MaxModelOutputTokens)) {
-		settings.MaxModelOutputTokens = int(*info.MaxOutputTokens)
+	// Distinct review profiles keep the host's run-wide ceilings. Each model's
+	// own capacity is applied at request projection, without capping the reviewer
+	// to the decision model or loosening either model's limits.
+	if selection == nil || selection.Config.ProfileID("completion_review") == selection.Config.ProfileID("decision") {
+		settings.ModelProtocolReserveTokens = max(settings.ModelProtocolReserveTokens, info.ProtocolReserveTokens)
+		if info.ContextWindowTokens != nil && (settings.ModelContextWindowTokens == 0 || *info.ContextWindowTokens < settings.ModelContextWindowTokens) {
+			settings.ModelContextWindowTokens = *info.ContextWindowTokens
+		}
+		if info.MaxInputTokens != nil && (settings.MaxModelInputTokens == 0 || *info.MaxInputTokens < settings.MaxModelInputTokens) {
+			settings.MaxModelInputTokens = *info.MaxInputTokens
+		}
+		if info.MaxOutputTokens != nil && (settings.MaxModelOutputTokens == 0 || *info.MaxOutputTokens < int64(settings.MaxModelOutputTokens)) {
+			settings.MaxModelOutputTokens = int(*info.MaxOutputTokens)
+		}
 	}
 	if err := settings.Validate(); err != nil {
 		return nil, err

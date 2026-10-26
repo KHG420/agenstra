@@ -37,13 +37,51 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 }
 ```
 
-`decision_profile` 和 `memory_extraction_profile` 留空时继承 `default_profile`。不同配置可以复用同一 API、凭据及模型，只设置不同推理强度。最多保存 32 项配置。
+`decision_profile` 和 `memory_extraction_profile` 留空时继承 `default_profile`。可选 `completion_review_profile` 为完成复核选择独立配置；省略时精确继承业务决策配置（包括非默认的 `decision_profile`）。不同配置可以复用同一 API、凭据及模型，只设置不同推理强度。最多保存 32 项配置。
 
 每项连接使用 `base_url` 或 `base_url_env`，二者只能填写一个。基础地址应包含服务所需的路径前缀，例如 `/v1`；框架在其后请求 `/chat/completions`。地址不接受内嵌用户名、密码、query 或 fragment。`api_key_ref` 引用服务端环境变量，或既有管理 `secret_dir` 中的 `secret:NAME` 文件。接口与数据库保存引用，不保存解析后的 API key。
 
 管理页 `/admin` 的“模型配置”支持编辑连接、用途选择、参数、限制和价格，保存整个配置草稿。API key 值继续由服务端环境或 secret 文件提供。管理 API 受既有管理员认证保护；用户的模型数据 consent、能力授权与审批规则保持生效。
 
-新任务会固定所选配置及其版本，包含默认、业务决策、记忆提取所需的连接引用。修改默认模型、模型 ID、参数或删除配置只影响新任务。已有任务从快照恢复配置；凭据引用在调用时解析，因此凭据更新仍由部署管理。直接使用既有单模型接口的任务保留原 `model_changed` 校验。
+新任务会固定所选配置及其版本，包含默认、业务决策、完成复核、记忆提取所需的连接引用。修改默认模型、模型 ID、参数或删除配置只影响新任务。已有任务从快照恢复配置；凭据引用在调用时解析，因此凭据更新仍由部署管理。直接使用既有单模型接口的任务保留原 `model_changed` 校验。
+
+## 只为完成复核启用推理
+
+例如，普通决策与记忆继续使用已配置的 `research`，仅复核使用 `review`。两个 profile 可复用同一模型、网关与凭据引用，分别设置参数：
+
+```json
+{
+  "default_profile": "research",
+  "completion_review_profile": "review",
+  "profiles": {
+    "research": {
+      "api_type": "deepseek_chat",
+      "model": "your-model-id",
+      "base_url_env": "AGENT_MODEL_BASE_URL",
+      "api_key_ref": "AGENT_MODEL_API_KEY",
+      "thinking": "disabled",
+      "decision_output_mode": "output_tools",
+      "max_output_tokens": 4096
+    },
+    "review": {
+      "api_type": "deepseek_chat",
+      "model": "your-model-id",
+      "base_url_env": "AGENT_MODEL_BASE_URL",
+      "api_key_ref": "AGENT_MODEL_API_KEY",
+      "thinking": "enabled",
+      "reasoning_effort": "high",
+      "decision_output_mode": "output_tools",
+      "max_output_tokens": 4096
+    }
+  }
+}
+```
+
+这只是连接配置示例，模型 ID 和参数须由目标网关实测确认。复核仍由框架默认规则或 `CompletionReviewPolicy` 触发；选择 profile 不会让所有回答自动复核。普通调用和记忆使用各自原参数。复核的输入测量、实际 HTTP 请求、输出上限和费用使用同一冻结 profile，遥测继续归入 `completion_review`，并记录实际 `profile`、`model`、`thinking`、`reasoning_effort`。已有任务恢复时保留原选择；旧快照未设置本字段时继续使用原业务决策模型。
+
+选择独立复核配置时，运行保存宿主设置的整体上限，各阶段再与该模型已知容量取交集，避免把普通决策的较小输出上限误当复核上限。复核没有额外的总 Token、轮次或运行时长预算；上下文或输出额度不足时沿原规则失败，不自动改为更便宜的模型或跳过复核。推理输出也计入输出和总预算，启用推理不意味着提高了任何已配置上限。
+
+这种选择沿用已有 profile 与评估流程，参考 [OpenHands 的独立 critic 调用](https://github.com/OpenHands/software-agent-sdk/blob/0bb7b525c75f4a9a0606844fc4a2579106b08d32/openhands-sdk/openhands/sdk/critic/impl/api/critic.py) 将评估与执行分开的方式，不采用其评分或迭代协议。[DeepSeek 的推理参数说明](https://api-docs.deepseek.com/guides/thinking_mode/)支持逐请求启用推理；工具历史要求真实原始推理内容时，适配器继续将保存的草稿作为数据提供，不伪造历史推理。独立复核或更强推理仍可能误判，须用原问题和相同证据实测；一次 `approve_completion` 不是自然语言正确性的证明。
 
 ## 嵌入式答案流与提示策略
 
@@ -168,13 +206,14 @@ JSON 内容输出的首次决策说明与格式纠正说明都提供本地 `call
 
 - `GET /admin/api/models`：读取配置和 revision；自定义模型未接入模块时返回 available=false。
 - `PUT /admin/api/models`：提交 `{"expected_revision":N,"config":{...}}`。并发修改返回 HTTP 409 的 model_revision_conflict。
-- `POST /admin/api/models/check`：提交 profile、purpose（decision / memory_extraction）及可选 config 草稿，返回合成检查结果。
+- `POST /admin/api/models/check`：提交 profile、purpose（decision / memory_extraction / completion_review）及可选 config 草稿，返回合成检查结果。
 
 ```sh
 go run ./cmd/agenstra-manage model list
 go run ./cmd/agenstra-manage model configure models.json --revision 0
 go run ./cmd/agenstra-manage model check business --purpose decision
 go run ./cmd/agenstra-manage model check memory --purpose memory_extraction --config models.json
+go run ./cmd/agenstra-manage model check review --purpose completion_review --config models.json
 ```
 
 CLI 使用既有 AGENSTRA_SERVER / AGENSTRA_ADMIN_API_KEY。models.json 包含 ModelConfiguration 本身，不包含外层 models 键。保存不会自动执行收费检查；验证与业务验收由使用者明确触发。

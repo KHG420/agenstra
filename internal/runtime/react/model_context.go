@@ -9,6 +9,11 @@ import (
 
 func (r *AgentRuntime) tokenProjection(state *agentcontract.RuntimeState, packet agentcontract.ContextPacket, prompt string) (agentcontract.ContextPacket, *int64, *int64, *int64, agentcontract.InputMeasurement, error) {
 	info := agentcontract.DescribeModel(r.Model)
+	if packet.CompletionReview != nil {
+		if model, ok := r.Model.(agentcontract.CompletionReviewModelInfoProvider); ok {
+			info = model.CompletionReviewModelInfo()
+		}
+	}
 	window := r.ModelContextWindowTokens
 	if info.ContextWindowTokens != nil && (window == 0 || *info.ContextWindowTokens < window) {
 		window = *info.ContextWindowTokens

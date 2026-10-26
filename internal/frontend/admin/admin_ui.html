@@ -95,16 +95,17 @@
           </form>
           <details class="model-validation">
             <summary>验证结构化输出</summary><p>对草稿中所选模型发送一条合成请求，会产生模型调用费用。不会执行业务动作。验证通过只代表当前样本符合协议。</p>
-            <label for="model-check-purpose">验证用途</label><select id="model-check-purpose"><option value="decision">业务决策</option><option value="memory_extraction">记忆提取</option></select>
+            <label for="model-check-purpose">验证用途</label><select id="model-check-purpose"><option value="decision">业务决策</option><option value="memory_extraction">记忆提取</option><option value="completion_review">回答复核</option></select>
             <div class="actions"><button id="models-check" class="button secondary" type="button">验证当前编辑的模型</button></div>
             <div id="model-check-result" aria-live="polite"></div>
           </details>
           </div>
           <div id="model-purposes-view" class="form-panel model-selection-panel" role="tabpanel" aria-labelledby="model-purposes-tab" hidden>
             <h3>按用途选择模型</h3>
-            <p>默认模型与用途选择一起保存。用途未指定时使用默认配置。</p>
+            <p>默认模型与用途选择一起保存。业务决策和记忆未指定时使用默认配置；回答复核未指定时使用业务决策配置。</p>
             <label for="model-default">默认模型配置</label><select id="model-default"></select>
             <label for="model-decision">业务决策</label><select id="model-decision"></select>
+            <label for="model-review">回答复核</label><select id="model-review"></select>
             <label for="model-memory">记忆提取</label><select id="model-memory"></select>
             <p>记忆提取可以选择较小推理预算。业务决策需结合真实任务、审批和业务状态验收选择参数。</p>
           </div>

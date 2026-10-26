@@ -116,7 +116,7 @@ flowchart TD
 | `internal/frontend/admin/`、`sdk/web/` | 各自拥有静态资源和 JS 测试；service 使用其嵌入资源。Web 客户端、聊天组件、会话助手保留原 ES module 边界。 |
 | `cmd/`、`examples/` | 通过 Go SDK 接线及演示接入，不复制运行流程。 |
 
-Host 在使用方定义最小的运行模型选择接口：读取独立 `Snapshot`，并以已冻结的 `ModelConfiguration` 调用 `SelectModel`。部署层的 `ModelManager` 实现它，Host 无需识别具体管理器。新任务只保存实际使用的决策和记忆 profile，恢复时继续采用已保存选择；实时目录修改仍只影响新任务。
+Host 在使用方定义最小的运行模型选择接口：读取独立 `Snapshot`，并以已冻结的 `ModelConfiguration` 调用 `SelectModel`。部署层的 `ModelManager` 实现它，Host 无需识别具体管理器。新任务只保存实际使用的决策、复核和记忆 profile，恢复时继续采用已保存选择；实时目录修改仍只影响新任务。
 
 模型配置的持久修订检查、保存和审计由注册表在同一事务中执行；ModelManager 保留独立解码的配置，调用方修改输入或返回值不能改变现有任务。HTTP 初始化通过 `Initialized` 查询连接归属，失败时只关闭本次打开的注册表连接。
 

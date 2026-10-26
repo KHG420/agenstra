@@ -39,12 +39,17 @@ test("saving profile edits preserves purpose selection and expected revision", a
   await get("model-profile-form").emit("input");
   get("model-decision").value = "business";
   await get("model-decision").emit("change");
+  assert.equal(get("model-review").value, "");
+  assert.equal(get("model-review").children[0].textContent, "使用业务决策模型配置");
+  get("model-review").value = "business";
+  await get("model-review").emit("change");
   await get("models-save").emit("click");
   const save = requests.find(request => request.options?.method === "PUT");
   assert.equal(save.options.body.expected_revision, 2);
   assert.equal(save.options.body.config.profiles.business.model, "business-next");
   assert.equal(save.options.body.config.profiles.business.reasoning_effort, "low");
   assert.equal(save.options.body.config.memory_extraction_profile, "memory");
+  assert.equal(save.options.body.config.completion_review_profile, "business");
   assert.equal(save.options.body.config.profiles.memory.thinking, "disabled");
 });
 
