@@ -10,7 +10,7 @@ import (
 )
 
 // CompletionContext is supplied only after citation identity checks succeed.
-// Validators must be read-only and respect cancellation. Facts are complete,
+// Callbacks must be read-only and respect cancellation. Facts are complete,
 // rather than the bounded previews supplied to the model.
 type CompletionContext struct {
 	RunID, OriginPackID, Instruction, AnswerMarkdown string
@@ -23,6 +23,13 @@ type CompletionContext struct {
 // CompletionValidator checks cited business evidence after citation identities are verified.
 // It must respect cancellation and return deliberate feedback through CompletionValidationError.
 type CompletionValidator func(context.Context, CompletionContext) error
+
+// CompletionReviewPolicy requests model review of an otherwise publishable
+// draft when the framework's default rules do not already require it. It receives
+// a detached snapshot of complete evidence and must be read-only, quick and
+// respect cancellation. Returning false cannot disable the default reviews.
+// Configure it before serving runs and retain the same policy when resuming them.
+type CompletionReviewPolicy func(context.Context, CompletionContext) bool
 
 // CompletionValidationError carries deliberately model-visible feedback.
 // Ordinary errors are reduced to a stable code and never expose their text.

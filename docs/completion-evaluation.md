@@ -10,7 +10,7 @@
 
 运行出现 `write` 操作结果后，框架在发布最终回答前自动复核一次拟返回的回答。模型上下文的 `action_outcomes` 将每次动作、确定状态和当前结果 Fact 关联起来，区分成功、仅受理、失败、未执行和结果未知，并说明能力的审批要求。复核仍使用本次运行固定的业务决策模型及参数，宿主无需实现文本判断或额外选择模型。
 
-只读或计算任务的最终回答引用了带 `omitted_paths` 的 Fact 预览时，也进入同一复核阶段。预览省略的字段可能仍存在于已保存回执中，不能把只输出可见字段当成已经完整回答。复核结合原请求、草稿和已有检查结果判断：请求的字段确实仍被省略时，返回缺失证据检查的反馈；只要求已经可见的字段时，其他省略不阻止完成。已有省略提示中的键名可以证明字段存在，但不能证明值；复核逐项核对请求字段，不能把局部预览的键集当作完整返回字段清单。证据不足时返回具体原 Fact 路径和缺失字段，保留简短未发布草稿，避免反复复制不完整的大答案。后续通过普通 `inspect_fact` 读取原回执，不重放业务请求。未被引用的截断证据和完整的只读证据不会触发额外复核。这沿用 [smolagents 发布最终结果前运行校验、失败后返回原循环](https://github.com/huggingface/smolagents/blob/227ef5e49ddd82339295939072f0223249aa8d38/src/smolagents/agents.py#L582-L618) 的模式，使用 Agenstra 已有的预算和反馈路径；模型复核仍可能漏检语义，不能代替独立字段验收。
+只读或计算任务的最终回答引用了带 `omitted_paths` 的 Fact 预览时，也进入同一复核阶段。预览省略的字段可能仍存在于已保存回执中，不能把只输出可见字段当成已经完整回答。复核结合原请求、草稿和已有检查结果判断：请求的字段确实仍被省略时，返回缺失证据检查的反馈；只要求已经可见的字段时，其他省略不阻止完成。已有省略提示中的键名可以证明字段存在，但不能证明值；复核逐项核对请求字段，不能把局部预览的键集当作完整返回字段清单。证据不足时返回具体原 Fact 路径和缺失字段，保留简短未发布草稿，避免反复复制不完整的大答案。后续通过普通 `inspect_fact` 读取原回执，不重放业务请求。未被引用的截断证据和完整的只读证据默认不触发额外复核。这沿用 [smolagents 发布最终结果前运行校验、失败后返回原循环](https://github.com/huggingface/smolagents/blob/227ef5e49ddd82339295939072f0223249aa8d38/src/smolagents/agents.py#L582-L618) 的模式，使用 Agenstra 已有的预算和反馈路径；模型复核仍可能漏检语义，不能代替独立字段验收。
 
 复核可返回 `final` 或仅含决策身份的 `approve_completion`，不能执行或重新提交业务操作。`final` 新增可选字符串 `completion_feedback`（最多 2,000 个 Unicode 码点），供复核拒绝提前完成：发现原请求中仍有未执行的工作时，返回具体缺项；框架保存草稿和复核决策，将 `completion_incomplete` 反馈写入现有观察，保持任务运行并回到普通决策阶段。后续操作继续经过当前授权、审批、前置校验和回执路径，复核文字本身不能授权或派发调用，也不会自动重放已成功的写入。所有请求消耗原有预算，没有新增无限重试。
 
@@ -20,7 +20,7 @@
 
 同一份回答同时违反多项本地证据规则时，一次反馈所有已发现的问题，避免模型改好一处后才收到另一处已知错误。观察仍保留原有首个错误码优先级，不新增响应字段；所有问题修正后仍须正常复核，纠正消耗原预算且不重放业务调用。这参考 [Pydantic AI 在重试反馈中保留完整校验错误列表](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/messages.py#L1809-L1854)，不保证模型首次输出或下一次纠正一定正确。
 
-没有写操作、也没有引用截断证据的只读、计算和对话运行不增加复核请求。正常复核增加一次模型请求；格式错误最多使用现有的一次格式纠正，并始终受轮次、Token、输入上下文、超时和费用统计约束。复核无法完成时，任务保持未完成、草稿不发布，已有业务回执继续保留。该反馈方式参考 [Pydantic AI 将输出校验失败反馈回模型循环](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_agent_graph.py#L2393-L2399)。
+默认情况下，没有写操作、也没有引用截断证据的只读、计算和对话运行不增加复核请求。宿主可通过下述 Go 策略为选定回答请求复核。正常复核增加一次模型请求；格式错误最多使用现有的一次格式纠正，并始终受轮次、Token、输入上下文、超时和费用统计约束。复核无法完成时，任务保持未完成、草稿不发布，已有业务回执继续保留。该反馈方式参考 [Pydantic AI 将输出校验失败反馈回模型循环](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_agent_graph.py#L2393-L2399)。
 
 使用 `output_tools` 时，复核请求只提供 `submit_decision` 的 `final` 和 `approve_completion` 分支，`final` 保留上述反馈字段，通过明确的 `tool_choice` 选择该函数，保持单个输出决策限制；内置复核工具 Schema 要求显式提供 `completion_feedback`。业务调用、追问、搜索和检查工具不作为此阶段的可选输出。普通决策工具不暴露复核反馈。已保存调用及结果仍作为历史证据呈现，输入测量与实际请求一致。该限制依据框架已有的复核阶段，不按模型名称分支；JSON 正文复核使用同一反馈语义，记忆提取不变。此取舍参考 [Pydantic AI 按可选工具限制模型请求](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/models/openai.py#L1583-L1616)。筛选输出工具使模型请求与运行内核一致，不能保证最终回答不混用字段来源或遗漏用户要求的数据。
 
@@ -36,7 +36,36 @@ JSON 正文复核同样只宣告 `final`：移除框架普通决策的种类列�
 
 遥测中的 `completion_review` 单独记录这部分请求和用量。标准聊天组件直接显示执行回执；任务或回答生成失败不会把已成功的业务操作显示成未执行。自定义界面可使用已有的 `run.state.runtime.invocation_receipts`，无需解析模型文字。
 
-这是针对执行结果叙述的模型语义复核，并不是自由文本正确性的数学证明；确定的执行状态仍以框架回执为准。它不代替业务专用字段规则。
+复核检查整篇回答的定义、数值关系、结论及内部一致性，并核对当前请求、补充输入和范围限制。历史助手回答不作为独立证据；例子不能推出未提供的实际业务结果，无证据支持的可选扩展应删除。原请求所必需的证据不足时，沿用缺项反馈或明确说明限制。这仍是模型语义复核，并不是自由文本正确性的数学证明；确定的执行状态仍以框架回执为准。它不代替业务专用字段规则。
+
+## 宿主按需启用只读回答复核
+
+嵌入式宿主可设置 `AgentHost.CompletionReviewPolicy`；临时运行使用 `AgentRuntime.CompletionReviewPolicy`。类型为 `func(context.Context, CompletionContext) bool`，仅在最终草稿通过本地引用检查、且框架默认规则尚未要求复核时调用。返回 `true` 后进入同一个 `final` / `approve_completion` 复核流程；`nil` 保留默认行为，`false` 不能关闭写入或截断证据的默认复核。
+
+策略接收独立复制的完整本轮 Fact、观察、任务、补充输入、拟返回正文及引用，不会把完整宿主证据额外发给模型。复核模型仍只收到原有可见范围内、经过预算投影的 Fact、检查历史和知识说明。回调应保持只读、快速并响应取消；取消后即使返回 `false` 也不会发布草稿。应在处理任务前配置，并在重启、恢复任务时使用相同策略；这项 Go 接线不新增部署字段或持久设置。
+
+例如，宿主选择对本轮成功取得参考资料的回答复核，能力名只出现在宿主的接线代码中：
+
+```go
+host.CompletionReviewPolicy = func(ctx context.Context, c agenstra.CompletionContext) bool {
+    if ctx.Err() != nil { return false }
+    for _, observation := range c.Observations {
+        if observation.Status != "succeeded" || observation.Capability != "reference.read" || observation.FactID == nil {
+            continue
+        }
+        for _, fact := range c.Facts {
+            if fact.FactID == *observation.FactID && fact.SourceCapability == observation.Capability {
+                return true
+            }
+        }
+    }
+    return false
+}
+```
+
+策略只决定是否增加复核，不改变授权、工具执行或证据。原模型轮次、Token、上下文和超时限制继续生效；预算不足或复核拒绝时，流式候选撤回，草稿不会变成正式回答。可从任务诊断的 `budget.usage_by_purpose.completion_review.requests` 核对实际复核请求，不能仅凭总轮次增加推定已复核。最终结果仍经过已有 `CompletionValidator`，该校验与选择复核的策略分开执行。
+
+## 宿主业务完成校验
 
 嵌入式宿主可配置 `AgentHost.CompletionValidator`；临时运行可配置 `AgentRuntime.CompletionValidator`。回调在引用检查通过后接收完整 Fact、观察、任务、补充输入及拟返回的回答，应保持只读并响应取消。返回 nil 才会完成；返回 `CompletionValidationError` 会把安全的错误码和明确反馈加入观察，让模型在原轮次预算内修正。其他错误仅暴露 `completion_validation_failed`，不会把内部错误详情发给模型。重启后的宿主应使用相同业务校验配置。
 

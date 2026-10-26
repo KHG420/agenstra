@@ -27,6 +27,7 @@ type AgentHost struct {
 	ProviderFactory        agentcontract.ProviderFactory
 	Model                  agentcontract.DecisionModel
 	CompletionValidator    agentcontract.CompletionValidator
+	CompletionReviewPolicy agentcontract.CompletionReviewPolicy
 	Reconciler             agentcontract.InvocationReconciler
 	PolicyResolver         agentcontract.PolicyResolver
 	ReleaseResolver        agentcontract.ReleaseResolver
@@ -1033,6 +1034,7 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 	runtime := &reactcore.AgentRuntime{Provider: provider, Model: runModel, Grants: policy.GrantedCapabilities, OriginPackID: run.PackID, ConnectionID: agentcontract.NewID(), Durable: true, MaxModelRounds: h.runSettings(run).MaxModelRounds, MaxToolCalls: h.runSettings(run).MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.runSettings(run).MaxContextCharacters}
 	runtime.ModelTimeout = time.Duration(h.runSettings(run).ModelTimeoutSeconds * 1e9)
 	runtime.CompletionValidator = h.CompletionValidator
+	runtime.CompletionReviewPolicy = h.CompletionReviewPolicy
 	runtime.ContextPolicy = h.runSettings(run).ContextPolicy
 	runtime.ModelContextWindowTokens = h.runSettings(run).ModelContextWindowTokens
 	runtime.MaxModelInputTokens = h.runSettings(run).MaxModelInputTokens

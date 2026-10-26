@@ -37,6 +37,7 @@ type AgentRuntime struct {
 	MaxContextCapabilities     int
 	Memories                   []agentcontract.MemoryView
 	CompletionValidator        agentcontract.CompletionValidator
+	CompletionReviewPolicy     agentcontract.CompletionReviewPolicy
 	MaxModelTokens             int64
 	MaxModelOutputTokens       int
 	MaxStagnantRounds          int
@@ -923,13 +924,30 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 				Reject(state, "final", "agent.final", "completion_incomplete", agentcontract.JSON{"feedback": d.CompletionFeedback}, "")
 				return nil
 			}
-			if review == nil && d.Kind == "final" && completionNeedsReview(d, packet) {
+			needsReview := review == nil && d.Kind == "final" && completionNeedsReview(d, packet)
+			if review == nil && d.Kind == "final" && (needsReview || r.CompletionReviewPolicy != nil) {
 				// Do not spend a review request on a proposal already known to
 				// violate publication rules. Ordinary correction retains evidence.
 				if _, code, feedback := validateFinalEvidence(d, facts, r.ConnectionID); code != "" {
 					recordDecision(state, d)
 					Reject(state, "final", "agent.final", code, agentcontract.JSON{"feedback": feedback}, "")
 					return nil
+				}
+				if !needsReview {
+					completion, err := jsonvalue.Clone(agentcontract.CompletionContext{RunID: state.RunID, OriginPackID: r.OriginPackID, Instruction: state.Instruction, AnswerMarkdown: d.AnswerMarkdown, FactIDs: d.FactIDs, Facts: state.Facts, Observations: state.Observations, Followups: state.Followups})
+					if err != nil {
+						state.Status = "failed"
+						state.ErrorCode = agentcontract.Strptr("run_state_invalid")
+						return nil
+					}
+					needsReview = r.CompletionReviewPolicy(ctx, completion)
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					if !needsReview {
+						decision = d
+						break
+					}
 				}
 				// Save the proposal for audit/checkpointing, but never publish it.
 				// The reviewer has no path to executing another business action.

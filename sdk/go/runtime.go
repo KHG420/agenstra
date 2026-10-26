@@ -7,13 +7,19 @@ import (
 )
 
 // CompletionContext is supplied only after citation identity checks succeed.
-// Validators must be read-only and respect cancellation. Facts are complete,
+// Callbacks must be read-only and respect cancellation. Facts are complete,
 // rather than the bounded previews supplied to the model.
 type CompletionContext = agent.CompletionContext
 
 // CompletionValidator checks cited business evidence after citation identities are verified.
 // It must respect cancellation and return deliberate feedback through CompletionValidationError.
 type CompletionValidator = agent.CompletionValidator
+
+// CompletionReviewPolicy optionally requests model review after citation checks.
+// It receives detached, complete evidence; it must be read-only, quick and respect
+// cancellation. False cannot disable default reviews. Configure before serving
+// runs and retain the same policy when resuming them.
+type CompletionReviewPolicy = agent.CompletionReviewPolicy
 
 // CompletionValidationError carries deliberately model-visible feedback.
 // Ordinary errors are reduced to a stable code and never expose their text.
