@@ -81,7 +81,7 @@ Agenstra 在框架部署侧管理模型连接和推理参数。宿主仍只负�
 
 选择独立复核配置时，运行保存宿主设置的整体上限，各阶段再与该模型已知容量取交集，避免把普通决策的较小输出上限误当复核上限。复核没有额外的总 Token、轮次或运行时长预算；上下文或输出额度不足时沿原规则失败，不自动改为更便宜的模型或跳过复核。推理输出也计入输出和总预算，启用推理不意味着提高了任何已配置上限。
 
-这种选择沿用已有 profile 与评估流程，参考 [OpenHands 的独立 critic 调用](https://github.com/OpenHands/software-agent-sdk/blob/0bb7b525c75f4a9a0606844fc4a2579106b08d32/openhands-sdk/openhands/sdk/critic/impl/api/critic.py) 将评估与执行分开的方式，不采用其评分或迭代协议。[DeepSeek 的推理参数说明](https://api-docs.deepseek.com/guides/thinking_mode/)支持逐请求启用推理；工具历史要求真实原始推理内容时，适配器继续将保存的草稿作为数据提供，不伪造历史推理。独立复核或更强推理仍可能误判，须用原问题和相同证据实测；一次 `approve_completion` 不是自然语言正确性的证明。
+这种选择沿用已有 profile 与评估流程，参考 [OpenHands 的独立 critic 调用](https://github.com/OpenHands/software-agent-sdk/blob/0bb7b525c75f4a9a0606844fc4a2579106b08d32/openhands-sdk/openhands/sdk/critic/impl/api/critic.py) 将评估与执行分开的方式，不采用其评分或迭代协议。[DeepSeek 的推理参数说明](https://api-docs.deepseek.com/guides/thinking_mode/)支持逐请求启用推理；工具历史要求真实原始推理内容时，适配器继续将保存的草稿作为数据提供，不伪造历史推理。独立复核或更强推理仍可能误判，须用原问题和相同证据实测；一次 `approve_completion` 不是自然语言正确性的证明。复核与格式恢复提示只描述决策语义，具体JSON或工具输出通道由同一个模型适配器声明；运行时不得再嵌入与该通道冲突的JSON返回示例。
 
 ## 嵌入式答案流与提示策略
 
