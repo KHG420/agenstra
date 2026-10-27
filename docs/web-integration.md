@@ -241,6 +241,8 @@ await client.send("查询待处理订单", { clientId: client.id() });
 
 `listConversations()` 返回当前 integration 下该用户最近的最多 100 个会话。`selectConversation(id)` 验证会话归属和 integration，立即发布所选会话的历史及状态。切换失败保留此前选择；旧会话的迟到轮询不会覆盖新会话。选择和创建按调用顺序串行化。未显式选择时，`getConversation()` 恢复已保存的会话 ID；没有可用会话时自动创建。切换不取消、不迁移旧任务的浏览器绑定。浏览器连接受阻时，仍可读取、选择和创建会话、查看任务状态以及调用 `cancelMessage`；这些操作成功不代表浏览器已连接。`watchConversation` 同时尝试浏览器连接和聊天轮询，连接错误不阻止历史显示。启用控制桥的 `send` 和 `run` 必须先完成浏览器连接。
 
+`watchConversation` 向新订阅者读取初始完整历史；之后已结束且未变化的会话使用认证后的 `If-None-Match` 条件读取，HTTP 304 不重复下载或触发会话回调。验证值只保存在当前 client 内，不写入浏览器存储；切换会话和新增订阅会重新读取。服务端仍逐次核对身份、owner及当前权限，继续使用 `Cache-Control: no-store`；正在执行、排队或等待输入的消息保持完整状态更新。弱ETag忽略已结束任务的遥测读取时刻和剩余秒数，其他结果、回执、运行修订及配置改变仍使其失效；普通GET和 `snapshot()` 仍返回原有完整JSON与当前遥测数值。宿主不需要增加状态、裁剪历史或管理验证值。
+
 handler 在连接前注册，返回符合 output Schema 的结果；实际业务写入须在后端再次校验权限，可用 `commandId` 作为业务幂等键。`getPageObservation` 返回当前页面、筛选、选中项等数据，排除 cookie、token 和无关敏感数据；手动改变页面后调用 `updatePageObservation`。这些接口只能更新页面观察数据，不影响聊天历史、运行检查点或 Agent 上下文选择。
 
 配置 `getPageObservation` 时，SDK 每次心跳检查页面变化，并在 handler 前后同步；内容不变时不增加页面版本。页面观察的外层 `revision` 仅用于浏览器桥。如果业务 API 自己有乐观锁版本，在观察和动作参数中使用不同字段名，例如 `activityRevision` 与 `expectedRevision`，并在能力说明中写清来源。每个批次执行一个宿主浏览器动作，下一宿主动作前读取一次 `ui.get_context`。一次成功的观察已满足下一动作的要求；内置 `ui.get_context`、`ui.command_status` 是服务端观察，本身不要求前置页面观察。这两个动态读取能力，以及声明为 `effect: "read"` 的宿主浏览器动作，可在同一任务再次读取以核对页面或业务变化，仍受总轮次与工具预算约束；业务写保留重复调用保护。缺少事实字段时用 `inspect_fact`，不能靠反复读取同一页面推进任务。
@@ -344,7 +346,7 @@ SDK 在发送恢复请求前保存稳定的 request ID、注册参数和确认�
 | `POST /web/v1/token` | 可信身份换短期票据 |
 | `GET /web/assets/agenstra-client.js` | 无 UI 的 SDK 资源 |
 | `GET, POST /chat/v1/conversations` | 用户会话；列表可用 `?integration_id=...`，创建用 `{integration_id}` |
-| `GET /chat/v1/conversations/{id}` | 消息和 run 状态 |
+| `GET /chat/v1/conversations/{id}` | 消息和 run 状态；已结束会话支持 `ETag` / `If-None-Match`，未改变时返回无正文的304 |
 | `POST /chat/v1/conversations/{id}/messages` | `{client_id,text,session_id}` |
 | `POST /chat/v1/messages/{id}/cancel` | 取消消息 |
 | `GET /browser/v1/integrations/{id}` | profile 和 digest |

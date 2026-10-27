@@ -67,6 +67,7 @@ export class AgenstraClient {
   getConversation(): Promise<ChatConversation>;
   snapshot(): Promise<ConversationSnapshot>;
   send(text: string, options?: { clientId?: string; sources?: RunSource[] }): Promise<ChatMessage>;
+  /** Delivers initial history and changed snapshots. Unchanged settled history uses authenticated conditional reads without another callback. */
   watchConversation(callback: (snapshot: ConversationSnapshot) => void): () => void;
   getRun(id: string): Promise<Run>;
   setContextPolicy(id: string, policy: ContextPolicy, revision: number, options?: { requestId?: string }): Promise<Run>;

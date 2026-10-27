@@ -31,6 +31,7 @@ export class AgenstraClient {
     this.browserRecovery = this.load("browser_recovery");
     this.browserResume = this.load("browser_resume");
     this.chatWatchers = 0;
+    this.chatETag = null;
     this.runWatchers = new Set();
     this.aborters = new Set();
     this.browserEpoch = 0;
@@ -71,7 +72,7 @@ export class AgenstraClient {
     const hex = Array.from(bytes, n => n.toString(16).padStart(2, "0")).join("");
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
-  async request(path, { method = "GET", body, browserKey, retry = true, signal, consume } = {}) {
+  async request(path, { method = "GET", body, browserKey, retry = true, signal, consume, etag } = {}) {
     if (this.closed) throw new AgenstraError("client_closed");
     signal?.throwIfAborted();
     if (!this.token) {
@@ -101,7 +102,10 @@ export class AgenstraClient {
       const headers = { Authorization: "Bearer " + token };
       if (body !== undefined) headers["Content-Type"] = "application/json";
       if (browserKey) headers["X-Agenstra-Browser-Key"] = browserKey;
+      if (etag?.value) headers["If-None-Match"] = etag.value;
       const response = await this.fetch(this.endpoint + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: aborter.signal, credentials: "same-origin" });
+      if (response.status === 304 && etag?.value) return null;
+      if (response.ok && etag) etag.value = response.headers?.get("ETag") || "";
       if (response.ok && consume) return await consume(response, aborter.signal);
       let data;
       try { data = await response.json(); }
@@ -116,7 +120,7 @@ export class AgenstraClient {
       if (response.status === 401 && retry && rawCode === "unauthorized") {
         // A late rejection only invalidates the credential used by this request.
         if (this.token === token) this.token = null;
-        return await this.request(path, { method, body, browserKey, retry: false, signal, consume });
+        return await this.request(path, { method, body, browserKey, retry: false, signal, consume, etag });
       }
       throw new AgenstraError(code, response.status);
     } finally { if (consume) aborter.abort(); signal?.removeEventListener("abort", abort); this.aborters.delete(aborter); }
@@ -432,6 +436,7 @@ export class AgenstraClient {
     if (this.closed) throw new AgenstraError("client_closed");
     if (conversation.integration_id !== this.options.integration) throw new AgenstraError("conversation_integration_mismatch");
     this.conversation = conversation;
+    this.chatETag = null;
     this.selectionRevision++;
     this.save("conversation", conversation.id);
     return conversation;
@@ -495,6 +500,8 @@ export class AgenstraClient {
   watchConversation(callback) {
     if (this.closed) throw new AgenstraError("client_closed");
     const off = this.on("conversation", callback);
+    // A new subscriber needs its initial snapshot even when history is idle.
+    this.chatETag = null;
     this.chatWatchers++;
     if (this.chatWatchers === 1) { void this.connectBrowser().catch(error => this.emit("error", error)); this.pollChat(); }
     let watching = true;
@@ -507,9 +514,14 @@ export class AgenstraClient {
     try {
       const conversation = await this.getConversation();
       const selectionRevision = this.selectionRevision;
-      const snapshot = await this.request("/chat/v1/conversations/" + conversation.id, { signal: aborter.signal });
+      const previous = this.chatETag;
+      const etag = { value: previous?.id === conversation.id ? previous.value : "" };
+      const snapshot = await this.request("/chat/v1/conversations/" + conversation.id, { signal: aborter.signal, etag });
       if (aborter.signal.aborted) return;
-      if (selectionRevision === this.selectionRevision && snapshot.conversation.id === this.conversation?.id) this.emit("conversation", snapshot);
+      if (selectionRevision === this.selectionRevision && conversation.id === this.conversation?.id && (!snapshot || snapshot.conversation.id === conversation.id)) {
+        if (this.chatETag === previous) this.chatETag = { id: conversation.id, value: etag.value };
+        if (snapshot) this.emit("conversation", snapshot);
+      }
       if (!this.options.browser || this.browserConnected) this.emit("connection", { status: "connected" });
     }
     catch (error) { if (!aborter.signal.aborted) { this.emit("error", error); this.emit("connection", { status: "disconnected" }); } }

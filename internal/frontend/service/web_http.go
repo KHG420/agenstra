@@ -1,8 +1,12 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -64,9 +68,10 @@ func (s *HTTPServer) webHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
+		w.Header().Set("Access-Control-Expose-Headers", "ETag")
 		if r.Method == "OPTIONS" {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Agenstra-Browser-Key")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Agenstra-Browser-Key, If-None-Match")
 			w.WriteHeader(204)
 			return
 		}
@@ -248,6 +253,21 @@ func (s *HTTPServer) chatHTTP(w http.ResponseWriter, r *http.Request, owner stri
 			webError(w, e)
 			return
 		}
+		tag, e := conversationValidator(c, m)
+		if e != nil {
+			serverError(w, e)
+			return
+		}
+		if tag != "" {
+			w.Header().Set("ETag", tag)
+			for _, candidate := range strings.Split(r.Header.Get("If-None-Match"), ",") {
+				candidate = strings.TrimSpace(candidate)
+				if candidate == "*" || strings.TrimPrefix(candidate, "W/") == strings.TrimPrefix(tag, "W/") {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+			}
+		}
 		writeJSON(w, 200, agentcontract.JSON{"conversation": c, "messages": m})
 		return
 	}
@@ -286,6 +306,28 @@ func (s *HTTPServer) chatHTTP(w http.ResponseWriter, r *http.Request, owner stri
 		return
 	}
 	http.NotFound(w, r)
+}
+
+// Only settled history can reuse a weak validator. Live work keeps receiving
+// fresh telemetry, while a finished run's observation clock is not a change.
+func conversationValidator(c agentcontract.ChatConversation, messages []agentcontract.ChatMessage) (string, error) {
+	stable := append(messages[:0:0], messages...)
+	for i, message := range stable {
+		if message.Status != "completed" && message.Status != "failed" && message.Status != "cancelled" {
+			return "", nil
+		}
+		if telemetry, ok := message.Run["telemetry"].(agentcontract.RunTelemetry); ok {
+			stable[i].Run = maps.Clone(message.Run)
+			telemetry.ObservedAt = 0
+			telemetry.Budget.SecondsRemaining = 0
+			stable[i].Run["telemetry"] = telemetry
+		}
+	}
+	data, err := json.Marshal(agentcontract.JSON{"conversation": c, "messages": stable})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(`W/"%x"`, sha256.Sum256(data)), nil
 }
 
 func (w *WebIntegration) profilesForConversation(owner, id string) bool {
