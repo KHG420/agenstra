@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
+	reactcore "github.com/KHG420/agenstra/internal/runtime/react"
 )
 
 func attachmentFixture(t *testing.T) (*webFixture, agentcontract.ChatConversation) {
@@ -213,7 +214,7 @@ func TestDraftAttachmentsWaitForMessagePublication(t *testing.T) {
 	}()
 	invocation := &agentcontract.InvocationContext{OwnerID: "alice", RunID: message.RunID}
 	listed, err := provider.Invoke(t.Context(), attachmentListCapability, map[string]any{}, invocation)
-	if err != nil || len(listed.Data["attachments"].([]agentcontract.ChatAttachment)) != 0 {
+	if err != nil || len(listed.Data["attachments"].([]any)) != 0 {
 		t.Fatal("unsent file reached agent", listed, err)
 	}
 	read, err := provider.Invoke(t.Context(), attachmentReadCapability, map[string]any{"attachment_id": file.ID}, invocation)
@@ -223,5 +224,36 @@ func TestDraftAttachmentsWaitForMessagePublication(t *testing.T) {
 	files, err := f.w.ListAttachments(t.Context(), "alice", c.ID)
 	if err != nil || len(files) != 1 {
 		t.Fatal("owner could not manage draft", files, err)
+	}
+}
+
+func TestAttachmentEvidenceSupportsOriginalJSONPaths(t *testing.T) {
+	f, c := attachmentFixture(t)
+	file, err := f.w.UploadAttachment(t.Context(), "alice", c.ID, "evidence", "data.txt", strings.NewReader(strings.Repeat("x", 8000)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := f.w.SubmitMessageWithAttachments(t.Context(), "alice", c.ID, "read", "Read this file", "", nil, []string{file.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := f.w.provider(t.Context(), "alice", "records")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := provider.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	call := agentcontract.ToolCall{CallRef: "read-file", Capability: attachmentReadCapability, Arguments: agentcontract.JSON{"attachment_id": file.ID}}
+	outcome, err := reactcore.ExecuteCall(t.Context(), provider, map[string]bool{attachmentReadCapability: true}, call, &agentcontract.InvocationContext{OwnerID: "alice", RunID: message.RunID})
+	if err != nil || outcome.Fact == nil {
+		t.Fatal(outcome, err)
+	}
+	fact := *outcome.Fact
+	value, err := reactcore.ResolveArgument(agentcontract.JSON{"$fact_value": agentcontract.JSON{"fact_id": fact.FactID, "path": []any{"data", "pages", 0, "text"}}}, map[string]agentcontract.Fact{fact.FactID: fact}, "", false)
+	if err != nil || len(value.(string)) != 6000 {
+		t.Fatal("attachment field was not inspectable", err)
 	}
 }

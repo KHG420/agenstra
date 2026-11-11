@@ -153,3 +153,16 @@ func TestStoredArrayRangeCorrectionCarriesBoundsWithoutReplayingCalls(t *testing
 		t.Fatal("range repair did not retain bounded execution and evidence")
 	}
 }
+
+func TestScalarInspectionIncludesCompleteAttachmentTextWindow(t *testing.T) {
+	text := strings.Repeat("document line\n", 450)
+	fact := agentcontract.Fact{FactID: agentcontract.NewID(), Value: agentcontract.JSON{"data": agentcontract.JSON{"text": text}}}
+	result, err := inspectionView(map[string]agentcontract.Fact{fact.FactID: fact}, fact.FactID, []any{"data", "text"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := result["preview"].(map[string]any)
+	if preview["value"] != text || len(result["omitted_paths"].([][]any)) != 0 {
+		t.Fatal("explicit text read lost its source window", result)
+	}
+}

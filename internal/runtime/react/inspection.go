@@ -37,7 +37,13 @@ func inspectionView(facts map[string]agentcontract.Fact, id string, path []any, 
 	fact := facts[id]
 	fact.Value = agentcontract.JSON{"value": selected}
 	fact.ModelOutput = nil
-	view := factView(fact, 6000)
+	budget := 6000
+	if _, ok := selected.(string); ok {
+		// Explicit scalar reads need room for the source window and JSON escaping.
+		// The ordinary evidence preview and total model context retain their own bounds.
+		budget = 12000
+	}
+	view := factView(fact, budget)
 	item := agentcontract.JSON{"fact_id": id, "path": path, "preview": view.Value, "omitted_paths": view.OmittedPaths}
 	if a, ok := selected.([]any); ok {
 		item["array_length"] = len(a)

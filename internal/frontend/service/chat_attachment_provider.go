@@ -103,7 +103,8 @@ func (p *chatAttachmentProvider) Invoke(ctx context.Context, name string, args m
 		if err != nil {
 			return agentcontract.CapabilityResult{}, err
 		}
-		return agentcontract.CapabilityResult{Data: agentcontract.JSON{"attachments": items}}, nil
+		data, err := agentcontract.ObjectOf(agentcontract.JSON{"attachments": items})
+		return agentcontract.CapabilityResult{Data: data}, err
 	}
 	var request agentcontract.AttachmentRead
 	raw, err := agentcontract.CanonicalJSON(args)
@@ -123,5 +124,9 @@ func (p *chatAttachmentProvider) Invoke(ctx context.Context, name string, args m
 	}
 	request = input.AttachmentRead
 	data, err := p.web.ReadAttachment(ctx, p.owner, conversation, input.AttachmentID, request)
+	if err != nil {
+		return agentcontract.CapabilityResult{}, err
+	}
+	data, err = agentcontract.ObjectOf(data)
 	return agentcontract.CapabilityResult{Data: data}, err
 }
