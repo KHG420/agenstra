@@ -185,3 +185,37 @@ func TestChatAttachmentHTTPUpload(t *testing.T) {
 		t.Fatal(response.Code, response.Body.String())
 	}
 }
+
+func TestDraftAttachmentsWaitForMessagePublication(t *testing.T) {
+	f, c := attachmentFixture(t)
+	file, err := f.w.UploadAttachment(t.Context(), "alice", c.ID, "draft", "private.txt", strings.NewReader("unsent draft"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := f.w.SubmitMessage(t.Context(), "alice", c.ID, "question", "Hello", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := f.w.provider(t.Context(), "alice", "records")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := provider.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	invocation := &agentcontract.InvocationContext{OwnerID: "alice", RunID: message.RunID}
+	listed, err := provider.Invoke(t.Context(), attachmentListCapability, map[string]any{}, invocation)
+	if err != nil || len(listed.Data["attachments"].([]agentcontract.ChatAttachment)) != 0 {
+		t.Fatal("unsent file reached agent", listed, err)
+	}
+	read, err := provider.Invoke(t.Context(), attachmentReadCapability, map[string]any{"attachment_id": file.ID}, invocation)
+	if err != nil || read.ErrorCode != "attachment_not_found" {
+		t.Fatal("unsent file readable by agent", read, err)
+	}
+	files, err := f.w.ListAttachments(t.Context(), "alice", c.ID)
+	if err != nil || len(files) != 1 {
+		t.Fatal("owner could not manage draft", files, err)
+	}
+}

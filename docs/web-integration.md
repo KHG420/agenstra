@@ -460,4 +460,6 @@ await client.deleteAttachment(file.id);
 
 HTTP 上传使用 `POST /chat/v1/conversations/{id}/attachments?client_id={stableId}`，multipart 仅包含一个 `file`。同一路径 GET 返回文件列表，文件子路径 GET 按 `page/count/offset/limit/vision` 读取，DELETE 删除。读取默认从第 1 页开始返回 4 页，每页 6000 字，总量最多 24000 字。结果中的 `next_offset` 和 `next_page` 表示后续范围。扫描页自动调用视觉解析，图表可指定 `vision=true`，解析结果缓存至原文件。代理与宿主 HTTP 超时需容纳 75 秒解析预算和上传时间。
 
+未发送的草稿可通过用户附件 API 管理，Agent 仅能读取已关联消息的附件。
+
 启用附件后，框架为聊天运行增加 `chat.attachments.list` 与 `chat.attachments.read` 只读能力。Agent 从当前运行关联的会话读取，按文件名和原页码引用。历史发行版保留原能力契约，框架附件功能随新运行的发行版固定。

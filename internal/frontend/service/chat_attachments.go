@@ -227,11 +227,15 @@ func (w *WebIntegration) uploadAttachment(ctx context.Context, owner, conversati
 }
 
 // ListAttachments returns metadata for ready files in the authorized conversation.
-func (w *WebIntegration) ListAttachments(ctx context.Context, owner, conversation string) (result []agentcontract.ChatAttachment, resultErr error) {
+func (w *WebIntegration) ListAttachments(ctx context.Context, owner, conversation string) ([]agentcontract.ChatAttachment, error) {
+	return w.listAttachments(ctx, owner, conversation, 0)
+}
+
+func (w *WebIntegration) listAttachments(ctx context.Context, owner, conversation string, bound int) (result []agentcontract.ChatAttachment, resultErr error) {
 	if _, err := w.attachmentConversation(ctx, owner, conversation, false); err != nil {
 		return nil, err
 	}
-	rows, err := w.Store.store.DB.QueryContext(ctx, "SELECT payload FROM web_attachments WHERE owner=$1 AND conversation=$2 AND status='ready' ORDER BY created_at DESC LIMIT 100", owner, conversation)
+	rows, err := w.Store.store.DB.QueryContext(ctx, "SELECT payload FROM web_attachments WHERE owner=$1 AND conversation=$2 AND status='ready' AND bound >= $3 ORDER BY created_at DESC LIMIT 100", owner, conversation, bound)
 	if err != nil {
 		return nil, err
 	}

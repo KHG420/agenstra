@@ -99,7 +99,7 @@ func (p *chatAttachmentProvider) Invoke(ctx context.Context, name string, args m
 		return agentcontract.CapabilityResult{ErrorCode: "attachment_conversation_required"}, nil
 	}
 	if name == attachmentListCapability {
-		items, err := p.web.ListAttachments(ctx, p.owner, conversation)
+		items, err := p.web.listAttachments(ctx, p.owner, conversation, 1)
 		if err != nil {
 			return agentcontract.CapabilityResult{}, err
 		}
@@ -116,6 +116,10 @@ func (p *chatAttachmentProvider) Invoke(ctx context.Context, name string, args m
 	}
 	if err := agentcontract.DecodeDocument(string(raw), &input); err != nil {
 		return agentcontract.CapabilityResult{}, err
+	}
+	var bound int
+	if err := p.web.Store.store.DB.QueryRowContext(ctx, "SELECT bound FROM web_attachments WHERE id=$1 AND owner=$2 AND conversation=$3 AND status='ready' AND bound=1", input.AttachmentID, p.owner, conversation).Scan(&bound); err != nil {
+		return agentcontract.CapabilityResult{ErrorCode: "attachment_not_found"}, nil
 	}
 	request = input.AttachmentRead
 	data, err := p.web.ReadAttachment(ctx, p.owner, conversation, input.AttachmentID, request)
