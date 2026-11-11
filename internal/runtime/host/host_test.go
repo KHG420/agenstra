@@ -298,6 +298,43 @@ func TestHostApprovalBindsArgumentsPolicyRevisionExpiry(t *testing.T) {
 	}
 }
 
+func TestHostCanRejectExpiredApprovalWithoutExecuting(t *testing.T) {
+	s := testStore(t)
+	p := &hostProvider{caps: map[string]agentcontract.CapabilityDescription{"records.get": {Name: "records.get", Effect: "write", Replay: "never", InputSchema: agentcontract.JSON{"type": "object"}, ApprovalRequired: true}}}
+	h := testHost(t, s, p, &hostModel{decisions: []agentcontract.Decision{callDecision("records.get")}})
+	now := runstore.UnixNow()
+	h.Clock = func() float64 { return now }
+	run := createTestHostRun(t, h)
+	run, err := h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "needs_approval" {
+		t.Fatal(run.Status, err)
+	}
+	state, err := h.Restore(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := state.Pending[0]
+	now = *item.ApprovalExpiresAt + 1
+	if _, err := h.Approve(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, run.Revision, true); agentcontract.ErrorCode(err) != "approval_expired" {
+		t.Fatal("expired approval allowed execution", err)
+	}
+	if _, err := h.Approve(t.Context(), run.RunID, "alice", item.InvocationID, strings.Repeat("0", 64), run.Revision, false); agentcontract.ErrorCode(err) != "approval_arguments_changed" {
+		t.Fatal("rejection lost its exact invocation binding", err)
+	}
+	run, err = h.Approve(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, run.Revision, false)
+	if err != nil || run.Status != "queued" {
+		t.Fatal("expired action could not be rejected", run.Status, err)
+	}
+	run, err = h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "completed" || p.calls != 0 {
+		t.Fatal("rejected action executed or failed to finish", run.Status, p.calls, err)
+	}
+	state, err = h.Restore(run)
+	if err != nil || len(state.Observations) != 1 || state.Observations[0].ErrorCode == nil || *state.Observations[0].ErrorCode != "approval_denied" {
+		t.Fatal("rejection receipt was not retained", state, err)
+	}
+}
+
 func TestHostUncertainCommitReplay(t *testing.T) {
 	for _, replay := range []string{"never", "idempotent", "safe"} {
 		t.Run(replay, func(t *testing.T) {

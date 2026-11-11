@@ -411,7 +411,7 @@ func (h *AgentHost) Approve(ctx context.Context, id, owner, invocationID, argsSH
 	if item.ArgumentsSHA256 != argsSHA {
 		return run, agentcontract.NewHostError("approval_arguments_changed")
 	}
-	if item.ApprovalExpiresAt == nil || h.Now() >= *item.ApprovalExpiresAt {
+	if approved && (item.ApprovalExpiresAt == nil || h.Now() >= *item.ApprovalExpiresAt) {
 		return run, agentcontract.NewHostError("approval_expired")
 	}
 	kind := "approval_denied"
