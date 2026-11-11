@@ -100,10 +100,11 @@ export class AgenstraClient {
     this.aborters.add(aborter);
     try {
       const headers = { Authorization: "Bearer " + token };
-      if (body !== undefined) headers["Content-Type"] = "application/json";
+      const multipart = typeof FormData !== "undefined" && body instanceof FormData;
+      if (body !== undefined && !multipart) headers["Content-Type"] = "application/json";
       if (browserKey) headers["X-Agenstra-Browser-Key"] = browserKey;
       if (etag?.value) headers["If-None-Match"] = etag.value;
-      const response = await this.fetch(this.endpoint + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: aborter.signal, credentials: "same-origin" });
+      const response = await this.fetch(this.endpoint + path, { method, headers, body: body === undefined || multipart ? body : JSON.stringify(body), signal: aborter.signal, credentials: "same-origin" });
       if (response.status === 304 && etag?.value) return null;
       if (response.ok && etag) etag.value = response.headers?.get("ETag") || "";
       if (response.ok && consume) return await consume(response, aborter.signal);
@@ -480,12 +481,33 @@ export class AgenstraClient {
     return this.rememberConversation(await this.request("/chat/v1/conversations", { method: "POST", body: { integration_id: this.options.integration } }));
   }
   async snapshot() { const conversation = await this.getConversation(); return this.request("/chat/v1/conversations/" + conversation.id); }
-  async send(text, { clientId = this.id(), sources = [] } = {}) {
+  async uploadAttachment(file, { clientId = this.id(), conversationId, signal } = {}) {
+    const conversation = conversationId || (await this.getConversation()).id;
+    const body = new FormData();
+    body.append("file", file, file.name || "attachment.txt");
+    try { return await this.request("/chat/v1/conversations/" + encodeURIComponent(conversation) + "/attachments?client_id=" + encodeURIComponent(clientId), { method: "POST", body, signal }); }
+    catch (error) { error.clientId = clientId; throw error; }
+  }
+  async listAttachments({ conversationId, signal } = {}) {
+    const conversation = conversationId || (await this.getConversation()).id;
+    return this.request("/chat/v1/conversations/" + encodeURIComponent(conversation) + "/attachments", { signal });
+  }
+  async readAttachment(id, { conversationId, signal, ...range } = {}) {
+    const conversation = conversationId || (await this.getConversation()).id;
+    const query = new URLSearchParams();
+    for (const [name, value] of Object.entries(range)) if (["page", "count", "offset", "limit", "vision"].includes(name)) query.set(name, String(value));
+    return this.request("/chat/v1/conversations/" + encodeURIComponent(conversation) + "/attachments/" + encodeURIComponent(id) + "?" + query, { signal });
+  }
+  async deleteAttachment(id, { conversationId, signal } = {}) {
+    const conversation = conversationId || (await this.getConversation()).id;
+    return this.request("/chat/v1/conversations/" + encodeURIComponent(conversation) + "/attachments/" + encodeURIComponent(id), { method: "DELETE", signal });
+  }
+  async send(text, { clientId = this.id(), sources = [], attachments = [] } = {}) {
     try {
       const conversation = await this.getConversation();
       await this.connectBrowser();
       if (this.options.browser) await this.pollBrowser({ schedule: false });
-      const submit = () => this.request("/chat/v1/conversations/" + conversation.id + "/messages", { method: "POST", browserKey: this.browser?.key, body: { client_id: clientId, text, ...(sources.length ? { sources } : {}), session_id: this.browser?.id || "" } });
+      const submit = () => this.request("/chat/v1/conversations/" + conversation.id + "/messages", { method: "POST", browserKey: this.browser?.key, body: { client_id: clientId, text, ...(sources.length ? { sources } : {}), ...(attachments.length ? { attachments } : {}), session_id: this.browser?.id || "" } });
       try { return await submit(); }
       catch (error) {
         // The server rejects this contract before publishing the message.

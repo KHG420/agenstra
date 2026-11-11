@@ -51,6 +51,8 @@ func newWebStore(s *runstore.Store) (*WebStore, error) {
  CREATE INDEX IF NOT EXISTS web_conversations_owner ON web_conversations(owner);
  CREATE TABLE IF NOT EXISTS web_messages(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,owner TEXT NOT NULL,conversation TEXT NOT NULL,client_id TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(conversation,client_id));
  CREATE INDEX IF NOT EXISTS web_messages_conversation ON web_messages(conversation,sequence);
+ CREATE TABLE IF NOT EXISTS web_attachments(id TEXT PRIMARY KEY,owner TEXT NOT NULL,conversation TEXT NOT NULL,client_id TEXT NOT NULL,status TEXT NOT NULL,created_at REAL NOT NULL,bound INTEGER NOT NULL DEFAULT 0,reserved_bytes BIGINT NOT NULL,digest TEXT NOT NULL,payload TEXT NOT NULL,document TEXT NOT NULL,data BLOB,UNIQUE(conversation,client_id));
+ CREATE INDEX IF NOT EXISTS web_attachments_owner ON web_attachments(owner,conversation);
  CREATE TABLE IF NOT EXISTS web_commands(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,owner TEXT NOT NULL,session TEXT NOT NULL,run TEXT NOT NULL,payload TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS web_commands_session ON web_commands(session,sequence);
  CREATE INDEX IF NOT EXISTS web_commands_run ON web_commands(run);
@@ -58,6 +60,8 @@ func newWebStore(s *runstore.Store) (*WebStore, error) {
  CREATE TABLE IF NOT EXISTS web_releases(id TEXT PRIMARY KEY,payload TEXT NOT NULL);`
 		if s.Postgres {
 			ddl = strings.ReplaceAll(ddl, "payload TEXT", "payload JSONB")
+			ddl = strings.ReplaceAll(ddl, "document TEXT", "document JSONB")
+			ddl = strings.ReplaceAll(ddl, "data BLOB", "data BYTEA")
 			ddl = strings.Replace(ddl, "web_conversations(id", "web_conversations(rowid BIGSERIAL UNIQUE,id", 1)
 		}
 		e = s.Transaction(func(tx *sql.Tx) error {

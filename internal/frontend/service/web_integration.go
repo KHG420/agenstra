@@ -86,6 +86,7 @@ func compileFrontend(p agentcontract.FrontendProfile) (*compiledFrontend, error)
 }
 
 type webRelease struct {
+	Attachments     bool                          `json:"attachments,omitempty"`
 	IntegrationID   string                        `json:"integration_id"`
 	PackID          string                        `json:"pack_id"`
 	BaseRelease     string                        `json:"base_release"`
@@ -97,6 +98,7 @@ type webRelease struct {
 // AuthenticateRequest is an optional trusted application-side identity hook.
 // It is only used to mint web session tickets; tickets never authorize /runs or /admin.
 type WebIntegration struct {
+	attachmentSlots       chan struct{}
 	Host                  *durablehost.AgentHost
 	Store                 *WebStore
 	Config                agentcontract.WebIntegrationConfig
@@ -114,6 +116,16 @@ type WebIntegration struct {
 // NewWebIntegration validates profiles, opens its store and installs host provider wiring.
 // Close the integration after callers stop; it leaves the host's run store caller-owned.
 func NewWebIntegration(h *durablehost.AgentHost, d *deployassembly.Deployment, c agentcontract.WebIntegrationConfig) (*WebIntegration, error) {
+	if c.Attachments != nil {
+		if !c.Chat {
+			return nil, errors.New("attachments require chat")
+		}
+		limits, err := attachmentLimits(c.Attachments)
+		if err != nil {
+			return nil, err
+		}
+		c.Attachments = &limits
+	}
 	if !c.Chat && !c.BrowserBridge {
 		return nil, errors.New("web integration must enable chat or browser_bridge")
 	}
@@ -137,6 +149,7 @@ func NewWebIntegration(h *durablehost.AgentHost, d *deployassembly.Deployment, c
 		return nil, errors.New("web session TTL must be 60..3600 seconds")
 	}
 	w := &WebIntegration{Host: h, Config: c, deployment: d, profiles: map[string]*compiledFrontend{}, sessionKey: []byte(d.Environment[c.SessionKeyEnv]), baseFactory: h.ProviderFactory, basePolicy: h.PolicyResolver, baseRelease: h.ReleaseResolver, baseReleaseFactory: h.ReleaseProviderFactory}
+	w.attachmentSlots = make(chan struct{}, 1)
 	for id, conf := range c.Integrations {
 		if !capabilitypack.CapNamePattern.MatchString(id) || (conf.PackID == "" && conf.FrontendProfilePath == "") {
 			return nil, errors.New("invalid web integration ID or pack_id")
@@ -241,7 +254,11 @@ func (w *WebIntegration) putBrowserBinding(owner, integration string, c agentcon
 func (w *WebIntegration) policy(ctx context.Context, owner, pack string) (agentcontract.ExecutionPolicy, error) {
 	conf, ok := w.Config.Integrations[pack]
 	if !ok || w.profiles[pack] == nil {
-		return w.basePolicy(ctx, owner, pack)
+		policy, err := w.basePolicy(ctx, owner, pack)
+		if err != nil {
+			return policy, err
+		}
+		return w.attachmentPolicy(policy, pack), nil
 	}
 	policyPack := conf.PackID
 	if policyPack == "" {
@@ -304,18 +321,22 @@ func (w *WebIntegration) policy(ctx context.Context, owner, pack string) (agentc
 	}
 	grants["ui.get_context"], grants["ui.command_status"] = true, true
 	p.GrantedCapabilities = grants
-	return p, nil
+	return w.attachmentPolicy(p, pack), nil
 }
 
 func (w *WebIntegration) release(ctx context.Context, owner, pack string) (string, error) {
 	p := w.profiles[pack]
-	if p == nil {
+	files := w.attachmentPack(pack)
+	if p == nil && !files {
 		if w.baseRelease != nil {
 			return w.baseRelease(ctx, owner, pack)
 		}
 		return "", nil
 	}
 	conf := w.Config.Integrations[pack]
+	if p == nil {
+		conf.PackID = pack
+	}
 	base := ""
 	var e error
 	if conf.PackID != "" && w.baseRelease != nil {
@@ -343,7 +364,11 @@ func (w *WebIntegration) release(ctx context.Context, owner, pack string) (strin
 			return "", agentcontract.NewHostError("web_base_contract_changed")
 		}
 	}
-	r := webRelease{IntegrationID: pack, PackID: conf.PackID, BaseRelease: base, BaseFingerprint: baseFingerprint, Profile: p.profile}
+	var profile agentcontract.FrontendProfile
+	if p != nil {
+		profile = p.profile
+	}
+	r := webRelease{IntegrationID: pack, PackID: conf.PackID, BaseRelease: base, BaseFingerprint: baseFingerprint, Profile: profile, Attachments: files}
 	id := "web:" + agentcontract.WebHash(r)
 	raw, e := agentcontract.EncodeDocument(r)
 	if e != nil {
@@ -382,9 +407,13 @@ func (w *WebIntegration) releaseProvider(ctx context.Context, owner, pack, relea
 	if r.IntegrationID != pack {
 		return nil, agentcontract.NewHostError("web_release_mismatch")
 	}
-	p, e := compileFrontend(r.Profile)
-	if e != nil {
-		return nil, e
+	var p *compiledFrontend
+	var e error
+	if r.Profile.Schema != "" {
+		p, e = compileFrontend(r.Profile)
+		if e != nil {
+			return nil, e
+		}
 	}
 	var base agentcontract.CapabilityProvider
 	if r.PackID != "" {
@@ -400,7 +429,13 @@ func (w *WebIntegration) releaseProvider(ctx context.Context, owner, pack, relea
 			return nil, errors.Join(agentcontract.NewHostError("web_base_contract_changed"), base.Close())
 		}
 	}
-	wrapped, e := w.wrap(base, pack, p)
+	wrapped := base
+	if p != nil {
+		wrapped, e = w.wrap(base, pack, p)
+	}
+	if e == nil && r.Attachments {
+		wrapped, e = w.wrapAttachments(wrapped, owner)
+	}
 	if e != nil && base != nil {
 		e = errors.Join(e, base.Close())
 	}

@@ -9,9 +9,12 @@ export interface RunProgressSnapshot { run: Run; telemetry: RunTelemetry | null;
 /** Replacement snapshot; reconnecting is client-local, completed is durable. */
 export interface AnswerUpdate { run_id: string; text: string; phase: "waiting" | "generating" | "checking" | "completed" | "failed" | "cancelled" | "reconnecting" }
 export interface AnswerSubscription { (): void; readonly done: Promise<void> }
+export interface ChatAttachment { id: string; conversation_id: string; name: string; media_type: string; kind: "text" | "spreadsheet" | "image" | "pdf"; size: number; page_count: number; preview: string; preview_partial: boolean; created_at: number }
+export interface AttachmentRead { page?: number; count?: number; offset?: number; limit?: number; vision?: boolean }
+export interface AttachmentContent { attachment_id: string; name: string; page_count: number; pages: { page: number; text: string; visual: boolean; next_offset: number | null }[]; next_page: number | null }
 export interface ChatConversation { id: string; integration_id: string; created_at: number }
 export interface ChatInput { field?: string; prompt?: string; text: string }
-export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; sources?: RunSource[]; run_id: string; status: string; answer_markdown?: string; result_refs?: ResultObjectRef[]; input_history?: ChatInput[]; context_selection?: ConversationContextSelection; run?: Run }
+export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; sources?: RunSource[]; attachments?: ChatAttachment[]; run_id: string; status: string; answer_markdown?: string; result_refs?: ResultObjectRef[]; input_history?: ChatInput[]; context_selection?: ConversationContextSelection; run?: Run }
 export interface ConversationSnapshot { conversation: ChatConversation; messages: ChatMessage[] }
 export interface Memory {
   id: string; scope: "user" | "pack"; pack_id: string; key: string; value: string;
@@ -66,7 +69,11 @@ export class AgenstraClient {
   selectConversation(id: string): Promise<ChatConversation>;
   getConversation(): Promise<ChatConversation>;
   snapshot(): Promise<ConversationSnapshot>;
-  send(text: string, options?: { clientId?: string; sources?: RunSource[] }): Promise<ChatMessage>;
+  uploadAttachment(file: Blob & { name?: string }, options?: { clientId?: string; conversationId?: string; signal?: AbortSignal }): Promise<ChatAttachment>;
+  listAttachments(options?: { conversationId?: string; signal?: AbortSignal }): Promise<ChatAttachment[]>;
+  readAttachment(id: string, options?: AttachmentRead & { conversationId?: string; signal?: AbortSignal }): Promise<AttachmentContent>;
+  deleteAttachment(id: string, options?: { conversationId?: string; signal?: AbortSignal }): Promise<{ deleted: boolean }>;
+  send(text: string, options?: { clientId?: string; sources?: RunSource[]; attachments?: string[] }): Promise<ChatMessage>;
   /** Delivers initial history and changed snapshots. Unchanged settled history uses authenticated conditional reads without another callback. */
   watchConversation(callback: (snapshot: ConversationSnapshot) => void): () => void;
   getRun(id: string): Promise<Run>;

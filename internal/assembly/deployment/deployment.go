@@ -31,11 +31,13 @@ func DeploymentError(code string) error { return &agentcontract.DeploymentError{
 // Deployment resolves trusted configuration and per-owner connections.
 // Treat Config and Environment as read-only while requests are active.
 type Deployment struct {
-	Config         agentcontract.DeploymentConfig
-	BaseDir        string
-	Environment    map[string]string
-	IdentityClient *http.Client
-	Registry       *packregistry.CapabilityRegistry
+	// AttachmentParser is an optional trusted parser installed before serving requests.
+	AttachmentParser agentcontract.AttachmentParser
+	Config           agentcontract.DeploymentConfig
+	BaseDir          string
+	Environment      map[string]string
+	IdentityClient   *http.Client
+	Registry         *packregistry.CapabilityRegistry
 }
 
 // LoadDeployment strictly decodes configuration and snapshots the process environment.

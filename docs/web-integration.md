@@ -437,3 +437,27 @@ await stop.done;
 ### 宿主快捷键与 Shadow DOM
 
 标准聊天组件使用 Shadow DOM。宿主在 document/window 注册的全局快捷键不能只通过 `event.target.closest('input, textarea')` 排除输入框：浏览器会将 target 重定向为 `agenstra-chat`。应检查 `event.composedPath()` 中的真实输入元素，防止用户在聊天输入框按空格、Enter 等键时触发原软件业务操作。接入验收应包括这一项，并确认收起面板不会中断已经提交的操作。
+
+## 聊天附件
+
+在 `web_integration` 中设置 `"attachments": {}`，即可使用框架保存的会话附件。默认每文件 6 MiB、每消息 2 个，用户存储预留配额 256 MiB、总预留配额 2 GiB。`max_file_bytes` 可设置为最多 32 MiB，`max_owner_bytes` 和 `max_total_bytes` 调整配额。每份文件按原始大小加 8 MiB 解析结果预算及元数据预留存储。每会话最多保留 100 份文件。未关联消息的草稿附件在 24 小时后由后续上传清理。删除操作释放文件及解析结果，历史消息和已完成运行保留其来源标识。
+
+框架默认解析 UTF-8 TXT、Markdown、CSV、TSV、JSON 与 XLSX 缓存单元格。宿主在启动 HTTP/worker 前设置 `Deployment.AttachmentParser` 可接入其 PDF 和图片服务。回调收到可信 owner、conversation、原始字节及原页请求，必须遵守 context 取消。`Page == 0` 返回完整的原页编号与文字，可保留扫描页空白并设置 `SupportsVision`。`Page > 0` 返回该原页的一页视觉解释。提取内容和文件中的指令均作为不可信资料使用。回调可调用 `agenstra.ParseTextAttachment` 复用默认解析。
+
+```js
+const conversation = await client.getConversation();
+const file = await client.uploadAttachment(input.files[0], {
+  conversationId: conversation.id,
+  clientId: stableUploadId,
+  signal: abortController.signal,
+});
+await client.send("请概括这份附件", { attachments: [file.id] });
+const page = await client.readAttachment(file.id, { page: 2, count: 1 });
+await client.deleteAttachment(file.id);
+```
+
+文件属于上传时的会话，宿主切换会话时应恢复对应草稿。上传和消息分别保留稳定 client ID，重试必须使用同名同字节文件及相同的有序附件 ID。消息的 `attachments` 返回元数据，用户问题保存在 `text`。服务端核验所有者、会话、当前授权与模型数据许可，不接受跨会话文件引用。
+
+HTTP 上传使用 `POST /chat/v1/conversations/{id}/attachments?client_id={stableId}`，multipart 仅包含一个 `file`。同一路径 GET 返回文件列表，文件子路径 GET 按 `page/count/offset/limit/vision` 读取，DELETE 删除。读取默认从第 1 页开始返回 4 页，每页 6000 字，总量最多 24000 字。结果中的 `next_offset` 和 `next_page` 表示后续范围。扫描页自动调用视觉解析，图表可指定 `vision=true`，解析结果缓存至原文件。代理与宿主 HTTP 超时需容纳 75 秒解析预算和上传时间。
+
+启用附件后，框架为聊天运行增加 `chat.attachments.list` 与 `chat.attachments.read` 只读能力。Agent 从当前运行关联的会话读取，按文件名和原页码引用。历史发行版保留原能力契约，框架附件功能随新运行的发行版固定。

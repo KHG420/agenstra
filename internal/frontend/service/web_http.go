@@ -26,13 +26,20 @@ func webError(w http.ResponseWriter, e error) {
 	code := agentcontract.ErrorCode(e)
 	status := 409
 	switch code {
-	case "not_found":
+	case "not_found", "attachment_not_found":
 		status = 404
+	case "attachment_busy":
+		status = 429
+	case "attachment_too_large", "attachment_document_too_large", "attachment_storage_full":
+		status = 413
 	case "unauthorized", "browser_session_invalid":
 		status = 401
 	case "access_denied", "identity_unverified", "model_data_not_authorized", "capability_not_granted":
 		status = 403
 	case "source_scope_invalid", "chat_message_invalid", "browser_context_invalid", "browser_result_invalid", "browser_handler_unknown", "request_id_required":
+		status = 422
+	}
+	if strings.HasPrefix(code, "attachment_") && status == 409 && code != "attachment_conflict" {
 		status = 422
 	}
 	apiError(w, status, code, false)
@@ -247,6 +254,10 @@ func (s *HTTPServer) chatHTTP(w http.ResponseWriter, r *http.Request, owner stri
 		return
 	}
 	parts := strings.Split(p, "/")
+	if (len(parts) == 3 || len(parts) == 4) && parts[0] == "conversations" && parts[2] == "attachments" {
+		s.attachmentHTTP(w, r, owner, parts)
+		return
+	}
 	if len(parts) == 2 && parts[0] == "conversations" && r.Method == "GET" {
 		c, m, e := s.Web.Conversation(r.Context(), owner, parts[1])
 		if e != nil {
@@ -273,10 +284,11 @@ func (s *HTTPServer) chatHTTP(w http.ResponseWriter, r *http.Request, owner stri
 	}
 	if len(parts) == 3 && parts[0] == "conversations" && parts[2] == "messages" && r.Method == "POST" {
 		var b struct {
-			Sources   []agentcontract.RunSource `json:"sources,omitempty"`
-			ClientID  string                    `json:"client_id"`
-			Text      string                    `json:"text"`
-			SessionID string                    `json:"session_id"`
+			Attachments []string                  `json:"attachments,omitempty"`
+			Sources     []agentcontract.RunSource `json:"sources,omitempty"`
+			ClientID    string                    `json:"client_id"`
+			Text        string                    `json:"text"`
+			SessionID   string                    `json:"session_id"`
 		}
 		if decodeBody(r, &b) != nil {
 			apiError(w, 422, "invalid_request", false)
@@ -286,7 +298,7 @@ func (s *HTTPServer) chatHTTP(w http.ResponseWriter, r *http.Request, owner stri
 			apiError(w, 401, "browser_session_invalid", false)
 			return
 		}
-		m, e := s.Web.SubmitMessageWithSources(r.Context(), owner, parts[1], b.ClientID, b.Text, b.SessionID, b.Sources)
+		m, e := s.Web.SubmitMessageWithAttachments(r.Context(), owner, parts[1], b.ClientID, b.Text, b.SessionID, b.Sources, b.Attachments)
 		if e != nil {
 			webError(w, e)
 			return

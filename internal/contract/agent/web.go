@@ -7,6 +7,7 @@ import (
 
 // WebIntegrationConfig enables optional chat and browser integration with trusted session settings.
 type WebIntegrationConfig struct {
+	Attachments       *AttachmentSettings         `json:"attachments,omitempty"`
 	DatabasePath      string                      `json:"database_path"`
 	Chat              bool                        `json:"chat"`
 	BrowserBridge     bool                        `json:"browser_bridge"`
@@ -117,6 +118,7 @@ type ChatInput struct {
 
 // ChatMessage retains queued user text and the framework's persisted result projection.
 type ChatMessage struct {
+	Attachments      []ChatAttachment              `json:"attachments,omitempty"`
 	ContextSelection *ConversationContextSelection `json:"context_selection,omitempty"`
 	Sources          []RunSource                   `json:"sources,omitempty"`
 	ID               string                        `json:"id"`
