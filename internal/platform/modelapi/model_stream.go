@@ -13,7 +13,7 @@ import (
 
 // SSE is transport only: reassemble the original envelope and pass it through
 // the same usage, refusal, truncation and strict decision checks as non-streaming.
-func readModelStream(reader io.Reader, publish func(string, string), allowedOutput map[string]bool) ([]byte, error) {
+func readModelStream(reader io.Reader, publish func(string, string), allowedOutput map[string]bool, plainConversation bool) ([]byte, error) {
 	const maximum = 8 << 20
 	bounded := &io.LimitedReader{R: reader, N: maximum + 1}
 	scanner := bufio.NewScanner(bounded)
@@ -39,6 +39,8 @@ func readModelStream(reader io.Reader, publish func(string, string), allowedOutp
 				case "submit_decision":
 					text = answerPrefix(tools[0].Function.Arguments, true)
 				}
+			} else if len(tools) == 0 && plainConversation {
+				text = nativeConversationText(content)
 			} else if len(tools) == 0 && len(allowedOutput) == 0 {
 				text = answerPrefix(content, true)
 			}

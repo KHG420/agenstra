@@ -107,3 +107,5 @@ return errors.Join(scheduleErr, runErr)
 当前调度与既有框架一样面向单节点 SQLite 持久盘部署。调度精度受 worker 间隔和运行耗时影响，不保证实时触发；触发历史没有自动清理。外部写操作的幂等与不确定结果继续按现有能力契约处理。
 
 跨项目任务可通过可选 `sources` 明确选择目标能力，并按发起项目委派、目标验证权限和任务范围取交集。目标身份、实际凭据、版本固定、项目记忆和各入口的完整接入说明见[跨项目任务、身份与授权](cross-project-tasks.md)。所有读取与轮询也必须明确授权。
+
+创建请求可携带 `Idempotency-Key` 请求头。Go 宿主使用 `CreateScheduleWithRequestID` 传入稳定请求身份。同一 owner 和身份复用原任务回执，包括已经触发的一次性任务。参数不同返回 `request_id_conflict`，不会重置周期或再建任务。未传身份的原接口继续每次创建新任务。

@@ -241,3 +241,110 @@ func TestDecisionPromptMeasurementMatchesExecutionAndMemoryIsUnchanged(t *testin
 		t.Fatal(err)
 	}
 }
+
+func TestThinkingPolicyMeasuresAndSendsSameModeWithoutReroutingProfiles(t *testing.T) {
+	requests := make(chan []byte, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		requests <- raw
+		var payload agentcontract.JSON
+		if json.Unmarshal(raw, &payload) != nil {
+			t.Error("invalid request")
+			return
+		}
+		content := `{"proposals":[]}`
+		message := agentcontract.JSON{"content": content}
+		if payload["tools"] != nil {
+			message = agentcontract.JSON{"tool_calls": []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "final", "arguments": `{"answer_markdown":"ok","fact_ids":[]}`}}}}
+		}
+		if err := json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{agentcontract.JSON{"message": message, "finish_reason": "stop"}}, "usage": agentcontract.JSON{"prompt_tokens": 100, "completion_tokens": 10}}); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer upstream.Close()
+	manager, err := selectionTestDeployment(t, upstream.URL).NewModel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := manager.Snapshot().Config
+	for id, profile := range config.Profiles {
+		profile.Thinking = "enabled"
+		profile.ReasoningEffort = "low"
+		profile.DecisionOutputMode = "native_tools"
+		config.Profiles[id] = profile
+	}
+	if _, err := manager.Configure(config, 0); err != nil {
+		t.Fatal(err)
+	}
+	manager.ThinkingPolicy = func(purpose string, p agentcontract.ContextPacket) string {
+		if purpose == "memory_extraction" || p.Instruction == "simple" {
+			return "disabled"
+		}
+		return "enabled"
+	}
+	before, valueErr1 := json.Marshal(manager.Snapshot())
+	if valueErr1 != nil {
+		t.Fatal(valueErr1)
+	}
+	selected, err := manager.selectedModel(manager.Snapshot().Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range []string{"simple", "complex", "simple"} {
+		p := agentcontract.ContextPacket{Schema: "agenstra.context.v1", Instruction: task}
+		measurement, err := selected.MeasureInput(p, "Use native functions.")
+		if err != nil {
+			t.Fatal(err)
+		}
+		decision, err := selected.Decide(t.Context(), p, "Use native functions.")
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := <-requests
+		var payload agentcontract.JSON
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Error(err)
+		}
+		mode, choice := "enabled", "auto"
+		if task == "simple" {
+			mode, choice = "disabled", "required"
+		}
+		if payload["thinking"].(map[string]any)["type"] != mode || payload["tool_choice"] != choice || decision.ModelCall.Thinking != mode || decision.ModelCall.Profile != "business" {
+			t.Fatal("actual mode or frozen profile differs", payload["thinking"], decision.ModelCall)
+		}
+		if measurement.Tokens != int64(len(raw)+128) || decision.ModelCall.EstimatedInputTokens != measurement.Tokens || decision.ModelCall.Attempts != 1 {
+			t.Fatal("measurement or request count changed", measurement, decision.ModelCall)
+		}
+		if task == "simple" && payload["reasoning_effort"] != nil {
+			t.Fatal("disabled thinking retained incompatible effort")
+		}
+	}
+	memory := agentcontract.MemoryExtractionRequest{Text: "Hello"}
+	measured, err := selected.MeasureMemoryInput(memory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, metrics, err := selected.ExtractMemoriesMeasured(t.Context(), memory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := <-requests
+	var payload agentcontract.JSON
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Error(err)
+	}
+	if payload["thinking"].(map[string]any)["type"] != "disabled" || payload["tools"] != nil || metrics.Thinking != "disabled" || metrics.Profile != "memory" || measured.Tokens != int64(len(raw)+128) {
+		t.Fatal("memory did not use a measured fast request", metrics)
+	}
+	after, valueErr2 := json.Marshal(manager.Snapshot())
+	if valueErr2 != nil {
+		t.Fatal(valueErr2)
+	}
+	if !bytes.Equal(before, after) || selected.decision.Thinking != "enabled" || selected.memory.Thinking != "enabled" {
+		t.Fatal("per-request mode mutated frozen configuration or shared adapters")
+	}
+}

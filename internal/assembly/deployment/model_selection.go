@@ -20,6 +20,10 @@ type ModelManager struct {
 	// DecisionPrompt is a trusted, deterministic startup policy. Measurement and
 	// execution both apply it; business-specific parsing remains in the host app.
 	DecisionPrompt func(agentcontract.ContextPacket, string) string
+	// ThinkingPolicy is an optional deterministic host policy, set before serving.
+	// It selects enabled/disabled only for DeepSeek; measurement and execution use
+	// the same policy without changing frozen profiles, credentials or budgets.
+	ThinkingPolicy func(string, agentcontract.ContextPacket) string
 	mu             sync.RWMutex
 	deployment     *Deployment
 	selection      agentcontract.ModelSelectionSnapshot
@@ -135,6 +139,7 @@ func (m *ModelManager) profile(id string, p agentcontract.ModelProfile) (*modela
 type selectedModels struct {
 	decision, memory, review *modelapi.HTTPJSONDecisionModel
 	prompt                   func(agentcontract.ContextPacket, string) string
+	thinking                 func(string, agentcontract.ContextPacket) string
 }
 
 func (m *ModelManager) selectedModel(c agentcontract.ModelConfiguration) (*selectedModels, error) {
@@ -158,14 +163,32 @@ func (m *ModelManager) selectedModel(c agentcontract.ModelConfiguration) (*selec
 	}
 	d.StreamAnswers = m.StreamAnswers
 	review.StreamAnswers = m.StreamAnswers
-	return &selectedModels{decision: d, memory: mem, review: review, prompt: m.DecisionPrompt}, nil
+	return &selectedModels{decision: d, memory: mem, review: review, prompt: m.DecisionPrompt, thinking: m.ThinkingPolicy}, nil
+}
+
+func (s *selectedModels) thinkingAdapter(model *modelapi.HTTPJSONDecisionModel, purpose string, packet agentcontract.ContextPacket) *modelapi.HTTPJSONDecisionModel {
+	if s.thinking == nil || model.APIType != "deepseek_chat" {
+		return model
+	}
+	mode := s.thinking(purpose, packet)
+	if mode != "enabled" && mode != "disabled" {
+		return model
+	}
+	selected := *model
+	selected.Thinking = mode
+	if mode == "disabled" {
+		selected.ReasoningEffort = ""
+	} else {
+		selected.Temperature = nil
+	}
+	return &selected
 }
 
 func (s *selectedModels) decisionAdapter(p agentcontract.ContextPacket) *modelapi.HTTPJSONDecisionModel {
 	if p.CompletionReview != nil {
-		return s.review
+		return s.thinkingAdapter(s.review, "completion_review", p)
 	}
-	return s.decision
+	return s.thinkingAdapter(s.decision, "decision", p)
 }
 
 // SelectModel opens adapters for a frozen run configuration using trusted
@@ -208,17 +231,17 @@ func (s *selectedModels) MeasureInput(p agentcontract.ContextPacket, prompt stri
 
 // ExtractMemories validates extracted preferences from the supplied input.
 func (s *selectedModels) ExtractMemories(ctx context.Context, r agentcontract.MemoryExtractionRequest) ([]agentcontract.MemoryProposal, error) {
-	return s.memory.ExtractMemories(ctx, r)
+	return s.thinkingAdapter(s.memory, "memory_extraction", agentcontract.ContextPacket{}).ExtractMemories(ctx, r)
 }
 
 // ExtractMemoriesMeasured retains extraction request metrics on success and failure.
 func (s *selectedModels) ExtractMemoriesMeasured(ctx context.Context, r agentcontract.MemoryExtractionRequest) ([]agentcontract.MemoryProposal, agentcontract.ModelCallMetrics, error) {
-	return s.memory.ExtractMemoriesMeasured(ctx, r)
+	return s.thinkingAdapter(s.memory, "memory_extraction", agentcontract.ContextPacket{}).ExtractMemoriesMeasured(ctx, r)
 }
 
 // MeasureMemoryInput uses the memory profile frozen for this run.
 func (s *selectedModels) MeasureMemoryInput(r agentcontract.MemoryExtractionRequest) (agentcontract.InputMeasurement, error) {
-	return s.memory.MeasureMemoryInput(r)
+	return s.thinkingAdapter(s.memory, "memory_extraction", agentcontract.ContextPacket{}).MeasureMemoryInput(r)
 }
 
 // Decide uses the current selected decision profile; durable runs use their pinned selection.

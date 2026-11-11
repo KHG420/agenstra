@@ -2,9 +2,32 @@ package schema
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLocalReferencesAreIndependentOfWorkingDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "中文 project & schema")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	contract, err := CompileLocal(map[string]any{
+		"$defs": map[string]any{"id": map[string]any{"type": "integer"}},
+		"type":  "object", "properties": map[string]any{"id": map[string]any{"$ref": "#/$defs/id"}},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(contract, map[string]any{"id": 7}); err != nil {
+		t.Fatal(err)
+	}
+	if Validate(contract, map[string]any{"id": "7"}) == nil {
+		t.Fatal("local reference lost its declared type")
+	}
+}
 
 func TestCompileChecksOnlySchemaPositions(t *testing.T) {
 	literal := map[string]any{"$ref": "provider-data", "$id": "provider-id", "$schema": "provider-metadata"}

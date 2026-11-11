@@ -7,6 +7,14 @@ import (
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
 
+func TestRuntimeInfoAdvertisesAnswerStream(t *testing.T) {
+	h := testHost(t, testStore(t), &hostProvider{}, &hostModel{})
+	info, err := h.GetRuntimeInfo(t.Context(), "alice", "records")
+	if err != nil || !info.Features["content_stream"] {
+		t.Fatalf("answer stream unavailable: %+v %v", info.Features, err)
+	}
+}
+
 func TestExecutionTelemetryTracksModelToolAndInputWait(t *testing.T) {
 	p := &hostProvider{}
 	m := &hostModel{decisions: []agentcontract.Decision{callDecision("records.get"), {Kind: "request_input", Field: "where", Prompt: "where?"}}}

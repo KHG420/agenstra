@@ -202,7 +202,7 @@ func TestModelStreamRejectsBrokenFraming(t *testing.T) {
 		{"oversized-line", "data: " + strings.Repeat("x", 1<<20), "model_response_too_large"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := readModelStream(strings.NewReader(tc.raw), func(string, string) {}, nil); agentcontract.ModelErrorCode(err) != tc.code {
+			if _, err := readModelStream(strings.NewReader(tc.raw), func(string, string) {}, nil, false); agentcontract.ModelErrorCode(err) != tc.code {
 				t.Fatal(err)
 			}
 		})

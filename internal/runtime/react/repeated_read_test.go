@@ -66,7 +66,7 @@ func TestRepeatedReadFeedbackIsBoundedAndSurvivesRestore(t *testing.T) {
 	}
 	for _, value := range []*agentcontract.RuntimeState{state, &restored} {
 		prompt := r.repeatedReadPrompt(value, r.Context(value))
-		if !strings.Contains(prompt, `capability "records.read" has succeeded 2 consecutive times`) || !strings.Contains(prompt, "explicitly requested read after a write") || len(prompt) > 1000 {
+		if !strings.Contains(prompt, `capability "records.read" has succeeded 2 times`) || !strings.Contains(prompt, "explicitly requested read after a write") || len(prompt) > 1000 {
 			t.Fatal("missing bounded, task-aware correction", prompt)
 		}
 		if strings.Contains(prompt, "private-result-text") || strings.Contains(prompt, state.Facts[1].FactID) {
@@ -79,6 +79,19 @@ func TestRepeatedReadFeedbackIsBoundedAndSurvivesRestore(t *testing.T) {
 	}
 	if string(before) != string(after) {
 		t.Fatal("feedback changed execution evidence or progress")
+	}
+}
+
+func TestRepeatedReadFeedbackRetainsEvidenceAcrossOtherReads(t *testing.T) {
+	r, state := repeatedReadFixture(t)
+	r.Provider.(*coreTestProvider).caps["other.read"] = agentcontract.CapabilityDescription{Name: "other.read", Effect: "read"}
+	state.Observations = append(state.Observations[:1], agentcontract.Observation{CallRef: "other", Capability: "other.read", Status: "succeeded"}, state.Observations[1])
+	if prompt := r.repeatedReadPrompt(state, r.Context(state)); !strings.Contains(prompt, "has succeeded 2 times") {
+		t.Fatal("an intervening read hid the completed prerequisite", prompt)
+	}
+	r.Provider.(*coreTestProvider).caps["other.read"] = agentcontract.CapabilityDescription{Name: "other.read", Effect: "write"}
+	if prompt := r.repeatedReadPrompt(state, r.Context(state)); prompt != "" {
+		t.Fatal("a mutation failed to establish a new freshness boundary", prompt)
 	}
 }
 
@@ -169,7 +182,7 @@ func TestRepeatedReadFeedbackUsesCompletedBrowserResults(t *testing.T) {
 		appendBrowserProgressResult(state, cap.Name, fmt.Sprintf("read-%d", i), agentcontract.JSON{"count": 156})
 		updateProgress(state, 8, r.Provider.Capabilities())
 	}
-	if prompt := r.repeatedReadPrompt(state, r.Context(state)); !strings.Contains(prompt, "has succeeded 2 consecutive times") {
+	if prompt := r.repeatedReadPrompt(state, r.Context(state)); !strings.Contains(prompt, "has succeeded 2 times") {
 		t.Fatal("new command receipts disguised the same completed browser result", prompt)
 	}
 	appendBrowserProgressResult(state, cap.Name, "read-2", agentcontract.JSON{"count": 157})

@@ -94,6 +94,8 @@ go run ./cmd/agenstra-manage disable alice records-web
 
 仅聊天可配置 `"integrations": {"records": {"pack_id":"records"}}`，无需 profile。包含前端 profile 的 integration 必须使用独立别名，避免改变原包的能力目录。业务包不能使用保留的 `ui.*` 命名空间。
 
+已有聊天 integration 可为当前同名 pack 接入页面观察和动作 profile，并开启 `browser_bridge`。同名接入保留会话身份，接受没有 browser session 的旧客户端及非网页通道，并保留原后端 release 的恢复入口。没有绑定浏览器的运行仍可调用后端能力，页面能力返回缺少会话的明确结果。浏览器继续按 session key、generation、profile digest 和页面 revision 隔离，动作仍须获得当前授权及声明的审批。独立别名不能覆盖其他后端 pack。模型通过 `ui.get_context` 按需读取页面，页面观察不追加聊天消息，也不重置任务或会话选择。已固定的 profile 决定历史运行的能力与提示语。
+
 ### 纯浏览器宿主
 
 若所有动作都绑定原页面函数，省略 `pack_id`，只提供 frontend profile。无需创建 REST/MCP 包，也无需额外提供静态信息接口。例如以下完整部署结构复用下一节的 `frontend-profile.json`：

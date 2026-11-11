@@ -90,5 +90,5 @@ func (h *AgentHost) GetRuntimeInfo(ctx context.Context, owner, pack string) (age
 	}
 	sort.Strings(names)
 	_, extract := h.Model.(agentcontract.MemoryExtractor)
-	return agentcontract.RuntimeInfo{Schema: "agenstra.runtime-info.v1", Settings: NormalizedRunSettings(h.Settings), Model: agentcontract.DescribeModel(h.Model), Features: map[string]bool{"telemetry": true, "context_policy": p.AllowModelData, "steering": p.AllowModelData, "memory_extraction": extract, "reconciliation": h.Reconciler != nil, "pause": false, "single_step": false, "content_stream": false}, GrantedCapabilities: names}, nil
+	return agentcontract.RuntimeInfo{Schema: "agenstra.runtime-info.v1", Settings: NormalizedRunSettings(h.Settings), Model: agentcontract.DescribeModel(h.Model), Features: map[string]bool{"telemetry": true, "context_policy": p.AllowModelData, "steering": p.AllowModelData, "memory_extraction": extract, "reconciliation": h.Reconciler != nil, "pause": false, "single_step": false, "content_stream": true}, GrantedCapabilities: names}, nil
 }

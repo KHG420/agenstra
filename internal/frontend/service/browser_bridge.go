@@ -689,7 +689,7 @@ func (w *WebIntegration) ReconcileBrowserCommand(ctx context.Context, owner, id 
 
 func (w *WebIntegration) bindRun(tx *sql.Tx, owner, run, request, integration, session string) error {
 	p := w.profiles[integration]
-	if p == nil {
+	if p == nil || session == "" && w.browserOptional(integration) {
 		return nil
 	}
 	var s agentcontract.BrowserSession

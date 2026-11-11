@@ -18,7 +18,7 @@ func (s *HTTPServer) schedulesHTTP(w http.ResponseWriter, r *http.Request, owner
 				apiError(w, 422, "invalid_request", true)
 				return
 			}
-			task, err := s.Host.CreateSchedule(ctx, owner, request)
+			task, err := s.Host.CreateScheduleWithRequestID(ctx, owner, request, r.Header.Get("Idempotency-Key"))
 			if err != nil {
 				serverError(w, err)
 				return

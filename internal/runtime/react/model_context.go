@@ -41,6 +41,18 @@ func (r *AgentRuntime) tokenProjection(state *agentcontract.RuntimeState, packet
 			limit = available
 		}
 	}
+	// A later decision or completion review must fit the run's remaining budget,
+	// as well as the model's input limit. Project optional context before the
+	// adapter rejects an otherwise usable checkpoint at its final request.
+	budgetLimited := false
+	if remaining := packet.ModelTokensRemaining; limit > 0 && remaining > 0 {
+		available := remaining - max(int64(1), reserve)
+		if available <= 0 {
+			return packet, agentcontract.KnownTokens(window), nil, agentcontract.KnownTokens(reserve), agentcontract.InputMeasurement{}, agentcontract.ModelDecisionError{Kind: "model_token_budget_exhausted"}
+		}
+		budgetLimited = available < limit
+		limit = min(limit, available)
+	}
 	if reserve > 0 && (packet.MaxModelOutputTokens <= 0 || reserve < int64(packet.MaxModelOutputTokens)) {
 		packet.MaxModelOutputTokens = int(reserve)
 	}
@@ -86,5 +98,8 @@ func (r *AgentRuntime) tokenProjection(state *agentcontract.RuntimeState, packet
 	}
 	m.ProjectionReason = reason
 	m.TargetMet = limit == 0 || m.Tokens <= goal
+	if err == nil && budgetLimited && m.Tokens > limit {
+		err = agentcontract.ModelDecisionError{Kind: "model_token_budget_exhausted"}
+	}
 	return packet, agentcontract.KnownTokens(window), agentcontract.KnownTokens(limit), agentcontract.KnownTokens(reserve), m, err
 }

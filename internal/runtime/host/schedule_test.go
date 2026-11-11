@@ -60,6 +60,33 @@ func TestScheduleValidation(t *testing.T) {
 	}
 }
 
+func TestScheduleCreateRequestIdentitySurvivesDispatch(t *testing.T) {
+	now, at := 1000., 1100.
+	h := scheduleHost(t, &now)
+	request := scheduleRequest(agentcontract.ScheduleSpec{Kind: "once", At: &at})
+	first, err := h.CreateScheduleWithRequestID(t.Context(), "alice", request, "lost-response")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = 1200
+	if n, err := h.DispatchDueSchedules(t.Context(), 10); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	replayed, err := h.CreateScheduleWithRequestID(t.Context(), "alice", request, "lost-response")
+	if err != nil || replayed.ScheduleID != first.ScheduleID || replayed.Status != "completed" {
+		t.Fatal("retry recreated a dispatched schedule", replayed, err)
+	}
+	request.Instruction = "A different task"
+	if _, err := h.CreateScheduleWithRequestID(t.Context(), "alice", request, "lost-response"); agentcontract.ErrorCode(err) != "request_id_conflict" {
+		t.Fatal("changed request reused the original identity", err)
+	}
+	request.Schedule = agentcontract.ScheduleSpec{Kind: "interval", IntervalSeconds: 60}
+	other, err := h.CreateScheduleWithRequestID(t.Context(), "bob", request, "lost-response")
+	if err != nil || other.ScheduleID == first.ScheduleID {
+		t.Fatal("request identity escaped its owner", err)
+	}
+}
+
 func TestScheduleOnceDispatchAndResult(t *testing.T) {
 	now, at := 1000., 1100.
 	h := scheduleHost(t, &now)

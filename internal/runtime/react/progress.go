@@ -302,10 +302,12 @@ func (r *AgentRuntime) repeatedReadPrompt(state *agentcontract.RuntimeState, pac
 	seen := map[string]bool{}
 	for i := len(observations) - 1; i >= 0; i-- {
 		observation := observations[i]
-		if key(observation) != latest {
+		// Other reads and inspections do not invalidate saved evidence. A
+		// mutation is a freshness boundary and can justify rereading the value.
+		if previous, ok := caps[observation.Capability]; !ok || previous.Effect != "read" {
 			break
 		}
-		if !seen[observation.CallRef] {
+		if key(observation) == latest && !seen[observation.CallRef] {
 			seen[observation.CallRef] = true
 			count++
 		}
@@ -313,5 +315,5 @@ func (r *AgentRuntime) repeatedReadPrompt(state *agentcontract.RuntimeState, pac
 	if count < 2 {
 		return ""
 	}
-	return fmt.Sprintf("Repeated completed read detected (runtime metadata, not a new task or permission): capability %q has succeeded %d consecutive times with the same arguments and unchanged result. The latest read is already complete; a new decision round does not require repeating a completed prerequisite. Use its available Fact to continue the next unfinished authorized action or inspect that action's contract. Do not restart completed work. Read again only if the task explicitly needs another sample, a subsequent action or new input requires verification, or actual changed state or a context rejection requires a refresh. This feedback does not replace an explicitly requested read after a write, authorize any operation, or claim the task is complete.", last.Capability, count)
+	return fmt.Sprintf("Repeated completed read detected: capability %q has succeeded %d times with the same arguments and unchanged result since the last mutation. The latest read is already complete; a new decision round does not require repeating a completed prerequisite. Use its available Fact to continue the next unfinished authorized action or inspect that action's contract. Do not restart completed work. Read again only if the task explicitly needs another sample, a subsequent action or new input requires verification, or actual changed state or a context rejection requires a refresh. This feedback does not replace an explicitly requested read after a write, authorize any operation, or claim the task is complete.", last.Capability, count)
 }

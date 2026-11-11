@@ -41,16 +41,62 @@ func nextSchedule(spec agentcontract.ScheduleSpec, due, now float64) (*float64, 
 
 // CreateSchedule authorizes and saves a normalized schedule with its request identity.
 func (h *AgentHost) CreateSchedule(ctx context.Context, owner string, request agentcontract.ScheduleRequest) (agentcontract.ScheduledTask, error) {
+	return h.CreateScheduleWithRequestID(ctx, owner, request, "")
+}
+
+// CreateScheduleWithRequestID reuses an owner-bound schedule after a lost create
+// response. A nonempty identity must accompany the same normalized definition.
+// Authorization is checked again, including when returning an existing task.
+func (h *AgentHost) CreateScheduleWithRequestID(ctx context.Context, owner string, request agentcontract.ScheduleRequest, requestID string) (agentcontract.ScheduledTask, error) {
+	if len(requestID) > 128 {
+		return agentcontract.ScheduledTask{}, agentcontract.NewHostError("request_id_required")
+	}
+	if _, err := h.BindSources(ctx, owner, request.PackID, request.Sources); err != nil {
+		return agentcontract.ScheduledTask{}, err
+	}
+	id := agentcontract.NewID()
+	if requestID != "" {
+		id = RequestRunID(owner, "schedule:"+requestID)
+		if existing, err := h.Store.GetSchedule(id, owner); err == nil {
+			return matchScheduleRequest(existing, request)
+		} else if agentcontract.ErrorCode(err) != "not_found" {
+			return agentcontract.ScheduledTask{}, err
+		}
+	}
 	now := h.Now()
 	request, next, err := request.Normalized(now)
 	if err != nil {
 		return agentcontract.ScheduledTask{}, err
 	}
-	if _, err = h.BindSources(ctx, owner, request.PackID, request.Sources); err != nil {
-		return agentcontract.ScheduledTask{}, err
+	task := agentcontract.ScheduledTask{ScheduleID: id, OwnerID: owner, ScheduleRequest: request, Status: "active", NextRunAt: &next, CreatedAt: now, UpdatedAt: now}
+	if err = h.Store.InsertSchedule(task); err == nil || requestID == "" {
+		return task, err
 	}
-	task := agentcontract.ScheduledTask{ScheduleID: agentcontract.NewID(), OwnerID: owner, ScheduleRequest: request, Status: "active", NextRunAt: &next, CreatedAt: now, UpdatedAt: now}
-	return task, h.Store.InsertSchedule(task)
+	// A competing create may have committed this identity. Read its receipt
+	// without resetting its cadence or dispatching a second definition.
+	if existing, readErr := h.Store.GetSchedule(id, owner); readErr == nil {
+		return matchScheduleRequest(existing, request)
+	}
+	return agentcontract.ScheduledTask{}, err
+}
+
+func matchScheduleRequest(task agentcontract.ScheduledTask, request agentcontract.ScheduleRequest) (agentcontract.ScheduledTask, error) {
+	request, _, err := request.Normalized(task.CreatedAt)
+	if err != nil {
+		return task, err
+	}
+	want, err := agentcontract.CanonicalJSON(request)
+	if err != nil {
+		return task, err
+	}
+	stored, err := agentcontract.CanonicalJSON(task.ScheduleRequest)
+	if err != nil {
+		return task, err
+	}
+	if string(want) != string(stored) {
+		return task, agentcontract.NewHostError("request_id_conflict")
+	}
+	return task, nil
 }
 
 // GetSchedule remains available to the owner after a pack grant is revoked,

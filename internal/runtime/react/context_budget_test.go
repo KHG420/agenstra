@@ -295,6 +295,146 @@ func TestContextBudgetCatalogDefersSchemasWithoutLosingInspectedContract(t *test
 	}
 }
 
+func TestContextBudgetKeepsLatestInspection(t *testing.T) {
+	for _, name := range []string{"completed", "fact inspection", "failed", "reinspected", "unrelated receipt", "later rejected receipt", "legacy checkpoint", "completion review"} {
+		t.Run(name, func(t *testing.T) {
+			runtime, state, provider := contextBudgetRuntime(t, 9000)
+			capability := agentcontract.CapabilityDescription{Name: "record.read", Version: "1", Effect: "read",
+				InputSchema:  agentcontract.JSON{"type": "object", "properties": agentcontract.JSON{"id": agentcontract.JSON{"type": "string"}}},
+				OutputSchema: agentcontract.JSON{"type": "object", "properties": agentcontract.JSON{"summary": agentcontract.JSON{"type": "string", "description": strings.Repeat("Output field guidance. ", 300)}}},
+			}
+			provider.caps[capability.Name] = capability
+			runtime.Grants[capability.Name] = true
+			fact := contextBudgetFact(agentcontract.JSON{"data": agentcontract.JSON{"summary": strings.Repeat("value", 300)}})
+			state.Facts = []agentcontract.Fact{fact}
+			state.InspectedCapability = agentcontract.Strptr(capability.Name)
+			var valueErr1 error
+			state.InspectedFact, valueErr1 = inspectionView(map[string]agentcontract.Fact{fact.FactID: fact}, fact.FactID, []any{"data", "summary"}, nil, nil)
+			if valueErr1 != nil {
+				t.Fatal(valueErr1)
+			}
+			arguments := agentcontract.JSON{"id": "record-1"}
+			observation := agentcontract.Observation{CallRef: "read-1", Capability: capability.Name, Status: "succeeded", FactID: &fact.FactID, Arguments: arguments}
+			capabilityInspection := agentcontract.JSON{"kind": "inspect_capability", "name": capability.Name}
+			call := agentcontract.JSON{"kind": "tool_batch", "calls": []any{agentcontract.JSON{"call_ref": "read-1", "capability": capability.Name, "arguments": arguments, "reason": "Read the record"}}}
+			factInspection := agentcontract.JSON{"kind": "inspect_fact", "fact_id": fact.FactID, "path": []any{"data", "summary"}}
+			state.Decisions = []agentcontract.JSON{factInspection, capabilityInspection, call}
+			if name == "fact inspection" {
+				state.Decisions = []agentcontract.JSON{call, capabilityInspection, factInspection}
+			}
+			if name == "failed" {
+				observation.Status = "failed"
+			}
+			if name == "reinspected" {
+				state.Decisions = append(state.Decisions, agentcontract.JSON{"kind": "inspect_capability", "name": capability.Name})
+			}
+			if name == "legacy checkpoint" {
+				state.Decisions = []agentcontract.JSON{call}
+			}
+			if name == "unrelated receipt" {
+				observation.CallRef = "another-call"
+			}
+			state.Observations = []agentcontract.Observation{observation}
+			if name == "later rejected receipt" {
+				rejected := observation
+				rejected.Status = "rejected"
+				state.Observations = append(state.Observations, rejected)
+			}
+			state.ModelObservations = slices.Clone(state.Observations)
+			before, err := agentcontract.CanonicalJSON(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			packet := runtime.Context(state)
+			if name == "completion review" {
+				packet.InspectedCapability = nil
+				packet.InspectedFact = state.InspectedFact
+				packet = budgetContext(packet, state, 100)
+				if !reflect.DeepEqual(packet.InspectedFact, state.InspectedFact) {
+					t.Fatal("completion review lost its current evidence")
+				}
+			}
+			if name == "completed" || name == "fact inspection" {
+				assertContextBudget(t, packet, runtime.SystemPrompt(), runtime.MaxContextCharacters)
+				if packet.InspectedCapability != nil || !reflect.DeepEqual(packet.InspectedFact, state.InspectedFact) {
+					t.Fatal("older contract displaced the current inspected evidence")
+				}
+			} else if name != "completion review" && packet.InspectedCapability["name"] != capability.Name {
+				t.Fatal("a required capability inspection was deferred")
+			}
+			if name == "reinspected" {
+				assertContextBudget(t, packet, runtime.SystemPrompt(), runtime.MaxContextCharacters)
+				if packet.InspectedFact != nil {
+					t.Fatal("an older fact inspection displaced the latest capability contract")
+				}
+			}
+			after, err := agentcontract.CanonicalJSON(state)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("projection changed the retained checkpoint", err)
+			}
+		})
+	}
+}
+
+func TestContextBudgetPreservesEvidenceAndUnconsumedContractInBothOrders(t *testing.T) {
+	for _, latest := range []string{"inspect_fact", "inspect_capability"} {
+		t.Run(latest, func(t *testing.T) {
+			runtime, state, provider := contextBudgetRuntime(t, 9000)
+			capability := agentcontract.CapabilityDescription{Name: "record.rename", Version: "1", Effect: "write", ApprovalRequired: true,
+				InputSchema: agentcontract.JSON{"type": "object", "properties": agentcontract.JSON{"id": agentcontract.JSON{"type": "string"}, "revision": agentcontract.JSON{"type": "integer"}, "title": agentcontract.JSON{"type": "string", "description": strings.Repeat("Original title guidance. ", 50)}}},
+			}
+			provider.caps[capability.Name] = capability
+			runtime.Grants[capability.Name] = true
+			other := agentcontract.CapabilityDescription{Name: "unrelated.read", Version: "1", Effect: "read", InputSchema: agentcontract.JSON{"type": "object", "properties": agentcontract.JSON{"filter": agentcontract.JSON{"type": "string", "description": strings.Repeat("Optional filter guidance. ", 700)}}}}
+			provider.caps[other.Name] = other
+			runtime.Grants[other.Name] = true
+			fact := contextBudgetFact(agentcontract.JSON{"data": agentcontract.JSON{"id": "conversation-1", "revision": 0, "title": "Original title"}})
+			state.Facts = []agentcontract.Fact{fact}
+			state.InspectedCapability = agentcontract.Strptr(capability.Name)
+			var valueErr2 error
+			state.InspectedFact, valueErr2 = inspectionView(map[string]agentcontract.Fact{fact.FactID: fact}, fact.FactID, []any{"data"}, nil, nil)
+			if valueErr2 != nil {
+				t.Fatal(valueErr2)
+			}
+			factInspection := agentcontract.JSON{"kind": "inspect_fact", "fact_id": fact.FactID, "path": []any{"data"}}
+			capabilityInspection := agentcontract.JSON{"kind": "inspect_capability", "name": capability.Name}
+			state.Decisions = []agentcontract.JSON{factInspection, capabilityInspection}
+			if latest == "inspect_fact" {
+				state.Decisions = []agentcontract.JSON{capabilityInspection, factInspection}
+			}
+			before, valueErr3 := agentcontract.CanonicalJSON(state)
+			if valueErr3 != nil {
+				t.Fatal(valueErr3)
+			}
+			packet := runtime.Context(state)
+			writeView, valueErr4 := agentcontract.ObjectOf(capability)
+			if valueErr4 != nil {
+				t.Fatal(valueErr4)
+			}
+			otherView, valueErr5 := agentcontract.ObjectOf(other)
+			if valueErr5 != nil {
+				t.Fatal(valueErr5)
+			}
+			packet.Capabilities = []agentcontract.JSON{writeView, otherView}
+			if contextCharacters(packet) <= 9000 {
+				t.Fatal("regression setup did not exceed the projection budget")
+			}
+			packet = budgetContext(packet, state, 9000)
+			assertContextBudget(t, packet, runtime.SystemPrompt(), runtime.MaxContextCharacters)
+			if packet.InspectedCapability["name"] != capability.Name || !reflect.DeepEqual(packet.InspectedFact, state.InspectedFact) {
+				t.Fatal("optional catalog schemas displaced the evidence/contract needed for the pending write", latest)
+			}
+			after, valueErr6 := agentcontract.CanonicalJSON(state)
+			if valueErr6 != nil {
+				t.Fatal(valueErr6)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatal("context projection changed persisted evidence or approval requirements")
+			}
+		})
+	}
+}
+
 func TestContextBudgetHistoryOmissionCount(t *testing.T) {
 	runtime, state, _ := contextBudgetRuntime(t, 1200)
 	for i := 0; i < 20; i++ {

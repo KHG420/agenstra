@@ -282,7 +282,7 @@ func (s *HTTPServer) chatHTTP(w http.ResponseWriter, r *http.Request, owner stri
 			apiError(w, 422, "invalid_request", false)
 			return
 		}
-		if s.Web.profilesForConversation(owner, parts[1]) && !s.Web.sessionKeyMatches(owner, b.SessionID, r.Header.Get("X-Agenstra-Browser-Key")) {
+		if s.Web.conversationRequiresBrowserKey(owner, parts[1], b.SessionID) && !s.Web.sessionKeyMatches(owner, b.SessionID, r.Header.Get("X-Agenstra-Browser-Key")) {
 			apiError(w, 401, "browser_session_invalid", false)
 			return
 		}
@@ -330,12 +330,12 @@ func conversationValidator(c agentcontract.ChatConversation, messages []agentcon
 	return fmt.Sprintf(`W/"%x"`, sha256.Sum256(data)), nil
 }
 
-func (w *WebIntegration) profilesForConversation(owner, id string) bool {
+func (w *WebIntegration) conversationRequiresBrowserKey(owner, id, session string) bool {
 	var c agentcontract.ChatConversation
 	if webLoad(w.Store.store.DB, "web_conversations", id, owner, &c) != nil {
 		return false
 	}
-	return w.profiles[c.IntegrationID] != nil
+	return w.profiles[c.IntegrationID] != nil && (session != "" || !w.browserOptional(c.IntegrationID))
 }
 
 func (w *WebIntegration) sessionKeyMatches(owner, id, key string) bool {

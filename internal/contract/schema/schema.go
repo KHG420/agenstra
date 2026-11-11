@@ -81,10 +81,12 @@ func CompileLocal(schema map[string]any, strictREST bool) (*jsonschema.Schema, e
 	compiler := jsonschema.NewCompiler()
 	compiler.DefaultDraft(jsonschema.Draft2020)
 	compiler.AssertFormat()
-	if err := compiler.AddResource("schema.json", schema); err != nil {
+	// Keep local references independent of the process directory and its URL escaping.
+	const resource = "https://agenstra.invalid/schema.json"
+	if err := compiler.AddResource(resource, schema); err != nil {
 		return nil, err
 	}
-	return compiler.Compile("schema.json")
+	return compiler.Compile(resource)
 }
 
 // Validate checks the standard Go JSON representation against a compiled contract.

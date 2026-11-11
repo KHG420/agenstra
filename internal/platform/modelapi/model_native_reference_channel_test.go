@@ -88,6 +88,10 @@ func TestNativeReferenceProposalFunctionsRequireDeclaredCapabilities(t *testing.
 					t.Fatal("proposal function was declared without a callable contract", name)
 				}
 			}
+			prompt := payload["messages"].([]any)[0].(agentcontract.JSON)["content"].(string)
+			if !strings.Contains(prompt, "No business functions or proposal functions are declared") || !strings.Contains(prompt, "call inspect_capability") || strings.Contains(prompt, nativeReferenceProposalPrompt) || strings.Contains(prompt, "the declared tool_batch function") {
+				t.Fatal("deferred contracts retained guidance for unavailable business proposals")
+			}
 		})
 	}
 }

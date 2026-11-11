@@ -148,6 +148,21 @@ func nativeDecisionOutputTools(tools []any, packet agentcontract.ContextPacket) 
 	return result, nil
 }
 
+// DeepSeek thinking requires auto tool choice. Its ordinary conversation text
+// is a final answer only before any business evidence exists. It cannot propose
+// calls, supply citations or approve a completion review.
+func (m *HTTPJSONDecisionModel) allowsNativeConversation(packet agentcontract.ContextPacket) bool {
+	return m.DecisionOutputMode == "native_tools" && m.APIType == "deepseek_chat" && m.Thinking != "disabled" && packet.Schema == "agenstra.context.v1" && packet.CompletionReview == nil && len(packet.Facts) == 0 && len(packet.Observations) == 0 && len(packet.ActionOutcomes) == 0
+}
+
+func nativeConversationText(content string) string {
+	text := strings.TrimSpace(content)
+	if text == "" || len(text) > 120000 || strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[") || strings.HasPrefix(text, "```") {
+		return ""
+	}
+	return text
+}
+
 func nativeDecisionOutputToolBody(calls []decisionOutputToolCall, tools []any, packet agentcontract.ContextPacket) ([]byte, string) {
 	if len(calls) > 1 {
 		if len(calls) > 4 {
@@ -284,7 +299,7 @@ func nativeArgumentsUseReferences(value any) bool {
 	return false
 }
 
-func nativeDecisionToolPrompt(prompt string, review bool) string {
+func nativeDecisionToolPrompt(prompt string, review, hasBusiness bool) string {
 	prompt = decisionOutputBasePrompt(prompt, review)
 	lines := strings.Split(prompt, "\n")
 	retained := lines[:0]
@@ -304,16 +319,21 @@ func nativeDecisionToolPrompt(prompt string, review bool) string {
 		retained = append(retained, line)
 	}
 	choice := "\nChoose one decision per response: one declared control or proposal function, or 1 to 4 declared business functions for independent calls. Never mix a control, proposal or final function with another function. Wait for results before deciding dependent calls."
+	if !hasBusiness {
+		choice = "\nChoose exactly one declared control function per response and wait for its result."
+	}
 	if review {
 		choice = "\nChoose exactly one declared native function per response and wait for its result."
 	}
 	prompt = strings.Join(retained, "\n") + choice + " Business functions accept the capability's actual parameters. Do not add decision wrappers such as kind, schema, calls, reason or call_ref unless those are declared business parameters. Preserve all declared business fields without coercion. The adapter assigns fresh local call identities; the runtime still checks original contracts, stored evidence references, current grants, identity, approval and budgets. Keep $fact_value references as objects. Unknown function names are invalid. Call final with answer_markdown and fact_ids to answer; user display formats apply inside answer_markdown only. Native functions replace legacy JSON decision output and its examples."
 	if review {
 		prompt += " This is completion review. Only final and approve_completion are available. Call approve_completion with no payload for an unchanged fully verified proposal; otherwise call final with completion_feedback as a string. Reject missing original work through nonempty feedback without executing, proposing or replaying calls."
-	} else {
+	} else if hasBusiness {
 		prompt += " Prefer one function call; the declared tool_batch function can propose up to 4 independent calls in its calls array. Multiple direct business functions also represent one batch, never separate future decisions. Wait before dependent calls and follow the user's explicit operation order. A catalog entry with schema_requires_inspection=true is not callable yet, including through tool_call or tool_batch. Call inspect_capability with its exact name, wait for the full contract, then construct arguments from that contract; historical calls cannot substitute for it. A capability enum rejection requires inspection of the intended capability, not substitution with a different capability from the enum."
 		prompt += " " + nativeReferenceProposalPrompt + " For tool_call, use the exact capability ID in capability, preserve the business parameter structure in arguments, and include a reason. For tool_batch, each calls entry has those same fields. Respect explicit requests to perform calls separately even when their inputs are independent."
 		prompt += " When the user requests an input value through an evidence reference, or names a prior result as that input's source, use $fact_value with that exact observed Fact and path. A matching literal, including a value already present in the task, does not satisfy a requested input reference. Preserve the requested input source even when the same business value appears in another Fact. Final-answer citations alone do not require replacing ordinary literal inputs."
+	} else {
+		prompt += " No business functions or proposal functions are declared in this request. tool_call and tool_batch are unavailable, including for capabilities called successfully earlier in this run. For a required business call whose visible authorized catalog entry has schema_requires_inspection=true, call inspect_capability with that exact capability name and wait for its complete contract. If the capability is absent from the visible catalog, use the declared search_capabilities function first. Reuse retained Facts and inspections while recovering the contract. Do not replay a successful business call or substitute another capability. After inspection, use only the functions actually declared in the next request."
 	}
 	prompt += "\nUse the exact parameter property names from the selected function schema. Do not invent aliases or wrapping properties absent from that schema. Preserve native JSON types: arrays and objects are not strings. For final, answer_markdown is a string and fact_ids is a native array, including [] when there are no supporting Facts."
 	return prompt

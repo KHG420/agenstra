@@ -217,7 +217,9 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	}
 	attempts, delay, maxDelay := m.retrySettings()
 	var packet agentcontract.ContextPacket
-	showAnswer := payload["stream"] == true && json.Unmarshal(input, &packet) == nil && packet.CompletionReview == nil
+	validPacket := json.Unmarshal(input, &packet) == nil
+	showAnswer := payload["stream"] == true && validPacket && packet.CompletionReview == nil
+	plainConversation := validPacket && m.allowsNativeConversation(packet)
 	allowedOutput := map[string]bool{}
 	if output, ok := payload["tools"].([]any); ok {
 		for _, tool := range output {
@@ -269,7 +271,7 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 						if showAnswer {
 							agentcontract.ObserveAnswer(ctx, agentcontract.AnswerUpdate{Text: text, Phase: phase})
 						}
-					}, allowedOutput)
+					}, allowedOutput, plainConversation)
 				} else {
 					body, requestErr = io.ReadAll(io.LimitReader(res.Body, (8<<20)+1))
 				}
@@ -405,6 +407,11 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		// at the limit remains valid; an ordinary empty response stays invalid.
 		if usage := envelope.Usage; outputLimit > 0 && usage != nil && usage.Output != nil && *usage.Output >= outputLimit && *usage.Output <= 1000000000 {
 			return nil, agentcontract.ModelDecisionError{Kind: "model_output_truncated"}
+		}
+	}
+	if usesOutputTools && plainConversation && len(envelope.Choices[0].Message.ToolCalls) == 0 && envelope.Choices[0].FinishReason == "stop" {
+		if text := nativeConversationText(envelope.Choices[0].Message.Content); text != "" {
+			return agentcontract.CanonicalJSON(agentcontract.Decision{Schema: "agenstra.decision.v1", Kind: "final", AnswerMarkdown: text, FactIDs: []string{}})
 		}
 	}
 	if usesOutputTools {

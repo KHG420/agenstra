@@ -343,7 +343,11 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 			}
 			payload["tools"], payload["tool_choice"], payload["parallel_tool_calls"] = nativeTools, toolChoice, false
 			delete(payload, "response_format")
-			messages[0] = agentcontract.JSON{"role": "system", "content": nativeDecisionToolPrompt(prompt, packet.CompletionReview != nil)}
+			nativePrompt := nativeDecisionToolPrompt(prompt, packet.CompletionReview != nil, len(nativeFunctionCapabilities(packet)) > 0)
+			if m.allowsNativeConversation(packet) {
+				nativePrompt += "\nFor an ordinary conversational reply that needs no business lookup, you may also answer directly in natural language. Do not write JSON decisions or proposed function calls in message content. Business operations still require declared native functions. Once business evidence exists, final must include its fact_ids through the declared final function."
+			}
+			messages[0] = agentcontract.JSON{"role": "system", "content": nativePrompt}
 			for _, item := range messages[1:] {
 				message := item.(agentcontract.JSON)
 				if message["role"] == "assistant" && message["tool_calls"] == nil {

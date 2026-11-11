@@ -22,8 +22,9 @@ func contextCharacters(value any) int {
 }
 
 // budgetContext builds a model projection without changing the complete run state.
-// Tasks, followups, fact identities, active inspections, the latest skill and the
-// latest outcome are required. Step rejects an oversized minimum before model IO.
+// Tasks, followups, fact identities, the latest inspection, skill and outcome
+// are required. Step rejects an
+// oversized minimum before model IO.
 func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.RuntimeState, available int) agentcontract.ContextPacket {
 	if contextCharacters(packet) <= available {
 		return packet
@@ -230,6 +231,25 @@ func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.Runt
 		packet = withNotes(packet, baseOmissions)
 	}
 	if contextCharacters(packet) > available {
+		// Compact optional previews and catalog schemas before separating an inspected
+		// input contract from the saved evidence needed to construct its arguments.
+		// If both still cannot fit, retain the latest inspection as before.
+		if name, ok := packet.InspectedCapability["name"].(string); ok {
+			latest := latestInspectionKind(state)
+			switch {
+			case latest == "inspect_fact" || capabilityInspectionConsumed(state, name):
+				packet.InspectedCapability = nil
+				packet.ContextOmissions = append(slices.Clone(packet.ContextOmissions), "Capability "+name+" contract deferred. Use inspect_capability to reload it.")
+			case latest == "inspect_capability" && packet.InspectedFact != nil:
+				packet.InspectedFact = nil
+				packet.ContextOmissions = append(slices.Clone(packet.ContextOmissions), "Older fact inspection deferred. Use inspect_fact to reload it.")
+			}
+			if contextCharacters(packet) <= available {
+				return packet
+			}
+		}
+	}
+	if contextCharacters(packet) > available {
 		return packet
 	}
 
@@ -345,6 +365,42 @@ func budgetContext(packet agentcontract.ContextPacket, state *agentcontract.Runt
 		}
 	}
 	return packet
+}
+
+func latestInspectionKind(state *agentcontract.RuntimeState) string {
+	for i := len(state.Decisions) - 1; i >= 0; i-- {
+		kind, _ := state.Decisions[i]["kind"].(string)
+		if kind == "inspect_fact" || kind == "inspect_capability" {
+			return kind
+		}
+	}
+	return ""
+}
+
+func capabilityInspectionConsumed(state *agentcontract.RuntimeState, name string) bool {
+	outcomes := map[string]bool{}
+	for _, observation := range state.Observations {
+		outcomes[observation.CallRef] = observation.Capability == name && observation.Status == "succeeded" && observation.ErrorCode == nil
+	}
+	consumed := false
+	for i := len(state.Decisions) - 1; i >= 0; i-- {
+		decision := state.Decisions[i]
+		if decision["kind"] == "inspect_capability" {
+			return decision["name"] == name && consumed
+		}
+		if decision["kind"] != "tool_batch" {
+			continue
+		}
+		calls, _ := decision["calls"].([]any)
+		for _, value := range calls {
+			call, _ := value.(map[string]any)
+			ref, _ := call["call_ref"].(string)
+			if ref != "" && call["capability"] == name && outcomes[ref] {
+				consumed = true
+			}
+		}
+	}
+	return false
 }
 
 func recordedCallReason(state *agentcontract.RuntimeState, observation agentcontract.Observation) string {
