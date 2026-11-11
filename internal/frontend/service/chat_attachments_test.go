@@ -139,6 +139,9 @@ func TestChatAttachmentCancellationQuotaAndVisionCache(t *testing.T) {
 	var calls atomic.Int32
 	f.d.AttachmentParser = func(_ context.Context, req agentcontract.AttachmentParseRequest) (agentcontract.AttachmentDocument, error) {
 		if req.Page > 0 {
+			if req.Page == 1 && req.OriginalText != "封面" {
+				t.Error("visual parser lost original page text")
+			}
 			calls.Add(1)
 			return agentcontract.AttachmentDocument{Kind: "pdf", Pages: []agentcontract.AttachmentPage{{Number: req.Page, Text: "图表 123 吨"}}}, nil
 		}
@@ -156,6 +159,9 @@ func TestChatAttachmentCancellationQuotaAndVisionCache(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatal("visual page not cached")
+	}
+	if _, err := f.w.ReadAttachment(t.Context(), "alice", c.ID, file.ID, agentcontract.AttachmentRead{Page: 1, Count: 1, Vision: true}); err != nil {
+		t.Fatal(err)
 	}
 	f.w.Config.Attachments.MaxOwnerBytes = maxAttachmentDocumentBytes + 8192 + 12
 	if _, err := f.w.UploadAttachment(t.Context(), "alice", c.ID, "excess", "next.txt", strings.NewReader("next")); agentcontract.ErrorCode(err) != "attachment_storage_full" {

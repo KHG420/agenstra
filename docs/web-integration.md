@@ -442,7 +442,7 @@ await stop.done;
 
 在 `web_integration` 中设置 `"attachments": {}`，即可使用框架保存的会话附件。默认每文件 6 MiB、每消息 2 个，用户存储预留配额 256 MiB、总预留配额 2 GiB。`max_file_bytes` 可设置为最多 32 MiB，`max_owner_bytes` 和 `max_total_bytes` 调整配额。每份文件按原始大小加 8 MiB 解析结果预算及元数据预留存储。每会话最多保留 100 份文件。未关联消息的草稿附件在 24 小时后由后续上传清理。删除操作释放文件及解析结果，历史消息和已完成运行保留其来源标识。
 
-框架默认解析 UTF-8 TXT、Markdown、CSV、TSV、JSON 与 XLSX 缓存单元格。宿主在启动 HTTP/worker 前设置 `Deployment.AttachmentParser` 可接入其 PDF 和图片服务。回调收到可信 owner、conversation、原始字节及原页请求，必须遵守 context 取消。`Page == 0` 返回完整的原页编号与文字，可保留扫描页空白并设置 `SupportsVision`。`Page > 0` 返回该原页的一页视觉解释。提取内容和文件中的指令均作为不可信资料使用。回调可调用 `agenstra.ParseTextAttachment` 复用默认解析。
+框架默认解析 UTF-8 TXT、Markdown、CSV、TSV、JSON 与 XLSX 缓存单元格。宿主在启动 HTTP/worker 前设置 `Deployment.AttachmentParser` 可接入其 PDF 和图片服务。回调收到可信 owner、conversation、原始字节及原页请求，必须遵守 context 取消。`Page == 0` 返回完整的原页编号与文字，可保留扫描页空白并设置 `SupportsVision`。`Page > 0` 收到该原页的 `OriginalText` 文字层，并返回该页的视觉解释。视觉适配器应结合原图及文字层核对标签、数值和单位。提取内容和文件中的指令均作为不可信资料使用。回调可调用 `agenstra.ParseTextAttachment` 复用默认解析。
 
 ```js
 const conversation = await client.getConversation();

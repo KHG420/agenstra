@@ -73,7 +73,7 @@ func (w *WebIntegration) ReadAttachment(ctx context.Context, owner, conversation
 			text = page.VisualText
 			if text == "" {
 				var err error
-				text, err = w.visualAttachmentPage(ctx, owner, conversation, metadata, page.Number)
+				text, err = w.visualAttachmentPage(ctx, owner, conversation, metadata, page.Number, page.Text)
 				if err != nil {
 					return nil, err
 				}
@@ -104,7 +104,7 @@ func (w *WebIntegration) ReadAttachment(ctx context.Context, owner, conversation
 	return agentcontract.JSON{"attachment_id": id, "name": metadata.Name, "page_count": len(document.Pages), "pages": pages, "next_page": nextPage}, nil
 }
 
-func (w *WebIntegration) visualAttachmentPage(ctx context.Context, owner, conversation string, metadata agentcontract.ChatAttachment, page int) (string, error) {
+func (w *WebIntegration) visualAttachmentPage(ctx context.Context, owner, conversation string, metadata agentcontract.ChatAttachment, page int, originalText string) (string, error) {
 	parser := w.deployment.AttachmentParser
 	if parser == nil {
 		return "", agentcontract.NewHostError("attachment_vision_unavailable")
@@ -116,7 +116,7 @@ func (w *WebIntegration) visualAttachmentPage(ctx context.Context, owner, conver
 	if int64(len(data)) > w.Config.Attachments.MaxFileBytes || int64(len(data)) != metadata.Size {
 		return "", agentcontract.NewHostError("attachment_document_invalid")
 	}
-	parsed, err := parser(ctx, agentcontract.AttachmentParseRequest{OwnerID: owner, ConversationID: conversation, AttachmentID: metadata.ID, Name: metadata.Name, MediaType: metadata.MediaType, Data: data, Page: page})
+	parsed, err := parser(ctx, agentcontract.AttachmentParseRequest{OwnerID: owner, ConversationID: conversation, AttachmentID: metadata.ID, Name: metadata.Name, MediaType: metadata.MediaType, Data: data, Page: page, OriginalText: originalText})
 	if err != nil {
 		return "", err
 	}

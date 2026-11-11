@@ -48,6 +48,8 @@ type AttachmentParseRequest struct {
 	MediaType      string
 	Data           []byte
 	Page           int
+	// OriginalText is the untrusted text layer of the requested visual page.
+	OriginalText string
 }
 
 // AttachmentParser connects chat uploads to an application-selected parser.
