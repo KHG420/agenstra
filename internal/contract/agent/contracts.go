@@ -446,9 +446,26 @@ func Strptr(s string) *string {
 }
 
 // ValueAt reads an object or array path from JSON and reports invalid or missing steps.
+// Typed Go containers use their JSON representation, including field visibility
+// and exact JSON numbers, while ordinary maps and slices keep their value types.
 func ValueAt(value any, path []any) (any, error) {
 	cur := value
 	for _, p := range path {
+		switch cur.(type) {
+		case map[string]any, []any:
+		default:
+			// Providers can return structs, pointers and typed slices. Follow the
+			// same JSON surface the model sees, without exposing private Go state.
+			raw, err := json.Marshal(cur)
+			if err != nil {
+				return nil, errors.New("invalid")
+			}
+			var decoded any
+			if err := jsonvalue.DecodeStrict(raw, &decoded); err != nil {
+				return nil, errors.New("invalid")
+			}
+			cur = decoded
+		}
 		switch v := cur.(type) {
 		case map[string]any:
 			key, ok := p.(string)
