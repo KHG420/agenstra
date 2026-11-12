@@ -243,6 +243,7 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		request := req.Clone(ctx)
 		if metrics := modelMetrics(ctx); metrics != nil {
 			metrics.Attempts++
+			metrics.StartedAt = float64(time.Now().UnixNano()) / 1e9
 		}
 		request.Body = io.NopCloser(bytes.NewReader(raw))
 		res, requestErr := client.Do(request)

@@ -68,6 +68,10 @@ type ModelPrices = agent.ModelPrices
 // ModelSelectionSnapshot binds a configuration to a management revision.
 type ModelSelectionSnapshot = agent.ModelSelectionSnapshot
 
+// RunModelContext identifies a trusted run and its frozen model selection for
+// AgentHost.RunModelWrapper. It stays outside model input.
+type RunModelContext = agent.RunModelContext
+
 // ModelManager owns deployment selection. Runs retain a connection-reference
 // snapshot, so editing the catalog cannot reroute an in-progress task.
 type ModelManager = deployassembly.ModelManager

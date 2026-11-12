@@ -26,6 +26,10 @@ type AgentHost struct {
 	Store           *runstore.SQLiteStore
 	ProviderFactory agentcontract.ProviderFactory
 	Model           agentcontract.DecisionModel
+	// RunModelWrapper optionally decorates the frozen model with trusted run
+	// metadata. Configure it before serving. Returned models must preserve the
+	// underlying optional measurement, memory and capacity interfaces they use.
+	RunModelWrapper func(agentcontract.RunModelContext, agentcontract.DecisionModel) agentcontract.DecisionModel
 	// CompletionPreflight optionally checks drafts before expensive model review.
 	// Configure it before serving runs and retain it when resuming them.
 	CompletionPreflight    agentcontract.CompletionValidator

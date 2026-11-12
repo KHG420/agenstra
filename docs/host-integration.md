@@ -79,6 +79,8 @@ Web 集成对应 `/web/v1/runs/{id}/reconcile` 与 `client.reconcileInvocation(r
 
 ## 快速接入与诊断
 
+嵌入式宿主可在启动前配置 `AgentHost.RunModelWrapper`，为每个已选定的模型添加账号费用等宿主策略。回调收到可信的 owner、run、pack 标识和冻结的模型配置，返回的模型需转发实际使用的容量、输入测量与记忆提取接口。装饰器同时覆盖决策、完成复核和记忆提取，继续使用框架原有的模型选择、检查点和取消路径。`ModelCallMetrics.started_at` 保存最终传输尝试的 Unix 开始时间，供按调用时段计价，历史指标的零值由宿主按既有历史口径处理。
+
 完整接入套件见[快速接入指南](quick-integration.md)。`GET /runs/{id}/diagnostics` 返回归因、恢复建议、调用进度、耗时和模型预算，保持 owner 校验且不触发模型或业务接口。可选部署 `completion_checks` 和 `reconciliation_checks` 见[业务校验配置](completion-evaluation.md)。
 
 公开 Go SDK 的瞬时 `AgentRuntime.Run` 会将调用方 Context 的取消或截止期限错误返回给调用方，支持 `errors.Is(err, context.Canceled)` / `errors.Is(err, context.DeadlineExceeded)`。检查返回错误时仍须保留 `RunResult`：取消前收到的业务回执与模型预算不会丢失，未知外部结果仍需核对；取消不证明写入失败，也不允许重放。模型适配器自己的局部取消在调用方 Context 仍有效时，沿用原有安全错误码。持久 Host 的状态、取消与恢复入口不受这个瞬时调用边界影响。

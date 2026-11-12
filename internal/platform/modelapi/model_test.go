@@ -44,9 +44,13 @@ func TestHTTPJSONDecisionModelStrictBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	started := float64(time.Now().UnixNano()) / 1e9
 	decision, err := model.Decide(context.Background(), agentcontract.ContextPacket{Schema: "agenstra.context.v1"}, "system")
 	if err != nil || decision.Kind != "final" {
 		t.Fatalf("valid decision: %+v %v", decision, err)
+	}
+	if decision.ModelCall.StartedAt < started || decision.ModelCall.StartedAt > float64(time.Now().UnixNano())/1e9 {
+		t.Fatal("transport attempt timestamp missing", decision.ModelCall.StartedAt)
 	}
 	content = "```json\n" + content + "\n```"
 	decision, err = model.Decide(context.Background(), agentcontract.ContextPacket{}, "system")

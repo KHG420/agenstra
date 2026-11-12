@@ -103,6 +103,9 @@ func DescribeModel(model DecisionModel) ModelInfo {
 // UsageAvailable distinguishes provider-reported usage from an estimate.
 // EstimatedCostUSD is populated only when the caller configured model prices.
 type ModelCallMetrics struct {
+	// StartedAt is the final transport attempt's start time in Unix seconds.
+	// Zero identifies historical metrics recorded before per-request timestamps.
+	StartedAt             float64  `json:"started_at,omitempty"`
 	FormatRecovery        bool     `json:"format_recovery,omitempty"`
 	Profile               string   `json:"profile,omitempty"`
 	Model                 string   `json:"model,omitempty"`
@@ -223,6 +226,16 @@ type ModelPrices struct {
 type ModelSelectionSnapshot struct {
 	Revision int                `json:"revision"`
 	Config   ModelConfiguration `json:"config"`
+}
+
+// RunModelContext identifies the trusted run bound to a selected model.
+// Configuration is an owned copy of the run's frozen selection, when present.
+// The context is local host metadata and is never added to model input.
+type RunModelContext struct {
+	OwnerID       string
+	RunID         string
+	PackID        string
+	Configuration *ModelConfiguration
 }
 
 // ValidateModelParameters checks that thinking, reasoning and temperature settings are supported by the selected API.
