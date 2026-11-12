@@ -12,6 +12,8 @@ Agenstra is an agent framework written in Go for integration with existing appli
 
 Start with the [minimal REST integration tutorial (Chinese)](docs/tutorial.md), or follow the [existing application integration checklist (Chinese)](docs/host-integration.md) to connect a frontend/backend application.
 
+Go hosts can also reuse the WeChat channel plugin for QR login, peer-scoped polling, text delivery, and encrypted native file attachments. [WeChat integration guide (Chinese)](docs/wechat-integration.md)
+
 ## What you need to add
 
 | Integration area | What you add | What the framework provides |
