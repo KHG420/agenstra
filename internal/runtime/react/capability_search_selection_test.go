@@ -136,3 +136,16 @@ func TestCapabilitySearchRestoresMultipleSelectedContracts(t *testing.T) {
 		t.Fatal("discovery bypassed authorization, capacity or provider isolation", names, provider.called)
 	}
 }
+
+func TestCapabilitySearchPreservesSingularQueriesForPluralDescriptions(t *testing.T) {
+	caps := map[string]agentcontract.CapabilityDescription{
+		"account.discover": {Name: "account.discover", Description: "Discover vessels, voyages, details, ports and statuses"},
+		"data.summary":     {Name: "data.summary", Description: "Read a report and statusbar"},
+	}
+	grants := map[string]bool{"account.discover": true, "data.summary": true}
+	for _, query := range []string{"vessel detail voyage", "port", "status"} {
+		if got := searchAuthorizedCapabilities(caps, grants, query, 4); !slices.Equal(got, []string{"account.discover"}) {
+			t.Fatalf("singular query %q lost whole plural words or matched an unrelated substring: %v", query, got)
+		}
+	}
+}

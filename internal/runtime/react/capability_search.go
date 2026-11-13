@@ -28,6 +28,7 @@ type capabilitySearchDocument struct {
 type capabilitySearchTerm struct {
 	text         string
 	wordBoundary bool
+	plural       bool
 }
 
 var qualifiedCapabilityQueryPattern = regexp.MustCompile(`[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)+`)
@@ -45,7 +46,11 @@ func capabilityNameParts(name string) []string {
 }
 
 func compileCapabilitySearchTerm(term string) capabilitySearchTerm {
-	return capabilitySearchTerm{text: term, wordBoundary: strings.IndexFunc(term, func(r rune) bool { return unicode.Is(unicode.Han, r) }) < 0}
+	return capabilitySearchTerm{
+		text:         term,
+		wordBoundary: strings.IndexFunc(term, func(r rune) bool { return unicode.Is(unicode.Han, r) }) < 0,
+		plural:       len(term) >= 3 && strings.IndexFunc(term, func(r rune) bool { return r < 'a' || r > 'z' }) < 0,
+	}
 }
 
 func (term capabilitySearchTerm) matches(text string) bool {
@@ -63,6 +68,18 @@ func (term capabilitySearchTerm) matches(text string) bool {
 		after, _ := utf8.DecodeRuneInString(text[end:])
 		if !capabilityWordRune(before) && !capabilityWordRune(after) {
 			return true
+		}
+		// Preserve singular queries for ordinary English plural descriptions,
+		// while keeping substrings inside unrelated words from matching.
+		if term.plural && !capabilityWordRune(before) {
+			for _, suffix := range []string{"s", "es"} {
+				if strings.HasPrefix(text[end:], suffix) {
+					after, _ := utf8.DecodeRuneInString(text[end+len(suffix):])
+					if !capabilityWordRune(after) {
+						return true
+					}
+				}
+			}
 		}
 		offset = index + 1
 	}
