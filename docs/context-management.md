@@ -155,6 +155,8 @@ HTTP 模型适配器将已有的 `capability_search_query` 和 `capability_searc
 
 默认连续 8 个决策没有新证据时以 `agent_stagnated` 停止，Host 可用 `max_stagnant_rounds` 调整（0 使用默认值）。提前两轮提供 `stagnation_warning`。新结果内容、首次有效 schema/Fact 路径检查、首次技能加载和新用户补充会重置计数；更换调用/Fact ID、重复相同结果或循环检查已读路径不会。计数与检查摘要持久化，因此重启不会清零。原有模型轮次、工具次数和 token 预算继续独立生效。
 
+能力发现阶段没有新证据、连续两次搜索返回相同候选集合时，当前阶段暂停 `capability_search`。模型仍可检查已知契约、读取最可能的模块目录并执行已发现的能力。确认缺少接入、权限或数据后直接答复具体限制；补充用户信息即可继续时使用 `request_input` 一次询问必要字段。新业务操作或新证据会恢复发现阶段。检查使用现有决策记录中的有界窗口，恢复运行时继续生效。同参数、同错误的重复调用也会在通用停滞上限之前获得具体纠正反馈，保留待处理和写入不确定状态。该设计参考 [OpenHands 的重复动作与错误检测](https://github.com/OpenHands/software-agent-sdk/blob/main/openhands-sdk/openhands/sdk/conversation/stuck_detector.py)及 [Pydantic AI 的分层重试预算](https://github.com/pydantic/pydantic-ai/blob/main/docs/retries.md)，沿用 Agenstra 的运行预算与真实回执。
+
 对成功的浏览器只读动作，以原动作能力和回执中的业务 `result` 判断信息增量，不把每次投递产生的新 `command_id` 当作进展；检查同一业务结果的相同路径也遵守此规则。新的写操作、变化的业务结果、普通 provider 的业务 ID 和没有动作关联的轮询保留完整判断依据，不按只读投递 ID 归一化。
 
 该检测衡量可观察的证据进展。持续变化的上游数据可能持续重置计数，仍由总预算约束；它不判断业务目标是否完成，业务验收由 completion validator 负责。

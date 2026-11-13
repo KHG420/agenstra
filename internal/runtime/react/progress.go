@@ -243,6 +243,40 @@ func currentEvidenceObservations(state *agentcontract.RuntimeState, observations
 
 const progressUsagePrompt = "progress summarizes observed outcomes; pending is unfinished. Reuse cited Facts. On stagnation_warning, change approach or explain the verified limitation."
 
+func repeatedFailurePrompt(state *agentcontract.RuntimeState, packet agentcontract.ContextPacket) string {
+	if packet.Progress == nil || packet.Progress.NoProgressRounds == 0 || len(packet.Progress.Pending) > 0 {
+		return ""
+	}
+	observations := currentEvidenceObservations(state, state.Observations)
+	if len(observations) < 2 {
+		return ""
+	}
+	last := observations[len(observations)-1]
+	if last.Status != "failed" || last.ErrorCode == nil || last.ArgumentsOmitted {
+		return ""
+	}
+	arguments := progressKey(last.Arguments)
+	count := 0
+	seen := map[string]bool{}
+	for i := len(observations) - 1; i >= max(0, len(observations)-12); i-- {
+		previous := observations[i]
+		if previous.Capability != last.Capability {
+			continue
+		}
+		if previous.Status != "failed" || previous.ErrorCode == nil || *previous.ErrorCode != *last.ErrorCode || previous.ArgumentsOmitted || progressKey(previous.Arguments) != arguments {
+			break
+		}
+		if !seen[previous.CallRef] {
+			seen[previous.CallRef] = true
+			count++
+		}
+	}
+	if count < 2 {
+		return ""
+	}
+	return fmt.Sprintf("Repeated failed call detected: %q returned %q %d times for the same arguments without new evidence. Stop retrying those unchanged inputs. Correct a concrete input problem, use a different verified authorized route, or explain the actual limitation in a final answer. If material user information enables an existing route, request_input should ask for it together. A new attempt requires corrected input or concrete evidence that the condition was transient. Preserve unknown write outcomes and pending operations; this feedback grants no permission and does not establish success.", last.Capability, *last.ErrorCode, count)
+}
+
 // Give a concrete action/observation correction before the hard stop, rather
 // than relying only on the late, generic stagnation flag. Compare full retained
 // evidence; equal previews alone cannot establish that a result is unchanged.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -239,6 +240,37 @@ func searchAuthorizedCapabilities(caps map[string]agentcontract.CapabilityDescri
 		result = append(result, match.name)
 	}
 	return result
+}
+
+// Rephrasing a query without finding new candidates is not discovery progress.
+// Use the existing decision journal so recovery preserves this bound as well.
+func (r *AgentRuntime) capabilitySearchStalled(state *agentcontract.RuntimeState) bool {
+	if r.MaxContextCapabilities <= 0 || state.Progress == nil || state.Progress.NoProgressRounds < 2 {
+		return false
+	}
+	var candidates []string
+	searches := 0
+	start := max(0, len(state.Decisions)-min(8, state.Progress.NoProgressRounds+1))
+	for i := len(state.Decisions) - 1; i >= start; i-- {
+		decision := state.Decisions[i]
+		switch decision["kind"] {
+		case "tool_batch", "request_input", "final":
+			return false
+		case "search_capabilities":
+			query, _ := decision["query"].(string)
+			matches := searchAuthorizedCapabilities(r.Provider.Capabilities(), r.Grants, query, r.MaxContextCapabilities)
+			slices.Sort(matches)
+			if searches > 0 && !slices.Equal(matches, candidates) {
+				return false
+			}
+			candidates = matches
+			searches++
+			if searches == 2 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func selectedCapabilityNames(caps map[string]agentcontract.CapabilityDescription, grants map[string]bool, instruction string, state *agentcontract.RuntimeState, limit int) ([]string, int, []string) {

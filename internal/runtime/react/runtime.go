@@ -445,9 +445,10 @@ func (r *AgentRuntime) contextCandidate(state *agentcontract.RuntimeState) agent
 	}
 	obs := []agentcontract.Observation{}
 	omissions := []string{}
+	searchStalled := r.capabilitySearchStalled(state)
 	if r.MaxContextCapabilities > 0 {
 		if catalogTotal > len(caps) {
-			omissions = append(omissions, fmt.Sprintf("capability catalog: showing %d of %d authorized capabilities; use search_capabilities to find omitted capabilities", len(caps), catalogTotal))
+			omissions = append(omissions, fmt.Sprintf("capability catalog: showing %d of %d authorized capabilities; use search_capabilities when runtime_features includes capability_search", len(caps), catalogTotal))
 		}
 		if state.CapabilitySearchQuery != "" && len(searchResults) == 0 {
 			omissions = append(omissions, "capability search returned no authorized matches for: "+state.CapabilitySearchQuery)
@@ -508,7 +509,7 @@ func (r *AgentRuntime) contextCandidate(state *agentcontract.RuntimeState) agent
 	if r.Durable {
 		features = append(features, "durable_execution")
 	}
-	if r.MaxContextCapabilities > 0 {
+	if r.MaxContextCapabilities > 0 && !searchStalled {
 		features = append(features, "capability_search")
 	}
 	history, omittedInspections := inspectionHistory(state)
@@ -616,6 +617,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		state.ErrorCode = agentcontract.Strptr("agent_stagnated")
 		return nil
 	}
+	searchStalled := r.capabilitySearchStalled(state)
 	facts := map[string]agentcontract.Fact{}
 	for _, f := range state.Facts {
 		facts[f.FactID] = f
@@ -661,6 +663,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			return nil
 		}
 		prompt := r.SystemPrompt() + followupExecutionPrompt(state) + feedback
+		if searchStalled {
+			prompt += "\n" + capabilityDiscoveryStopPrompt
+		}
 		purpose := "decision"
 		if len(packet.ActionOutcomes) > 0 {
 			prompt += "\n" + actionOutcomePrompt
@@ -672,6 +677,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		if packet.Progress != nil {
 			prompt += "\n" + progressUsagePrompt
 			if repeated := r.repeatedReadPrompt(state, packet); repeated != "" {
+				prompt += "\n" + repeated
+			}
+			if repeated := repeatedFailurePrompt(state, packet); repeated != "" {
 				prompt += "\n" + repeated
 			}
 		}
@@ -1046,6 +1054,10 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 	case "search_capabilities":
 		if r.MaxContextCapabilities <= 0 {
 			Reject(state, "search", "agent.search_capabilities", "capability_search_disabled", nil, "")
+			break
+		}
+		if searchStalled {
+			Reject(state, "search", "agent.search_capabilities", "capability_search_stalled", nil, "")
 			break
 		}
 		state.CapabilitySearchQuery = decision.Query
