@@ -9,7 +9,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
 
 func TestWebAnswerStreamAuthenticationAndDurableReconnect(t *testing.T) {
@@ -39,6 +42,53 @@ func TestWebAnswerStreamAuthenticationAndDurableReconnect(t *testing.T) {
 			t.Fatal("durable answer missing", out.Body.String())
 		}
 	}
+}
+
+func TestWaitingAnswerStreamBoundsAuthorizationReadsAndRechecksRevocation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newWebFixture(t, &hostModel{}, false)
+		run, err := f.w.CreateBrowserRun(t.Context(), "alice", "records-web", f.session.ID, "Respond", "idle-stream")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolve := f.h.PolicyResolver
+		var reads atomic.Int32
+		var revoked atomic.Bool
+		f.h.PolicyResolver = func(ctx context.Context, owner, pack string) (agentcontract.ExecutionPolicy, error) {
+			reads.Add(1)
+			if revoked.Load() {
+				return agentcontract.ExecutionPolicy{}, agentcontract.NewHostError("access_denied")
+			}
+			return resolve(ctx, owner, pack)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		req := httptest.NewRequestWithContext(ctx, "GET", "/runs/"+run.RunID+"/answer-stream", nil)
+		out := httptest.NewRecorder()
+		s := &HTTPServer{Host: f.h, stop: make(chan struct{})}
+		var exited atomic.Bool
+		go func() {
+			s.answerHTTP(out, req, "alice", nil)
+			exited.Store(true)
+		}()
+		synctest.Wait()
+		time.Sleep(900 * time.Millisecond)
+		synctest.Wait()
+		if reads.Load() != 1 || exited.Load() {
+			t.Fatalf("idle stream repeatedly queried authorization: reads=%d exited=%t", reads.Load(), exited.Load())
+		}
+		// No policy result is cached. The next snapshot must check revocation
+		// before publishing any newly available answer.
+		revoked.Store(true)
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
+		if reads.Load() != 2 || !exited.Load() {
+			t.Fatalf("revocation did not close the stream: reads=%d exited=%t", reads.Load(), exited.Load())
+		}
+		if !strings.Contains(out.Body.String(), `"phase":"failed"`) {
+			t.Fatalf("revocation did not publish failure: %s", out.Body.String())
+		}
+	})
 }
 
 func TestAnswerStreamDisconnectExpiryAndServerShutdown(t *testing.T) {

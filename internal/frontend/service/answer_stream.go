@@ -47,7 +47,15 @@ func (s *HTTPServer) answerHTTP(w http.ResponseWriter, r *http.Request, owner st
 	if !write(update) {
 		return
 	}
-	ticker := time.NewTicker(250 * time.Millisecond)
+	interval := func(phase string) time.Duration {
+		// Waiting has no draft text to stream. Keep idle readers from consuming
+		// the host's identity-source budget while its workflow is doing work.
+		if phase == "waiting" {
+			return time.Second
+		}
+		return 250 * time.Millisecond
+	}
+	ticker := time.NewTicker(interval(update.Phase))
 	defer ticker.Stop()
 	deadline := time.NewTimer(25 * time.Second)
 	defer deadline.Stop()
@@ -72,6 +80,9 @@ func (s *HTTPServer) answerHTTP(w http.ResponseWriter, r *http.Request, owner st
 			if next != update {
 				if !write(next) {
 					return
+				}
+				if next.Phase != update.Phase {
+					ticker.Reset(interval(next.Phase))
 				}
 				update = next
 			}

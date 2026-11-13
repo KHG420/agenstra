@@ -418,6 +418,8 @@ await stop.done;
 
 `GET /web/v1/runs/{id}/answer-stream` 使用既有 web ticket、owner 和 Web run 绑定校验，持续重新检查当前授权。Go/服务端接入也可使用原身份认证下的 `GET /runs/{id}/answer-stream`，或 `host.AnswerSnapshot(ctx, runID, owner)`。HTTP 是 `text/event-stream`，每条 `event: answer` 的数据只有 `{run_id, text, phase}`；`text` 是当前完整文本，应替换旧文本，不能追加。
 
+HTTP 在 `waiting` 阶段每秒读取一次快照，生成或复核正文时每 250 毫秒读取一次，避免等待外部工作流时持续消耗身份源额度。每次读取仍核对当前归属和授权，不缓存权限结果；取消、票据失效和服务关闭仍会结束流。
+
 | phase | 含义 |
 | --- | --- |
 | `waiting` | 尚无候选，或原候选已撤回；文本为空 |
