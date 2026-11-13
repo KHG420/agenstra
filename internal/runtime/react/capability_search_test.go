@@ -28,6 +28,9 @@ func capabilityNames(packet agentcontract.ContextPacket) []string {
 
 func TestCapabilitySearchFindsOmittedAuthorizedCapability(t *testing.T) {
 	caps := searchTestCapabilities()
+	invoice := caps["omega.submit_invoice"]
+	invoice.OutputSchema = agentcontract.JSON{"type": "object"}
+	caps[invoice.Name] = invoice
 	provider := &coreTestProvider{caps: caps}
 	grants := map[string]bool{"alpha.read": true, "beta.read": true, "omega.submit_invoice": true}
 	r := &AgentRuntime{Provider: provider, Grants: grants, MaxContextCapabilities: 2, Model: decisionModelFunc(func(context.Context, agentcontract.ContextPacket, string) (agentcontract.Decision, error) {
@@ -51,9 +54,12 @@ func TestCapabilitySearchFindsOmittedAuthorizedCapability(t *testing.T) {
 	if len(packet.Capabilities) != 2 || capabilityNames(packet)[0] != "omega.submit_invoice" || len(packet.CapabilitySearchResults) != 1 || packet.CapabilitySearchResults[0] != "omega.submit_invoice" {
 		t.Fatal("search did not reveal omitted capability", capabilityNames(packet), packet.CapabilitySearchResults)
 	}
+	if packet.InspectedCapability["name"] != "omega.submit_invoice" || packet.InspectedCapability["input_schema"] == nil || packet.InspectedCapability["output_schema"] == nil {
+		t.Fatal("tool search did not load the complete matching contract", packet.InspectedCapability)
+	}
 	grants["omega.submit_invoice"] = false
 	packet = r.Context(state)
-	if strings.Contains(strings.Join(capabilityNames(packet), ","), "omega.submit_invoice") || len(packet.CapabilitySearchResults) != 0 {
+	if strings.Contains(strings.Join(capabilityNames(packet), ","), "omega.submit_invoice") || len(packet.CapabilitySearchResults) != 0 || packet.InspectedCapability != nil {
 		t.Fatal("revoked capability remained visible", capabilityNames(packet), packet.CapabilitySearchResults)
 	}
 }

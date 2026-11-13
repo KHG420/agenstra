@@ -1062,6 +1062,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		}
 		state.CapabilitySearchQuery = decision.Query
 		state.CapabilitySearchResults = searchAuthorizedCapabilities(r.Provider.Capabilities(), r.Grants, decision.Query, r.MaxContextCapabilities)
+		if len(state.CapabilitySearchResults) > 0 {
+			name := state.CapabilitySearchResults[0]
+			state.InspectedCapability = &name
+			recordInspection(state, agentcontract.JSON{"capability": name})
+		}
 	case "inspect_fact":
 		view, err := inspectionView(facts, decision.FactID, decision.Path, decision.Offset, decision.Limit)
 		if err != nil {
