@@ -499,7 +499,10 @@ func (w *WebIntegration) Conversation(ctx context.Context, owner, id string) (ag
 		if messages[i].Status == "queued" || messages[i].Status == "creating" {
 			continue
 		}
-		run, e := w.Host.Get(ctx, messages[i].RunID, owner)
+		// The conversation's pack was authorized for this request. Loading its
+		// owner-scoped checkpoints preserves that decision without repeating an
+		// external policy lookup for each historical message.
+		run, e := w.Host.Store.GetRun(messages[i].RunID, owner)
 
 		// A queued message cancelled before publication has no run checkpoint.
 		if errors.Is(e, runstore.ErrRunNotFound) && messages[i].Status == "cancelled" {
@@ -507,6 +510,11 @@ func (w *WebIntegration) Conversation(ctx context.Context, owner, id string) (ag
 		}
 		if e != nil {
 			return c, nil, e
+		}
+		if run.PackID != pack {
+			if _, e = w.Host.Policy(ctx, owner, run.PackID, false); e != nil {
+				return c, nil, e
+			}
 		}
 		messages[i].InputHistory = chatInputHistory(run)
 		if messages[i].Status == "active" || messages[i].Status == "cancelling" || runHasInvocationEvidence(run) {
