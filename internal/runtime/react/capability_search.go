@@ -304,6 +304,16 @@ func searchAuthorizedCapabilities(caps map[string]agentcontract.CapabilityDescri
 	return capabilitySearcher(caps, grants)(query, limit)
 }
 
+// Framework chat wraps the current request with historical exchanges. Rank the
+// current task and followups, while retaining the complete instruction as evidence.
+func capabilitySelectionInstruction(state *agentcontract.RuntimeState) string {
+	instruction, wrapped := strings.CutPrefix(state.Instruction, "Current user request:\n")
+	if wrapped {
+		instruction, _, _ = strings.Cut(instruction, "\n\nEarlier conversation (")
+	}
+	return instruction + " " + strings.Join(state.Followups, " ")
+}
+
 // capabilitySearcher reuses prepared metadata during one fixed-catalog selection
 // pass. Each new pass receives current contracts and grants from its caller.
 func capabilitySearcher(caps map[string]agentcontract.CapabilityDescription, grants map[string]bool) func(string, int) []string {

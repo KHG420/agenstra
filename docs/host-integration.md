@@ -29,6 +29,7 @@
 - 使用简短的业务词、工具名或参数名搜索。工具名按分隔符和 CamelCase 拆词，名称优先于描述和输入字段，英文描述按词边界匹配并兼容常见单复数，中文保留短语匹配。Schema 中的 `const`、`enum` 和嵌套参数说明也参与检索。
 - `+ledger +send report` 只保留同时包含两个必需词的工具，再按相关性排序。`select:records.read,records.update` 按指定顺序载入已知工具，去重并过滤未授权名称。裸工具全名和 `mcp__server` 前缀支持直接查找。
 - 通过 `max_context_capabilities` 限制每轮可见工具数量。多工具直选优先保留本次选择，后续检索和检查点恢复通过既有决策日志重新构建已发现工具集合，始终重新核对当前授权。目录已满时，完成当前已加载的工作再搜索下一项。
+- 聊天包装中的历史对话继续完整交给模型，初始工具排序使用当前请求和运行中的补充指令，避免旧主题挤占当前工具。复述已经报告的历史值可直接引用原交换，查询最新状态仍读取业务接口。
 - 元数据只在一次固定目录选择过程中复用，随该过程结束释放。下一轮重新读取当前契约与授权，同名工具的描述或字段更新会生效。工具搜索无额外模型调用、Provider 调用或业务写入。
 
 检索机制参考了公开 GitHub 快照中 `ToolSearchTool` 的本地关键词评分、工具名直选、必需词和发现恢复。阅读基准固定为 `871deb6e6284e91e620ba0f9fd4a90e5c3ab009c`，另两份快照的四个相关文件经 SHA-256 核对一致。快照声称来自 Claude Code v2.1.88，本次核对范围为这四个文件。Agenstra 使用自身 Go 实现，沿用既有 IDF 权重、中文处理、授权和上下文预算。[主快照](https://github.com/OrcaWhisper/Claude-Code/tree/871deb6e6284e91e620ba0f9fd4a90e5c3ab009c/src/tools/ToolSearchTool) · [核对快照一](https://github.com/JiaranI/start-claude-code/tree/403997698b770c15701e8d6f102a029f49ad5e0a/src/tools/ToolSearchTool) · [核对快照二](https://github.com/starbt/ClaudeCode/tree/3e838ef4d68948195a2d460b0d7fa3ea0d08e5cf/tools/ToolSearchTool)

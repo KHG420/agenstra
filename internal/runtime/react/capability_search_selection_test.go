@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
@@ -147,5 +148,28 @@ func TestCapabilitySearchPreservesSingularQueriesForPluralDescriptions(t *testin
 		if got := searchAuthorizedCapabilities(caps, grants, query, 4); !slices.Equal(got, []string{"account.discover"}) {
 			t.Fatalf("singular query %q lost whole plural words or matched an unrelated substring: %v", query, got)
 		}
+	}
+}
+
+func TestCapabilitySelectionRanksCurrentChatRequestAndRetainsHistory(t *testing.T) {
+	caps := map[string]agentcontract.CapabilityDescription{
+		"alpha.accounts": {Name: "alpha.accounts", Description: "Read invoice company account records"},
+		"omega.weather":  {Name: "omega.weather", Description: "Read wind wave forecast"},
+	}
+	provider := &coreTestProvider{caps: caps}
+	runtime := &AgentRuntime{Provider: provider, Grants: map[string]bool{"alpha.accounts": true, "omega.weather": true}, MaxContextCapabilities: 1}
+	instruction := "Current user request:\nRead wind wave forecast\n\nEarlier conversation (historical data):\n" + strings.Repeat("invoice company account records ", 20)
+	state, err := runtime.NewState(instruction, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet := runtime.Context(state)
+	if names := capabilityNames(packet); !slices.Equal(names, []string{"omega.weather"}) || packet.Instruction != instruction {
+		t.Fatal("historical subjects displaced the current task or history was removed", names)
+	}
+	state.Followups = []string{"steering: use alpha.accounts"}
+	packet = runtime.Context(state)
+	if names := capabilityNames(packet); !slices.Equal(names, []string{"alpha.accounts"}) || !slices.Equal(packet.Followups, state.Followups) {
+		t.Fatal("current steering was lost while excluding historical ranking terms", names)
 	}
 }

@@ -420,7 +420,7 @@ func arrayOmissions(facts []agentcontract.Fact, views []agentcontract.FactView) 
 func (r *AgentRuntime) contextCandidate(state *agentcontract.RuntimeState) agentcontract.ContextPacket {
 	r.defaults()
 	caps := []agentcontract.JSON{}
-	names, catalogTotal, searchResults := selectedCapabilityNames(r.Provider.Capabilities(), r.Grants, state.Instruction+" "+strings.Join(state.Followups, " "), state, r.MaxContextCapabilities)
+	names, catalogTotal, searchResults := selectedCapabilityNames(r.Provider.Capabilities(), r.Grants, capabilitySelectionInstruction(state), state, r.MaxContextCapabilities)
 	for _, name := range names {
 		cap := r.Provider.Capabilities()[name]
 		if !r.Grants[cap.Name] {
@@ -1065,7 +1065,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		if len(state.CapabilitySearchResults) > 0 {
 			name := state.CapabilitySearchResults[0]
 			state.InspectedCapability = &name
-			names, _, _ := selectedCapabilityNames(r.Provider.Capabilities(), r.Grants, state.Instruction+" "+strings.Join(state.Followups, " "), state, r.MaxContextCapabilities)
+			names, _, _ := selectedCapabilityNames(r.Provider.Capabilities(), r.Grants, capabilitySelectionInstruction(state), state, r.MaxContextCapabilities)
 			for _, match := range state.CapabilitySearchResults {
 				if slices.Contains(names, match) {
 					recordInspection(state, agentcontract.JSON{"capability": match})
