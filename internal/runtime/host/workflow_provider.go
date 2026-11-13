@@ -136,3 +136,32 @@ func (p *workflowProvider) Invoke(ctx context.Context, name string, args agentco
 	}
 	return agentcontract.CapabilityResult{Data: data, ReferenceScope: "durable"}, nil
 }
+
+// Reconciliation reads the child created by the original framework invocation.
+func (h *AgentHost) reconcileWorkflowStart(ctx context.Context, check agentcontract.ReconciliationContext) (agentcontract.CapabilityResult, error) {
+	id := requestRunID(check.OwnerID, "workflow:"+check.Invocation.InvocationID)
+	run, err := h.Store.GetRun(id, check.OwnerID)
+	if err != nil {
+		return agentcontract.CapabilityResult{}, err
+	}
+	runtime, _ := run.State["runtime"].(map[string]any)
+	parent, _ := runtime["workflow_parent"].(map[string]any)
+	if parent["run_id"] != check.RunID || run.PackID != check.OriginPackID {
+		return agentcontract.CapabilityResult{}, agentcontract.NewHostError("reconciliation_binding_mismatch")
+	}
+	view, err := h.GetWorkflow(ctx, id, check.OwnerID)
+	if err != nil {
+		return agentcontract.CapabilityResult{}, err
+	}
+	if view.Name != check.Invocation.Call.Arguments["workflow"] {
+		return agentcontract.CapabilityResult{}, agentcontract.NewHostError("reconciliation_binding_mismatch")
+	}
+	if !Terminal(view.Status) {
+		return agentcontract.CapabilityResult{}, agentcontract.NewHostError("reconciliation_result_not_settled")
+	}
+	data, err := agentcontract.ObjectOf(view)
+	if err != nil {
+		return agentcontract.CapabilityResult{}, err
+	}
+	return agentcontract.CapabilityResult{Data: data, ReferenceScope: "durable"}, nil
+}

@@ -167,6 +167,66 @@ func TestWorkflowUnknownWriteReconcilesWithoutReplay(t *testing.T) {
 	}
 }
 
+func TestFrameworkWorkflowStartReconcilesOriginalChild(t *testing.T) {
+	h, provider := workflowFixture(t)
+	h.Model = &hostModel{decisions: []agentcontract.Decision{
+		{Schema: "agenstra.decision.v1", Kind: "inspect_capability", Name: "workflows.start"},
+		{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []agentcontract.ToolCall{{CallRef: "report", Capability: "workflows.start", Arguments: agentcontract.JSON{"workflow": "report", "input": agentcontract.JSON{"id": "R-1"}}, Reason: "Generate the requested report"}}},
+	}}
+	run, err := h.Create(t.Context(), "alice", "records", "Generate a report", "workflow-parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "waiting" {
+		t.Fatal(run.Status, err)
+	}
+	run, err = h.Store.Claim(run.RunID, "alice", h.Settings.LeaseSeconds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := h.Restore(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Status, state.ErrorCode = "needs_reconciliation", agentcontract.Strptr("provider_outcome_unknown")
+	state.Pending[0].Status = "unknown"
+	item := state.Pending[0]
+	run, err = h.save(run, state, "", nil, agentcontract.JSON{"kind": "reconciliation_required"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Store.Release(run.RunID, "alice", run.LeaseToken); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Reconcile(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, run.Revision); agentcontract.ErrorCode(err) != "reconciliation_unavailable" || provider.calls != 0 {
+		t.Fatal("unsettled child was accepted or repeated", provider.calls, err)
+	}
+	childID := requestRunID("alice", "workflow:"+item.InvocationID)
+	child, err := h.Drive(t.Context(), childID, "alice")
+	if err != nil || child.Status != "completed" || provider.calls != 2 {
+		t.Fatal(child.Status, provider.calls, err)
+	}
+	original := h.PolicyResolver
+	h.PolicyResolver = func(ctx context.Context, owner, pack string) (agentcontract.ExecutionPolicy, error) {
+		policy, err := original(ctx, owner, pack)
+		policy.GrantedCapabilities["workflows.start"] = false
+		return policy, err
+	}
+	if _, err := h.Reconcile(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, run.Revision); agentcontract.ErrorCode(err) != "capability_not_granted" {
+		t.Fatal("reconciliation bypassed current authorization", err)
+	}
+	h.PolicyResolver = original
+	run, err = h.Reconcile(t.Context(), run.RunID, "alice", item.InvocationID, item.ArgumentsSHA256, run.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "completed" || provider.calls != 2 {
+		t.Fatal("reconciliation repeated the original child", run.Status, provider.calls, err)
+	}
+}
+
 type workflowConcurrentProvider struct{ *hostProvider }
 
 func (*workflowConcurrentProvider) ConcurrentInvocation(string) bool { return true }

@@ -65,6 +65,8 @@ Operation: &agenstra.OperationBinding{
 
 等待期间保存原作业 ID 并释放运行槽位，轮询消耗 `MaxPollCalls`。确定性节点和等待阶段不调用模型。重启后沿原调用与回执恢复。`replay=idempotent` 要求宿主接口真实支持相同幂等键，无法确认结果的写操作使用原有 reconciliation 流程。
 
+普通 Agent 的 `workflows.start` 进入结果核对时，由框架按原 invocation 定位已创建的子工作流，核对归属、父运行及终态，再接回原调用。核对沿用当前授权与原参数摘要。业务节点的外部结果继续由宿主核对器核验。
+
 工作流取消会停止本地调度并请求取消其 Agent 子运行。远端作业的取消由宿主显式提供业务能力，已提交操作的真实回执继续保留。
 
 ## Agent 节点

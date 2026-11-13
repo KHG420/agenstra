@@ -99,6 +99,9 @@ func (h *AgentHost) VerifyInvocation(ctx context.Context, id, owner, invocationI
 	if item.Operation != nil && item.Operation.Binding.PollCapability == "ui.command_status" && !browser {
 		return run, agentcontract.NewHostError("reconciliation_use_browser_endpoint")
 	}
+	if !browser && item.Call.Capability == "workflows.start" && run.State["workflow_catalog"] != nil {
+		verifier = h.reconcileWorkflowStart
+	}
 	if verifier == nil {
 		return run, agentcontract.NewHostError("reconciliation_unavailable")
 	}
