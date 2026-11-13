@@ -1065,7 +1065,12 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		if len(state.CapabilitySearchResults) > 0 {
 			name := state.CapabilitySearchResults[0]
 			state.InspectedCapability = &name
-			recordInspection(state, agentcontract.JSON{"capability": name})
+			names, _, _ := selectedCapabilityNames(r.Provider.Capabilities(), r.Grants, state.Instruction+" "+strings.Join(state.Followups, " "), state, r.MaxContextCapabilities)
+			for _, match := range state.CapabilitySearchResults {
+				if slices.Contains(names, match) {
+					recordInspection(state, agentcontract.JSON{"capability": match})
+				}
+			}
 		}
 	case "inspect_fact":
 		view, err := inspectionView(facts, decision.FactID, decision.Path, decision.Offset, decision.Limit)

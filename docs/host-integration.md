@@ -21,7 +21,19 @@
 9. 用虚构数据验证全部操作，包括拒绝、过期版本、抽奖中锁定或对应业务锁定、刷新恢复、文件校验和并发条件。再用真实模型验证自然语言，分别记录结果。
 10. 关闭本任务启动的服务、测试容器和浏览器页面；保留用户原有资源。提交源码、能力契约、完整操作映射及可复现命令，排除密钥与数据库。
 
-业务接口可以从受信任的路由或 OpenAPI 声明生成逐操作能力，与宿主已有原生函数进入同一 `CapabilityProvider` 目录。框架的 `search_capabilities` 统一检索名称、描述和参数说明，并加载首个匹配工具的完整契约。宿主在每次调用时继续核对当前账号、记录归属和审批，工具搜索只读取授权目录。
+业务接口可以从受信任的路由或 OpenAPI 声明生成逐操作能力，与宿主已有原生函数进入同一 `CapabilityProvider` 目录。框架的 `search_capabilities` 统一检索名称、描述和参数说明，将命中工具的输入契约与原生函数载入有界目录，并提供首个工具的完整输入、输出契约。宿主在每次调用时继续核对当前账号、记录归属和审批，工具搜索只读取授权目录。
+
+
+### 工具搜索与按需加载
+
+- 使用简短的业务词、工具名或参数名搜索。工具名按分隔符和 CamelCase 拆词，名称优先于描述和输入字段，英文描述按词边界匹配，中文保留短语匹配。Schema 中的 `const`、`enum` 和嵌套参数说明也参与检索。
+- `+ledger +send report` 只保留同时包含两个必需词的工具，再按相关性排序。`select:records.read,records.update` 按指定顺序载入已知工具，去重并过滤未授权名称。裸工具全名和 `mcp__server` 前缀支持直接查找。
+- 通过 `max_context_capabilities` 限制每轮可见工具数量。多工具直选优先保留本次选择，后续检索和检查点恢复通过既有决策日志重新构建已发现工具集合，始终重新核对当前授权。目录已满时，完成当前已加载的工作再搜索下一项。
+- 元数据只在一次固定目录选择过程中复用，随该过程结束释放。下一轮重新读取当前契约与授权，同名工具的描述或字段更新会生效。工具搜索无额外模型调用、Provider 调用或业务写入。
+
+检索机制参考了公开 GitHub 快照中 `ToolSearchTool` 的本地关键词评分、工具名直选、必需词和发现恢复。阅读基准固定为 `871deb6e6284e91e620ba0f9fd4a90e5c3ab009c`，另两份快照的四个相关文件经 SHA-256 核对一致。快照声称来自 Claude Code v2.1.88，本次核对范围为这四个文件。Agenstra 使用自身 Go 实现，沿用既有 IDF 权重、中文处理、授权和上下文预算。[主快照](https://github.com/OrcaWhisper/Claude-Code/tree/871deb6e6284e91e620ba0f9fd4a90e5c3ab009c/src/tools/ToolSearchTool) · [核对快照一](https://github.com/JiaranI/start-claude-code/tree/403997698b770c15701e8d6f102a029f49ad5e0a/src/tools/ToolSearchTool) · [核对快照二](https://github.com/starbt/ClaudeCode/tree/3e838ef4d68948195a2d460b0d7fa3ea0d08e5cf/tools/ToolSearchTool)
+
+Anthropic 平台的工具搜索另有 BM25 与正则实现，Claude Code 本地层在上述快照中使用关键词评分。延迟加载和工具引用的公开说明见官方文档。[工具搜索 API](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool) · [Claude Code MCP 工具搜索](https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search)
 
 ## SDK 的最小宿主职责
 
