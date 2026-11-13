@@ -54,6 +54,7 @@ type ManagementConfig struct {
 
 // DeploymentConfig contains trusted host wiring, execution limits and optional integrations.
 type DeploymentConfig struct {
+	Workflows            map[string][]WorkflowDefinition          `json:"workflows,omitempty"`
 	Database             *DatabaseConfig                          `json:"database,omitempty"`
 	Models               *ModelConfiguration                      `json:"models,omitempty"`
 	CompletionChecks     map[string][]FactRequirement             `json:"completion_checks,omitempty"`

@@ -27,7 +27,7 @@ func webError(w http.ResponseWriter, e error) {
 	code := agentcontract.ErrorCode(e)
 	status := 409
 	switch code {
-	case "not_found", "attachment_not_found":
+	case "not_found", "attachment_not_found", "workflow_unknown":
 		status = 404
 	case "attachment_busy":
 		status = 429
@@ -37,7 +37,7 @@ func webError(w http.ResponseWriter, e error) {
 		status = 401
 	case "access_denied", "identity_unverified", "model_data_not_authorized", "capability_not_granted":
 		status = 403
-	case "source_scope_invalid", "chat_message_invalid", "browser_context_invalid", "browser_result_invalid", "browser_handler_unknown", "request_id_required":
+	case "source_scope_invalid", "chat_message_invalid", "browser_context_invalid", "browser_result_invalid", "browser_handler_unknown", "request_id_required", "workflow_request_invalid", "workflow_input_invalid", "workflow_definition_invalid", "workflow_value_too_large":
 		status = 422
 	}
 	if strings.HasPrefix(code, "attachment_") && status == 409 && code != "attachment_conflict" {
@@ -138,6 +138,19 @@ func (s *HTTPServer) webHTTP(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 401, "unauthorized", false)
 		return
 	}
+	if p == "/web/v1/workflows" || strings.HasPrefix(p, "/web/v1/workflows/") {
+		pack, err := integration.integrationPack(r.URL.Query().Get("integration_id"))
+		if err != nil {
+			webError(w, err)
+			return
+		}
+		copy := r.Clone(r.Context())
+		u := *r.URL
+		u.Path = strings.TrimPrefix(p, "/web/v1")
+		copy.URL = &u
+		s.workflowsHTTP(w, copy, owner, pack)
+		return
+	}
 	if p == "/web/v1/memories" || strings.HasPrefix(p, "/web/v1/memories/") {
 		pack, err := integration.integrationPack(r.URL.Query().Get("integration_id"))
 		if err != nil {
@@ -180,8 +193,15 @@ func (s *HTTPServer) webHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if count == 0 {
-			http.NotFound(w, r)
-			return
+			visible, err := integration.workflowRunVisible(owner, id)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			if !visible {
+				http.NotFound(w, r)
+				return
+			}
 		}
 		if r.Method == "POST" && strings.HasSuffix(path, "/cancel") {
 			if e = integration.cancelCommands(owner, id); e != nil {

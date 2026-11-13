@@ -383,6 +383,8 @@ type InvocationReceipt struct {
 // RuntimeState is the complete checkpoint for a single run.
 // A driver owns its mutable state; model input is a separate bounded projection.
 type RuntimeState struct {
+	Workflow                *WorkflowExecution    `json:"workflow,omitempty"`
+	WorkflowParent          *WorkflowParent       `json:"workflow_parent,omitempty"`
 	Conversation            *ConversationContext  `json:"conversation,omitempty"`
 	InvocationReceipts      []InvocationReceipt   `json:"invocation_receipts,omitempty"`
 	Execution               *ExecutionCheckpoint  `json:"execution,omitempty"`

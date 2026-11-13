@@ -84,3 +84,7 @@ Web 集成对应 `/web/v1/runs/{id}/reconcile` 与 `client.reconcileInvocation(r
 完整接入套件见[快速接入指南](quick-integration.md)。`GET /runs/{id}/diagnostics` 返回归因、恢复建议、调用进度、耗时和模型预算，保持 owner 校验且不触发模型或业务接口。可选部署 `completion_checks` 和 `reconciliation_checks` 见[业务校验配置](completion-evaluation.md)。
 
 公开 Go SDK 的瞬时 `AgentRuntime.Run` 会将调用方 Context 的取消或截止期限错误返回给调用方，支持 `errors.Is(err, context.Canceled)` / `errors.Is(err, context.DeadlineExceeded)`。检查返回错误时仍须保留 `RunResult`：取消前收到的业务回执与模型预算不会丢失，未知外部结果仍需核对；取消不证明写入失败，也不允许重放。模型适配器自己的局部取消在调用方 Context 仍有效时，沿用原有安全错误码。持久 Host 的状态、取消与恢复入口不受这个瞬时调用边界影响。
+
+## 声明持久工作流
+
+宿主可在启动服务前配置 `AgentHost.Workflows`，组合已有能力、异步作业和 Agent 分析节点。框架沿用当前身份、审批、租约、检查点与 worker。声明方式、HTTP/Web SDK 入口及可运行示例见[工作流与宿主接入](workflows.md)。

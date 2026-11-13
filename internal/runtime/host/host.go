@@ -23,6 +23,8 @@ import (
 // AgentHost owns run scheduling, authorization, leases and durable checkpoints.
 // It must not be copied after use; its store and model are supplied by the host app.
 type AgentHost struct {
+	// Workflows contains trusted definitions per pack. Configure before serving.
+	Workflows map[string][]agentcontract.WorkflowDefinition
 	// ConversationHistory supplies bounded source ranges before the normal decision loop.
 	// Configure it before serving. The Host owns compaction checkpoints and model usage.
 	ConversationHistory agentcontract.ConversationHistory
@@ -178,6 +180,16 @@ func (h *AgentHost) prepareRun(ctx context.Context, owner, pack, instruction, id
 		return nil, err
 	}
 	envelope := map[string]any{"runtime": runtime, "artifact_ids": []string{}, "pack_fingerprint": nil, "pack_release": release, "effective_config": agentcontract.EffectiveRunConfig{Version: 1, Source: "run_snapshot", Settings: settings, Model: info, ModelSelection: selection}}
+	if definitions := h.Workflows[pack]; len(definitions) > 0 {
+		if _, err := workflowInfos(definitions); err != nil {
+			return nil, err
+		}
+		catalog, err := jsonvalue.Clone(definitions)
+		if err != nil {
+			return nil, agentcontract.NewHostError("workflow_definition_invalid")
+		}
+		envelope["workflow_catalog"] = catalog
+	}
 	setMemoryInput(envelope, id+":instruction", instruction)
 	raw, err := agentcontract.CanonicalJSON(envelope)
 	if err != nil {
@@ -288,7 +300,7 @@ func (h *AgentHost) save(run agentcontract.StoredRun, state *agentcontract.Runti
 		fp = fingerprint
 	}
 	envelope := map[string]any{"runtime": runtime, "artifact_ids": ids, "pack_fingerprint": fp, "pack_release": run.State["pack_release"]}
-	for _, key := range []string{"memory_inputs", "memory_snapshot", "memory_errors", "project_sources", "effective_config"} {
+	for _, key := range []string{"memory_inputs", "memory_snapshot", "memory_errors", "project_sources", "effective_config", "workflow_catalog"} {
 		if value, exists := run.State[key]; exists {
 			envelope[key] = value
 		}
@@ -450,6 +462,15 @@ func (h *AgentHost) Cancel(ctx context.Context, id, owner string) (agentcontract
 	r, e = h.Store.RequestCancel(id, owner)
 	if e == nil {
 		h.answers.clear(owner, id, "")
+		if r.State["workflow_catalog"] != nil {
+			state, err := h.Restore(r)
+			if err != nil {
+				return r, err
+			}
+			if err := h.cancelWorkflowChildren(ctx, r, state); err != nil {
+				return r, err
+			}
+		}
 	}
 	return r, e
 }
@@ -952,6 +973,9 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 	if e != nil {
 		return run, e
 	}
+	if state.Workflow != nil && state.Workflow.Definition.Validate() != nil {
+		return run, agentcontract.NewHostError("workflow_checkpoint_invalid")
+	}
 	defer func() {
 		if err == nil || errors.Is(err, runstore.ErrLeaseLost) || ctx.Err() != nil {
 			return
@@ -1004,6 +1028,9 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 		}
 	}()
 	if run.CancelRequested {
+		if e := h.cancelWorkflowChildren(ctx, run, state); e != nil {
+			return run, e
+		}
 		return h.markCancelled(run, state)
 	}
 	if Terminal(state.Status) || state.Status == "needs_input" || state.Status == "needs_reconciliation" {
@@ -1061,9 +1088,11 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 	runtime.MaxStagnantRounds = h.runSettings(run).MaxStagnantRounds
 	runtime.MaxConcurrentTools = h.runSettings(run).MaxConcurrentTools
 	runtime.MaxContextCapabilities = h.runSettings(run).MaxContextCapabilities
-	run, e = h.prepareMemories(ctx, run)
-	if e != nil {
-		return run, e
+	if state.Workflow == nil {
+		run, e = h.prepareMemories(ctx, run)
+		if e != nil {
+			return run, e
+		}
 	}
 	state, e = h.Restore(run)
 	if e != nil {
@@ -1074,7 +1103,7 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 		return run, e
 	}
 	remaining := h.runSettings(run).MaxRunSeconds - (h.Now() - run.CreatedAt)
-	if remaining > 0 && h.ConversationHistory != nil {
+	if remaining > 0 && h.ConversationHistory != nil && state.Workflow == nil && state.WorkflowParent == nil {
 		prepareCtx, prepareCancel := context.WithTimeout(ctx, time.Duration(remaining*1e9))
 		run, e = h.prepareConversation(prepareCtx, run, state, runtime)
 		prepareExpired := errors.Is(prepareCtx.Err(), context.DeadlineExceeded)
@@ -1101,9 +1130,15 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 			return run, e
 		}
 		if latest.CancelRequested {
+			if e := h.cancelWorkflowChildren(ctx, latest, state); e != nil {
+				return run, e
+			}
 			return h.markCancelled(run, state)
 		}
 		if h.Now()-run.CreatedAt >= h.runSettings(run).MaxRunSeconds {
+			if e := h.cancelWorkflowChildren(ctx, run, state); e != nil {
+				return run, e
+			}
 			state.Status = "failed"
 			state.ErrorCode = agentcontract.Strptr("run_deadline_exceeded")
 			for i := range state.Pending {
@@ -1174,9 +1209,19 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 				state.Status = "waiting"
 				return h.save(run, state, "", wake, map[string]any{"kind": "run_waiting"})
 			}
+			if e := settleWorkflowSteps(state); e != nil {
+				return run, e
+			}
 			state.Pending = []agentcontract.Invocation{}
 			run, e = h.save(run, state, "", nil, nil)
 			if e != nil {
+				return run, e
+			}
+			continue
+		}
+		if state.Workflow != nil {
+			run, e = h.advanceWorkflow(ctx, run, state, provider, runtime)
+			if e != nil || state.Status != "running" {
 				return run, e
 			}
 			continue
@@ -1300,6 +1345,9 @@ func (h *AgentHost) Drive(ctx context.Context, id, owner string) (agentcontract.
 	defer h.answers.clear(owner, id, run.LeaseToken)
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	runtime, _ := run.State["runtime"].(map[string]any)
+	parent, _ := runtime["workflow_parent"].(map[string]any)
+	parentID, _ := parent["run_id"].(string)
 	done := make(chan struct{})
 	heartbeatErr := make(chan error, 1)
 	go func() {
@@ -1332,6 +1380,18 @@ func (h *AgentHost) Drive(ctx context.Context, id, owner string) (agentcontract.
 					cancel()
 					return
 				}
+				if parentID != "" {
+					parentRun, err := h.Store.GetRun(parentID, owner)
+					if err == nil && (parentRun.CancelRequested || Terminal(parentRun.Status)) {
+						_, err = h.Store.RequestCancel(id, owner)
+						cancel()
+					}
+					if err != nil {
+						heartbeatErr <- err
+						cancel()
+						return
+					}
+				}
 			}
 		}
 	}()
@@ -1348,7 +1408,9 @@ func (h *AgentHost) Drive(ctx context.Context, id, owner string) (agentcontract.
 					e = runstore.ErrLeaseLost
 				} else if state, err := h.Restore(current); err == nil {
 					current.LeaseToken = run.LeaseToken
-					result, e = h.markCancelled(current, state)
+					if e = h.cancelWorkflowChildren(ctx, current, state); e == nil {
+						result, e = h.markCancelled(current, state)
+					}
 				}
 			}
 		}

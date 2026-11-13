@@ -30,7 +30,11 @@ func (h *AgentHost) Telemetry(run agentcontract.StoredRun) (agentcontract.RunTel
 	now := h.Now()
 	b := agentcontract.RunBudget{ModelRounds: countBudget(state.RoundsUsed, s.MaxModelRounds), ToolCalls: countBudget(state.ToolCallsUsed, s.MaxToolCalls), PollCalls: countBudget(state.PollCallsUsed, s.MaxPollCalls), Usage: state.ModelUsage, UsageByPurpose: map[string]agentcontract.ModelUsage{}, Deadline: run.CreatedAt + s.MaxRunSeconds}
 	b.SecondsRemaining = max(0, b.Deadline-now)
-	for i, call := range state.ModelCalls {
+	calls := state.ModelCalls
+	if state.Workflow != nil {
+		calls = append(append([]agentcontract.ModelCallMetrics{}, calls...), state.Workflow.AgentModelCalls...)
+	}
+	for i, call := range calls {
 		purpose := call.Purpose
 		if purpose == "" {
 			purpose = "decision"
@@ -41,7 +45,7 @@ func (h *AgentHost) Telemetry(run agentcontract.StoredRun) (agentcontract.RunTel
 		var charged agentcontract.ModelUsage
 		reactcore.AddModelUsage(&charged, call)
 		if call.Reservation || call.ErrorCode != nil && *call.ErrorCode == "model_outcome_unknown" {
-			if i == len(state.ModelCalls)-1 && run.Status == "running" && run.LeaseUntil != nil && *run.LeaseUntil > now {
+			if state.Workflow == nil && i == len(calls)-1 && run.Status == "running" && run.LeaseUntil != nil && *run.LeaseUntil > now {
 				b.Tokens.ReservedTokens += charged.BudgetTokens
 			} else {
 				b.Tokens.UnknownTokens += charged.BudgetTokens

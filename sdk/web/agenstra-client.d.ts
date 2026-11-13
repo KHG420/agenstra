@@ -87,6 +87,11 @@ export class AgenstraClient {
   getRuntimeInfo(): Promise<RuntimeInfo>;
   cancelRun(id: string): Promise<Run>;
   resumeRun(id: string): Promise<Run>;
+  listWorkflows(): Promise<WorkflowInfo[]>;
+  startWorkflow(workflow: string, input: JSONObject, options: { requestId: string }): Promise<WorkflowView>;
+  getWorkflow(id: string): Promise<WorkflowView>;
+  cancelWorkflow(id: string): Promise<WorkflowView>;
+  resumeWorkflow(id: string): Promise<WorkflowView>;
   getArtifact(id: string, artifactId: string): Promise<JSONObject>;
   getRunTelemetry(id: string): Promise<RunTelemetry>;
   getRunDiagnostics(id: string): Promise<RunDiagnostics>;
@@ -164,3 +169,9 @@ export interface RuntimeInfo { schema: "agenstra.runtime-info.v1"; settings: Hos
 export interface ConversationContextSelection { history_limit: number; part_character_limit: number; included_messages: number; omitted_messages: number; truncated_parts: number; input_characters: number }
 
 export interface RunDiagnostics { schema: "agenstra.run-diagnostics.v1"; run_id: string; status: string; revision: number; elapsed_ms: number; findings: { category: string; code: string; capability?: string; message: string; next_action: string; recovered: boolean; actionable: boolean }[]; progress: RunProgress | null; budget: RunBudget }
+
+/** Configured workflow metadata. Definitions and business inputs are validated server-side. */
+export interface WorkflowInfo { name: string; version: string; description: string; input_schema: JSONObject }
+export interface WorkflowStepState { id: string; status: string; fact_id?: string; run_id?: string; output?: JSONObject; error_code?: string }
+/** Existing owner-scoped run APIs handle actions on blocked_run_id. */
+export interface WorkflowView { run_id: string; name: string; version: string; status: string; steps: WorkflowStepState[]; output?: JSONObject; answer_markdown?: string; error_code?: string; blocked_run_id?: string; blocked_state?: string }

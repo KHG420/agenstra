@@ -222,6 +222,23 @@ func NewWebIntegration(h *durablehost.AgentHost, d *deployassembly.Deployment, c
 	if e != nil {
 		return nil, errors.Join(e, store.Close())
 	}
+	definitions := h.Workflows
+	if definitions == nil {
+		definitions = d.Config.Workflows
+	}
+	workflows, e := jsonvalue.Clone(definitions)
+	if e != nil {
+		return nil, errors.Join(e, store.Close())
+	}
+	if workflows == nil {
+		workflows = map[string][]agentcontract.WorkflowDefinition{}
+	}
+	for id, conf := range c.Integrations {
+		if _, explicit := workflows[id]; !explicit && w.profiles[id] != nil && len(workflows[conf.PackID]) > 0 {
+			workflows[id] = workflows[conf.PackID]
+		}
+	}
+	h.Workflows = workflows
 	h.ProviderFactory = w.provider
 	h.PolicyResolver = w.policy
 	h.ReleaseResolver = w.release

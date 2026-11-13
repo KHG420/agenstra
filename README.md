@@ -144,6 +144,7 @@ Start with capability packs and the run API, then enable modules to match your a
 | Capability | What it provides | Integration guide |
 | --- | --- | --- |
 | Web integration | Headless chat and conversation APIs, framework-managed context, message queues, a JS SDK, and optional browser control. | [Web integration (Chinese)](docs/web-integration.md) |
+| Durable workflows | Declare capability and Agent nodes with dependencies, async receipts, checkpoints, live permissions, and resumable execution. | [Workflow integration (Chinese)](docs/workflows.md) |
 | Scheduled tasks | One-time timestamps, fixed intervals, and five-field Cron with IANA timezones; persistent definitions and history, with authorization rechecked at trigger time. | [Scheduled tasks (Chinese)](docs/scheduled-tasks.md) |
 | Memory | Preferences, lasting constraints, and pack conventions across runs. Explicit defaults take effect immediately; habits from three independent inputs can become defaults. Hosts can inspect, edit, forget, and trace their origins. | [Memory management (Chinese)](docs/memory-management.md) |
 | Capability management (optional) | Shared CLI/Web drafts, validation, publishing, activation, rollback, user connections, and grants. | [Capability management (Chinese)](docs/capability-management.md) |

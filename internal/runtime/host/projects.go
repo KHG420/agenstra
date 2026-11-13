@@ -78,7 +78,7 @@ func (h *AgentHost) ProjectPolicy(ctx context.Context, run agentcontract.StoredR
 			out.ApprovalCapabilities[name] = target.ApprovalCapabilities[local]
 		}
 	}
-	return out, nil
+	return h.workflowParentPolicy(ctx, run, out)
 }
 
 func projectName(pack, local string) string { return pack + "::" + local }
@@ -117,7 +117,11 @@ func (h *AgentHost) OpenRunProvider(ctx context.Context, run agentcontract.Store
 		return nil, errors.Join(err, primary.Close())
 	}
 	if len(bindings) == 0 {
-		return primary, nil
+		wrapped, err := h.wrapWorkflows(run, primary)
+		if err != nil {
+			return nil, errors.Join(err, primary.Close())
+		}
+		return wrapped, nil
 	}
 	p := &projectProvider{host: h, run: run, primary: primary, providers: []agentcontract.CapabilityProvider{primary}, routes: map[string]projectRoute{}, caps: map[string]agentcontract.CapabilityDescription{}, skills: map[string]agentcontract.Skill{}}
 	ok := false
@@ -193,8 +197,12 @@ func (h *AgentHost) OpenRunProvider(ctx context.Context, run agentcontract.Store
 			p.routes[name] = projectRoute{provider: source, pack: binding.PackID, local: local, release: binding.Release, subject: binding.Subject}
 		}
 	}
+	wrapped, err := h.wrapWorkflows(run, p)
+	if err != nil {
+		return nil, err
+	}
 	ok = true
-	return p, nil
+	return wrapped, nil
 }
 
 // Capabilities returns the read-only capability catalog; callers must not mutate it.

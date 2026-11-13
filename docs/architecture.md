@@ -176,6 +176,8 @@ stateDiagram-v2
 
 `OperationBinding` 将外部作业回执映射到 `id_path`、`status_path`、`poll_capability`、`poll_argument`、pending/success/failure 状态、间隔和超时。Host 在 `waiting` 中定时调用状态接口，等待不会持续消耗模型轮次。作业 ID 应在连接重建后仍可用；短期连接内引用不能假装是长期资源 ID。
 
+宿主可声明有界工作流 DAG，组合现有能力与受限 Agent 子运行。Host 在既有 run checkpoint 中冻结定义、输入与节点状态，复用原调用日志、授权、审批、租约、异步轮询和 worker。确定性节点由 Host 推进，Agent 节点通过普通 ReAct run 执行。通用状态机保存在 `internal/runtime/host/workflow*.go`，业务定义与算法由宿主提供。接入方式见[持久工作流](workflows.md)。
+
 ## 4. 权限、身份与数据边界
 
 开发者管理和宿主用户运行分别授权。框架 HTTP 服务直接提供开发者控制台与管理 API，独立管理密钥控制模型配置、能力发布、连接绑定和授权策略；宿主业务角色不能换取这项权限。宿主仅接入按可信 owner 隔离的会话、任务、上下文、用量、记忆和自动化功能，不嵌入开发者控制台或代理管理 API。业务管理员的原系统权限仍由宿主核验。

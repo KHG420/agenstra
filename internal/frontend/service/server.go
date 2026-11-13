@@ -49,6 +49,9 @@ func NewHTTPServer(host *durablehost.AgentHost, deployment *deployassembly.Deplo
 	if err := deployassembly.ConfigureDeploymentChecks(host, deployment); err != nil {
 		return nil, err
 	}
+	if host.Workflows == nil {
+		host.Workflows = deployment.Config.Workflows
+	}
 	s := &HTTPServer{Host: host, Deployment: deployment, WorkerEnabled: workerEnabled, WorkerInterval: interval, stop: make(chan struct{}), done: make(chan struct{})}
 	registryOpened := false
 	if deployment.Registry != nil {
@@ -247,6 +250,14 @@ func runView(run agentcontract.StoredRun, host *durablehost.AgentHost) map[strin
 	}
 	delete(m, "lease_token")
 	delete(m, "lease_until")
+	if state, ok := m["state"].(map[string]any); ok {
+		delete(state, "workflow_catalog")
+		if runtime, ok := state["runtime"].(map[string]any); ok {
+			if workflow, ok := runtime["workflow"].(map[string]any); ok {
+				delete(workflow, "definition")
+			}
+		}
+	}
 	if telemetry, err := host.Telemetry(run); err == nil {
 		m["telemetry"] = telemetry
 	}
@@ -329,6 +340,10 @@ func (s *HTTPServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if p == "/schedules" || strings.HasPrefix(p, "/schedules/") {
 		s.schedulesHTTP(w, r, owner)
+		return
+	}
+	if p == "/workflows" || strings.HasPrefix(p, "/workflows/") {
+		s.workflowsHTTP(w, r, owner, "")
 		return
 	}
 	if p == "/runtime-info" {

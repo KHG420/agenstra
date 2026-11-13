@@ -13,8 +13,13 @@ import (
 
 // Steer appends authorized user input under a stable request identity and expected run revision.
 func (h *AgentHost) Steer(ctx context.Context, id, owner, requestID, text string, revision int) (agentcontract.StoredRun, error) {
-	if _, err := h.Get(ctx, id, owner); err != nil {
+	run, err := h.Get(ctx, id, owner)
+	if err != nil {
 		return agentcontract.StoredRun{}, err
+	}
+	runtime, _ := run.State["runtime"].(map[string]any)
+	if runtime["workflow"] != nil {
+		return run, agentcontract.NewHostError("workflow_input_immutable")
 	}
 	if !agentcontract.ValidUUID(requestID) || revision < 0 || strings.TrimSpace(text) == "" || len([]rune(text)) > 30000 {
 		return agentcontract.StoredRun{}, agentcontract.NewHostError("steering_invalid")

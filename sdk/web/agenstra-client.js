@@ -563,6 +563,12 @@ export class AgenstraClient {
   getRuntimeInfo() { return this.request("/web/v1/integrations/" + encodeURIComponent(this.options.integration) + "/runtime-info"); }
   cancelRun(id) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/cancel", { method: "POST", body: {} }); }
   resumeRun(id) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/resume", { method: "POST", body: {} }); }
+  listWorkflows() { return this.request(this.workflowPath()); }
+  startWorkflow(workflow, input, { requestId } = {}) { return this.request(this.workflowPath("/runs"), { method: "POST", body: { workflow, input, request_id: requestId } }); }
+  getWorkflow(id) { return this.request(this.workflowPath("/runs/" + encodeURIComponent(id))); }
+  cancelWorkflow(id) { return this.request(this.workflowPath("/runs/" + encodeURIComponent(id) + "/cancel"), { method: "POST", body: {} }); }
+  resumeWorkflow(id) { return this.request(this.workflowPath("/runs/" + encodeURIComponent(id) + "/resume"), { method: "POST", body: {} }); }
+  workflowPath(suffix = "") { return "/web/v1/workflows" + suffix + "?integration_id=" + encodeURIComponent(this.options.integration); }
   getArtifact(id, artifactId) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/artifacts/" + encodeURIComponent(artifactId)); }
   getRunTelemetry(id) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/telemetry"); }
   getRunDiagnostics(id) { return this.request("/web/v1/runs/" + encodeURIComponent(id) + "/diagnostics"); }

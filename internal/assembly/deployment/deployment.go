@@ -69,6 +69,18 @@ func LoadDeployment(path string) (*Deployment, error) {
 	if e := c.Settings.Validate(); e != nil {
 		return nil, e
 	}
+	for _, definitions := range c.Workflows {
+		if len(definitions) > 32 {
+			return nil, errors.New("workflow_definition_invalid")
+		}
+		seen := map[string]bool{}
+		for _, definition := range definitions {
+			if definition.Validate() != nil || seen[definition.Name] {
+				return nil, errors.New("workflow_definition_invalid")
+			}
+			seen[definition.Name] = true
+		}
+	}
 	if c.Models != nil {
 		if err := c.Models.Validate(); err != nil {
 			return nil, err
