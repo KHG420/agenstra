@@ -14,8 +14,12 @@ export interface AttachmentRead { page?: number; count?: number; offset?: number
 export interface AttachmentContent { attachment_id: string; name: string; page_count: number; pages: { page: number; text: string; visual: boolean; next_offset: number | null }[]; next_page: number | null }
 export interface ChatConversation { id: string; integration_id: string; created_at: number }
 export interface ChatInput { field?: string; prompt?: string; text: string }
-export interface ChatMessage { id: string; conversation_id: string; client_id: string; text: string; sources?: RunSource[]; attachments?: ChatAttachment[]; run_id: string; status: string; answer_markdown?: string; result_refs?: ResultObjectRef[]; input_history?: ChatInput[]; context_selection?: ConversationContextSelection; run?: Run }
-export interface ConversationSnapshot { conversation: ChatConversation; messages: ChatMessage[] }
+export interface ChatMessage { id: string; sequence?: number; conversation_id: string; client_id: string; text: string; sources?: RunSource[]; attachments?: ChatAttachment[]; run_id: string; status: string; answer_markdown?: string; result_refs?: ResultObjectRef[]; input_history?: ChatInput[]; context_selection?: ConversationContextSelection; run?: Run }
+export interface ConversationSnapshot { conversation: ChatConversation; messages: ChatMessage[]; next_before_sequence?: number }
+export interface ConversationCursor { after_sequence: number; part: number; offset: number }
+export interface ConversationEntry { id: string; message_id: string; sequence: number; role: "user" | "assistant" | "reference"; field: string; text: string; offset: number; status?: string }
+export interface ConversationRequirement { id: string; source_id: string; quote: string; supersedes?: string[] }
+export interface ConversationContext { conversation_id: string; message_id: string; cursor: ConversationCursor; summary: string; summary_through?: string; requirements: ConversationRequirement[]; recent: ConversationEntry[]; compactions: number; failures?: number; ready: boolean }
 export interface Memory {
   id: string; scope: "user" | "pack"; pack_id: string; key: string; value: string;
   kind: "preference" | "constraint" | "convention"; status: "active" | "candidate" | "forgotten";
@@ -69,6 +73,8 @@ export class AgenstraClient {
   selectConversation(id: string): Promise<ChatConversation>;
   getConversation(): Promise<ChatConversation>;
   snapshot(): Promise<ConversationSnapshot>;
+  /** Read earlier original messages in bounded chronological pages. */
+  getConversationMessages(options?: { conversationId?: string; beforeSequence?: number; limit?: number; signal?: AbortSignal }): Promise<ConversationSnapshot>;
   uploadAttachment(file: Blob & { name?: string }, options?: { clientId?: string; conversationId?: string; signal?: AbortSignal }): Promise<ChatAttachment>;
   listAttachments(options?: { conversationId?: string; signal?: AbortSignal }): Promise<ChatAttachment[]>;
   readAttachment(id: string, options?: AttachmentRead & { conversationId?: string; signal?: AbortSignal }): Promise<AttachmentContent>;
@@ -132,7 +138,7 @@ export interface ContextTelemetry {
 export interface CounterBudget { used: number; limit: number; remaining: number }
 export interface ModelUsage { requests: number; input_tokens: number; output_tokens: number; budget_tokens: number; estimated_requests: number; estimated_cost_usd: number; cost_available: boolean; cached_input_tokens?: number; reasoning_output_tokens?: number; cached_input_requests?: number; reasoning_output_requests?: number; priced_requests?: number; reported_requests?: number; format_recovery_requests?: number; elapsed_ms?: number; invalid_responses?: number; retry_attempts?: number }
 export interface ModelCallMetrics {
- round: number; purpose?: "decision" | "completion_review" | "memory_extraction"; source_id?: string; reservation?: boolean;
+ round: number; purpose?: "decision" | "completion_review" | "memory_extraction" | "conversation_compaction"; source_id?: string; reservation?: boolean;
  profile?: string; model?: string; response_model?: string; api_type?: string; thinking?: string; reasoning_effort?: string;
  cached_input_tokens?: number; reasoning_output_tokens?: number; format_error?: string; format_recovery?: boolean;
  attempts: number; input_tokens: number; output_tokens: number; usage_available: boolean;
@@ -149,7 +155,7 @@ export interface ProgressItem { capability: string; call_ref?: string; status: s
 export interface RunProgress { completed?: ProgressItem[]; pending?: ProgressItem[]; blocked?: ProgressItem[]; completed_count: number; blocked_count: number; omitted_items: number; no_progress_rounds: number; stagnation_warning?: boolean }
 export interface Invocation { invocation_id: string; call: { call_ref: string; capability: string; arguments: JSONObject; reason: string }; status: string; arguments_sha256: string; attempts: number; error_code: string | null; fact_id: string | null; approval_expires_at: number | null; operation: JSONObject | null; receipt?: InvocationReceipt }
 export interface InvocationReceipt { invocation_id: string; capability: string; effect: string; arguments_sha256: string; status: string; error_code?: string; fact_id?: string; result_sha256?: string; result_bytes?: number; result_error_code?: string; operation_id?: string; operation_status?: string; reconciled?: boolean }
-export interface RuntimeState extends JSONObject { run_id: string; status: string; rounds_used: number; tool_calls_used: number; poll_calls_used: number; pending: Invocation[]; invocation_receipts?: InvocationReceipt[]; model_usage: ModelUsage; model_calls?: ModelCallMetrics[]; context_telemetry?: ContextTelemetry; input_field?: string | null; input_prompt?: string | null; input_schema?: RequestedInputSchema; result_refs?: ResultObjectRef[] }
+export interface RuntimeState extends JSONObject { run_id: string; status: string; rounds_used: number; tool_calls_used: number; poll_calls_used: number; pending: Invocation[]; invocation_receipts?: InvocationReceipt[]; model_usage: ModelUsage; model_calls?: ModelCallMetrics[]; context_telemetry?: ContextTelemetry; conversation?: ConversationContext; input_field?: string | null; input_prompt?: string | null; input_schema?: RequestedInputSchema; result_refs?: ResultObjectRef[] }
 export interface RequestedInputSchema { type: "string" | "enum" | "date"; enum?: string[]; min_length?: number; max_length?: number }
 export interface ResultObjectRef { fact_id: string; path: (string | number)[]; id: string; label?: string; entity_type?: string }
 

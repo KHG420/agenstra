@@ -517,6 +517,7 @@ func (r *AgentRuntime) contextCandidate(state *agentcontract.RuntimeState) agent
 	}
 	packet := agentcontract.ContextPacket{OriginPackID: r.OriginPackID, Schema: "agenstra.context.v1", Instruction: state.Instruction, Capabilities: caps, Facts: views, Observations: obs, RoundIndex: state.RoundsUsed, RoundsRemaining: r.MaxModelRounds - state.RoundsUsed, ToolCallsRemaining: r.MaxToolCalls - state.ToolCallsUsed, Skills: skillViews, LoadedSkills: loaded, InspectedCapability: inspected, InspectedFact: state.InspectedFact, InspectionHistory: history, Followups: state.Followups, RuntimeFeatures: features, ContextOmissions: omissions, Memories: append([]agentcontract.MemoryView{}, r.Memories...)}
 	packet.LastCallReason = lastCallReason
+	packet.Conversation = state.Conversation.View()
 	if r.MaxContextCapabilities > 0 {
 		packet.CapabilityCatalogTotal = catalogTotal
 		packet.CapabilitySearchQuery = state.CapabilitySearchQuery

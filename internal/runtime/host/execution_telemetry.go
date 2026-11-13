@@ -18,11 +18,15 @@ func (h *AgentHost) recordExecution(state *agentcontract.RuntimeState, event age
 		stage = "model_decision"
 	case "memory_requested":
 		stage = "memory_extraction"
+	case "conversation_loading":
+		stage = "conversation_loading"
+	case "conversation_compaction_requested":
+		stage = "conversation_compaction"
 	case "model_retry_wait":
 		stage = "retry_wait"
 	case "call_started", "operation_poll_started":
 		stage = "tool_execution"
-	case "run_resumed", "model_decided", "memory_decided", "call_finished", "parallel_finished":
+	case "run_resumed", "model_decided", "memory_decided", "conversation_compacted", "call_finished", "parallel_finished":
 		stage = "planning"
 	}
 	if state.Status != "running" {
@@ -30,6 +34,9 @@ func (h *AgentHost) recordExecution(state *agentcontract.RuntimeState, event age
 	}
 	if kind == "model_retry_started" && event["purpose"] == "memory_extraction" {
 		stage = "memory_extraction"
+	}
+	if kind == "model_retry_started" && event["purpose"] == "conversation_compaction" {
+		stage = "conversation_compaction"
 	}
 	if stage == "" {
 		return

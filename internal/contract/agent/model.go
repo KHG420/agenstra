@@ -277,6 +277,9 @@ func ValidModelURL(value string) bool {
 // ProfileID resolves a purpose selection. Review falls back to decision; other
 // empty selections fall back to the default profile.
 func (c ModelConfiguration) ProfileID(purpose string) string {
+	if purpose == "conversation_compaction" {
+		return c.ProfileID("decision")
+	}
 	if purpose == "completion_review" {
 		if c.CompletionReviewProfile != "" {
 			return c.CompletionReviewProfile

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -171,12 +172,14 @@ func (w *WebIntegration) SubmitMessageWithAttachments(ctx context.Context, owner
 		if !errors.Is(existing, sql.ErrNoRows) {
 			return existing
 		}
-		var count int
-		if e := tx.QueryRow("SELECT count(*) FROM web_messages WHERE conversation=$1", conversation).Scan(&count); e != nil {
-			return e
-		}
-		if count >= durablehost.NormalizedRunSettings(w.Host.Settings).MaxConversationMessages {
-			return agentcontract.NewHostError("conversation_full")
+		if !w.Config.ConversationContext {
+			var count int
+			if e := tx.QueryRow("SELECT count(*) FROM web_messages WHERE conversation=$1", conversation).Scan(&count); e != nil {
+				return e
+			}
+			if count >= durablehost.NormalizedRunSettings(w.Host.Settings).MaxConversationMessages {
+				return agentcontract.NewHostError("conversation_full")
+			}
 		}
 		files, err := w.messageAttachments(tx, owner, conversation, attachments)
 		if err != nil {
@@ -206,6 +209,9 @@ func (w *WebIntegration) conversationInstruction(owner string, messages []agentc
 }
 
 func (w *WebIntegration) conversationInstructionSelection(owner string, messages []agentcontract.ChatMessage, m agentcontract.ChatMessage) (string, *agentcontract.ConversationContextSelection, error) {
+	if w.Config.ConversationContext {
+		return "Current user request:\n" + m.Text + attachmentReferences(m.Attachments), nil, nil
+	}
 	for i, old := range messages {
 		if old.ID == m.ID {
 			messages = messages[:i]
@@ -279,7 +285,7 @@ func (w *WebIntegration) advanceConversation(ctx context.Context, owner, id stri
 	if e := webLoad(w.Store.store.DB, "web_conversations", id, owner, &c); e != nil {
 		return e
 	}
-	messages, e := w.Store.messages(w.Store.store.DB, owner, id)
+	messages, e := messageRows(w.Store.store.DB, "SELECT sequence,payload FROM web_messages WHERE owner=$1 AND conversation=$2 AND payload->>'status' IN ('active','creating','cancelling') ORDER BY sequence LIMIT 1", owner, id)
 	if e != nil {
 		return e
 	}
@@ -327,6 +333,7 @@ func (w *WebIntegration) advanceConversation(ctx context.Context, owner, id stri
 		}
 		m.Status = status
 		if runtime, ok := run.State["runtime"].(map[string]any); ok {
+			m.InputHistory = chatInputHistory(run)
 			m.AnswerMarkdown, _ = runtime["answer_markdown"].(string)
 			m.ErrorCode, _ = runtime["error_code"].(string)
 			if runtime["result_refs"] != nil {
@@ -365,22 +372,39 @@ func (w *WebIntegration) advanceConversation(ctx context.Context, owner, id stri
 	var next agentcontract.ChatMessage
 	selected := false
 	e = w.Store.store.Transaction(func(tx *sql.Tx) error {
-		current, e := w.Store.messages(tx, owner, id)
+		current, e := messageRows(tx, "SELECT sequence,payload FROM web_messages WHERE owner=$1 AND conversation=$2 AND payload->>'status' IN ('active','creating','cancelling') ORDER BY sequence LIMIT 1", owner, id)
 		if e != nil {
 			return e
 		}
-		for _, m := range current {
-			if m.Status == "active" || m.Status == "creating" || m.Status == "cancelling" {
-				return nil
-			}
+		if len(current) > 0 {
+			return nil
 		}
-		for _, m := range current {
+		queued, e := messageRows(tx, "SELECT sequence,payload FROM web_messages WHERE owner=$1 AND conversation=$2 AND payload->>'status'='queued' ORDER BY sequence LIMIT 1", owner, id)
+		if e != nil {
+			return e
+		}
+		for _, m := range queued {
 			if m.Status == "queued" {
 				next = m
 				next.Status = "creating"
-				next.Instruction, next.ContextSelection, e = w.conversationInstructionSelection(owner, current, m)
+				history := []agentcontract.ChatMessage{}
+				if !w.Config.ConversationContext {
+					history, e = messageRows(tx, "SELECT sequence,payload FROM web_messages WHERE owner=$1 AND conversation=$2 AND sequence<$3 ORDER BY sequence DESC LIMIT $4", owner, id, m.Sequence, durablehost.NormalizedRunSettings(w.Host.Settings).MaxConversationHistoryMessages)
+					if e != nil {
+						return e
+					}
+					slices.Reverse(history)
+				}
+				next.Instruction, next.ContextSelection, e = w.conversationInstructionSelection(owner, history, m)
 				if e != nil {
 					return e
+				}
+				if next.ContextSelection != nil {
+					var total int
+					if e = tx.QueryRow("SELECT count(*) FROM web_messages WHERE owner=$1 AND conversation=$2 AND sequence<$3", owner, id, m.Sequence).Scan(&total); e != nil {
+						return e
+					}
+					next.ContextSelection.OmittedMessages = total - next.ContextSelection.IncludedMessages
 				}
 				selected = true
 				return webSave(tx, "web_messages", next.ID, next)
@@ -476,23 +500,48 @@ func chatInputHistory(run agentcontract.StoredRun) []agentcontract.ChatInput {
 
 // Conversation reads framework-owned history after checking current scope and ownership.
 func (w *WebIntegration) Conversation(ctx context.Context, owner, id string) (agentcontract.ChatConversation, []agentcontract.ChatMessage, error) {
+	c, messages, _, err := w.ConversationMessages(ctx, owner, id, 0, 0)
+	return c, messages, err
+}
+
+// ConversationMessages returns a bounded newest-first page in chronological
+// display order. nextBefore is zero at the beginning of the saved transcript.
+// A zero limit uses 50 with durable context and the legacy read for old hosts.
+func (w *WebIntegration) ConversationMessages(ctx context.Context, owner, id string, before int64, limit int) (agentcontract.ChatConversation, []agentcontract.ChatMessage, int64, error) {
 	var c agentcontract.ChatConversation
+	if before < 0 || limit < 0 || limit > 100 {
+		return c, nil, 0, agentcontract.NewHostError("conversation_range_invalid")
+	}
+	if limit == 0 && (w.Config.ConversationContext || before > 0) {
+		limit = 50
+	}
 	if e := webLoad(w.Store.store.DB, "web_conversations", id, owner, &c); e != nil {
-		return c, nil, e
+		return c, nil, 0, e
 	}
 	pack, e := w.integrationPack(c.IntegrationID)
 	if e != nil {
-		return c, nil, e
+		return c, nil, 0, e
 	}
 	if _, e = w.Host.Policy(ctx, owner, pack, false); e != nil {
-		return c, nil, e
+		return c, nil, 0, e
 	}
 	if e = w.advanceConversation(ctx, owner, id); e != nil {
-		return c, nil, e
+		return c, nil, 0, e
 	}
-	messages, e := w.Store.messages(w.Store.store.DB, owner, id)
+	var messages []agentcontract.ChatMessage
+	nextBefore := int64(0)
+	if limit == 0 {
+		messages, e = w.Store.messages(w.Store.store.DB, owner, id)
+	} else {
+		messages, e = messageRows(w.Store.store.DB, "SELECT sequence,payload FROM web_messages WHERE owner=$1 AND conversation=$2 AND (sequence<$3 OR $3=0) ORDER BY sequence DESC LIMIT $4", owner, id, before, limit+1)
+		if len(messages) > limit {
+			messages = messages[:limit]
+			nextBefore = messages[len(messages)-1].Sequence
+		}
+		slices.Reverse(messages)
+	}
 	if e != nil {
-		return c, nil, e
+		return c, nil, 0, e
 	}
 	for i := range messages {
 		messages[i].Instruction = ""
@@ -509,11 +558,11 @@ func (w *WebIntegration) Conversation(ctx context.Context, owner, id string) (ag
 			continue
 		}
 		if e != nil {
-			return c, nil, e
+			return c, nil, 0, e
 		}
 		if run.PackID != pack {
 			if _, e = w.Host.Policy(ctx, owner, run.PackID, false); e != nil {
-				return c, nil, e
+				return c, nil, 0, e
 			}
 		}
 		messages[i].InputHistory = chatInputHistory(run)
@@ -521,7 +570,7 @@ func (w *WebIntegration) Conversation(ctx context.Context, owner, id string) (ag
 			messages[i].Run = runView(run, w.Host)
 		}
 	}
-	return c, messages, nil
+	return c, messages, nextBefore, nil
 }
 
 // CancelMessage requests local cancellation while retaining any external receipts.

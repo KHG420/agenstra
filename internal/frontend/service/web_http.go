@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -259,7 +260,19 @@ func (s *HTTPServer) chatHTTP(w http.ResponseWriter, r *http.Request, owner stri
 		return
 	}
 	if len(parts) == 2 && parts[0] == "conversations" && r.Method == "GET" {
-		c, m, e := s.Web.Conversation(r.Context(), owner, parts[1])
+		before, limit := int64(0), 0
+		var e error
+		if value := r.URL.Query().Get("before_sequence"); value != "" {
+			before, e = strconv.ParseInt(value, 10, 64)
+		}
+		if value := r.URL.Query().Get("limit"); value != "" && e == nil {
+			limit, e = strconv.Atoi(value)
+		}
+		if e != nil {
+			webError(w, agentcontract.NewHostError("conversation_range_invalid"))
+			return
+		}
+		c, m, next, e := s.Web.ConversationMessages(r.Context(), owner, parts[1], before, limit)
 		if e != nil {
 			webError(w, e)
 			return
@@ -279,7 +292,7 @@ func (s *HTTPServer) chatHTTP(w http.ResponseWriter, r *http.Request, owner stri
 				}
 			}
 		}
-		writeJSON(w, 200, agentcontract.JSON{"conversation": c, "messages": m})
+		writeJSON(w, 200, agentcontract.JSON{"conversation": c, "messages": m, "next_before_sequence": next})
 		return
 	}
 	if len(parts) == 3 && parts[0] == "conversations" && parts[2] == "messages" && r.Method == "POST" {

@@ -93,6 +93,7 @@ type Observation struct {
 
 // ContextPacket is the bounded decision input; previews do not replace complete facts.
 type ContextPacket struct {
+	Conversation            *ConversationView `json:"conversation,omitempty"`
 	MaxModelInputTokens     int64             `json:"max_model_input_tokens,omitempty"`
 	OriginPackID            string            `json:"origin_pack_id,omitempty"`
 	Schema                  string            `json:"schema"`
@@ -382,6 +383,7 @@ type InvocationReceipt struct {
 // RuntimeState is the complete checkpoint for a single run.
 // A driver owns its mutable state; model input is a separate bounded projection.
 type RuntimeState struct {
+	Conversation            *ConversationContext  `json:"conversation,omitempty"`
 	InvocationReceipts      []InvocationReceipt   `json:"invocation_receipts,omitempty"`
 	Execution               *ExecutionCheckpoint  `json:"execution,omitempty"`
 	ContextPolicy           *ContextPolicy        `json:"context_policy,omitempty"`

@@ -481,6 +481,11 @@ export class AgenstraClient {
     return this.rememberConversation(await this.request("/chat/v1/conversations", { method: "POST", body: { integration_id: this.options.integration } }));
   }
   async snapshot() { const conversation = await this.getConversation(); return this.request("/chat/v1/conversations/" + conversation.id); }
+  async getConversationMessages({ conversationId, beforeSequence = 0, limit = 50, signal } = {}) {
+    const id = conversationId || (await this.getConversation()).id;
+    const query = new URLSearchParams({ before_sequence: String(beforeSequence), limit: String(limit) });
+    return this.request("/chat/v1/conversations/" + encodeURIComponent(id) + "?" + query, { signal });
+  }
   async uploadAttachment(file, { clientId = this.id(), conversationId, signal } = {}) {
     const conversation = conversationId || (await this.getConversation()).id;
     const body = new FormData();

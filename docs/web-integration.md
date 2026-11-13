@@ -245,7 +245,7 @@ await client.send("查询待处理订单", { clientId: client.id() });
 
 `listConversations()` 返回当前 integration 下该用户最近的最多 100 个会话。`selectConversation(id)` 验证会话归属和 integration，立即发布所选会话的历史及状态。切换失败保留此前选择；旧会话的迟到轮询不会覆盖新会话。选择和创建按调用顺序串行化。未显式选择时，`getConversation()` 恢复已保存的会话 ID；没有可用会话时自动创建。切换不取消、不迁移旧任务的浏览器绑定。浏览器连接受阻时，仍可读取、选择和创建会话、查看任务状态以及调用 `cancelMessage`；这些操作成功不代表浏览器已连接。`watchConversation` 同时尝试浏览器连接和聊天轮询，连接错误不阻止历史显示。启用控制桥的 `send` 和 `run` 必须先完成浏览器连接。
 
-`watchConversation` 向新订阅者读取初始完整历史；之后已结束且未变化的会话使用认证后的 `If-None-Match` 条件读取，HTTP 304 不重复下载或触发会话回调。验证值只保存在当前 client 内，不写入浏览器存储；切换会话和新增订阅会重新读取。服务端仍逐次核对身份、owner及当前权限，继续使用 `Cache-Control: no-store`；正在执行、排队或等待输入的消息保持完整状态更新。弱ETag忽略已结束任务的遥测读取时刻和剩余秒数，其他结果、回执、运行修订及配置改变仍使其失效；普通GET和 `snapshot()` 仍返回原有完整JSON与当前遥测数值。宿主不需要增加状态、裁剪历史或管理验证值。
+`watchConversation` 向新订阅者读取当前历史页。之后已结束且未变化的会话使用认证后的 `If-None-Match` 条件读取，HTTP 304 保留已显示内容。验证值只保存在当前 client 内，切换会话和新增订阅会重新读取。服务端逐次核对身份、owner 及当前权限，继续使用 `Cache-Control: no-store`。弱 ETag 忽略已结束任务的遥测读取时刻和剩余秒数，其他结果、回执、运行修订及配置改变仍使其失效。
 
 handler 在连接前注册，返回符合 output Schema 的结果；实际业务写入须在后端再次校验权限，可用 `commandId` 作为业务幂等键。`getPageObservation` 返回当前页面、筛选、选中项等数据，排除 cookie、token 和无关敏感数据；手动改变页面后调用 `updatePageObservation`。这些接口只能更新页面观察数据，不影响聊天历史、运行检查点或 Agent 上下文选择。
 
@@ -271,11 +271,13 @@ SDK 的 `id()` 在没有 `crypto.randomUUID` 的 HTTP 页面使用 `crypto.getRa
 
 宿主的聊天请求仅含用户消息、稳定 client ID 和必要的浏览器绑定，不接受 `context`、`context_id`、`history` 或替代模型输入。没有向宿主开放 Agent 上下文设置或加载接口。
 
-框架按 owner 和 conversation ID 读取持久化消息。消息轮到执行时，取此前最近六条消息中已经结束的任务，将用户请求、回答、任务状态和运行检查点内的补充输入按长度限制组装为本次输入。未执行的排队消息、其他会话的记录不会进入本次历史。输入在创建 run 前保存到该消息，后续创建重试和服务重启复用同一份输入。
+在 `web_integration` 设置 `"conversation_context": true` 启用全量原文与语义压缩。框架按 owner、conversation 和当前消息序号读取此前全部原文，原文能容纳时完整保留。接近字符或模型输入预算时，决策 profile 将较早片段整理为摘要，来源校验通过后保存到当前 run 的 `runtime.conversation`。其中 `requirements` 保存贯穿会话的用户原话和显式修订关系，`recent` 保存近期原文，`cursor` 记录导入位置，`summary_through` 和 `compactions` 记录摘要覆盖位置与版本。旧要求自动沿用，用户后续纠正通过 `supersedes` 替换。历史读取固定在当前输入之前，模型可调用 `chat.history.search/read` 核对原文。该开关关闭时沿用原有可配置窗口，默认六条消息。
 
 每个 run 的完整运行状态、事实、观察、待审批调用、补充输入和进度由现有运行库存储。未结束的任务从自己的检查点恢复，运行时负责组装模型的 ContextPacket。下一条消息创建独立 run，旧业务事实不作为新的可执行 Fact 引用；需要当前业务状态时重新查询能力。
 
-因此，“加载某个会话的某个上下文”通过框架内部的消息/run 关联定位：活跃任务使用自己的运行检查点，新任务使用执行开始时冻结的会话输入。宿主只选择会话。本版本不提供任意历史检查点选择或会话分支功能，也没有新增上下文数据库表。消息展示记录与模型实际输入分别处理：完整展示历史仍保留，模型输入采用有限窗口；当前没有跨全历史的自动语义摘要。
+活跃任务使用自己的运行检查点，新消息从前一检查点继续按序导入原文。摘要生成沿用 Host 的租约、心跳、取消、执行期限和 token 预算。收到的模型用量以 `conversation_compaction` 计入同一 run，模型包装器应转发 `ConversationCompactor` 并接入宿主的额度核算。连续三次无效摘要会结束当前任务并保留原文及上一份有效摘要。相关结构、边界与恢复流程见[上下文管理](context-management.md)。
+
+启用后，历史消息持续保存在框架存储中，按需分页展示。默认 snapshot 返回最近 50 条，按时间正序排列，每条增加 `sequence`。响应的 `next_before_sequence` 为 0 时表示已到最早记录。`GET /chat/v1/conversations/{id}?before_sequence=123&limit=50` 可继续读更早消息，`limit` 最大 100。JS 宿主使用 `client.getConversationMessages({beforeSequence, limit, conversationId, signal})`，将较早页合并到当前会话，保留后续轮询返回的最新状态。可选聊天组件提供“加载更早消息”。同一会话跨网页和其他通道共用这份原文及检查点。
 
 不提供模型 token 流式输出；任务状态通过 SDK 轮询事件更新，原有 run events 仍可用于任务事件展示。
 

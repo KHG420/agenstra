@@ -7,14 +7,15 @@ import (
 
 // WebIntegrationConfig enables optional chat and browser integration with trusted session settings.
 type WebIntegrationConfig struct {
-	Attachments       *AttachmentSettings         `json:"attachments,omitempty"`
-	DatabasePath      string                      `json:"database_path"`
-	Chat              bool                        `json:"chat"`
-	BrowserBridge     bool                        `json:"browser_bridge"`
-	SessionKeyEnv     string                      `json:"session_key_env"`
-	SessionTTLSeconds int                         `json:"session_ttl_seconds,omitempty"`
-	AllowedOrigins    []string                    `json:"allowed_origins,omitempty"`
-	Integrations      map[string]WebProfileConfig `json:"integrations"`
+	ConversationContext bool                        `json:"conversation_context,omitempty"`
+	Attachments         *AttachmentSettings         `json:"attachments,omitempty"`
+	DatabasePath        string                      `json:"database_path"`
+	Chat                bool                        `json:"chat"`
+	BrowserBridge       bool                        `json:"browser_bridge"`
+	SessionKeyEnv       string                      `json:"session_key_env"`
+	SessionTTLSeconds   int                         `json:"session_ttl_seconds,omitempty"`
+	AllowedOrigins      []string                    `json:"allowed_origins,omitempty"`
+	Integrations        map[string]WebProfileConfig `json:"integrations"`
 }
 
 // WebProfileConfig binds an integration alias to a pack and optional frontend profile.
@@ -118,6 +119,7 @@ type ChatInput struct {
 
 // ChatMessage retains queued user text and the framework's persisted result projection.
 type ChatMessage struct {
+	Sequence         int64                         `json:"sequence,omitempty"`
 	Attachments      []ChatAttachment              `json:"attachments,omitempty"`
 	ContextSelection *ConversationContextSelection `json:"context_selection,omitempty"`
 	Sources          []RunSource                   `json:"sources,omitempty"`

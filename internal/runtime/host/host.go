@@ -23,9 +23,12 @@ import (
 // AgentHost owns run scheduling, authorization, leases and durable checkpoints.
 // It must not be copied after use; its store and model are supplied by the host app.
 type AgentHost struct {
-	Store           *runstore.SQLiteStore
-	ProviderFactory agentcontract.ProviderFactory
-	Model           agentcontract.DecisionModel
+	// ConversationHistory supplies bounded source ranges before the normal decision loop.
+	// Configure it before serving. The Host owns compaction checkpoints and model usage.
+	ConversationHistory agentcontract.ConversationHistory
+	Store               *runstore.SQLiteStore
+	ProviderFactory     agentcontract.ProviderFactory
+	Model               agentcontract.DecisionModel
 	// RunModelWrapper optionally decorates the frozen model with trusted run
 	// metadata. Configure it before serving. Returned models must preserve the
 	// underlying optional measurement, memory and capacity interfaces they use.
@@ -1066,6 +1069,23 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 	if e != nil {
 		return run, e
 	}
+	runtime.Memories, e = h.runMemories(run)
+	if e != nil {
+		return run, e
+	}
+	remaining := h.runSettings(run).MaxRunSeconds - (h.Now() - run.CreatedAt)
+	if remaining > 0 && h.ConversationHistory != nil {
+		prepareCtx, prepareCancel := context.WithTimeout(ctx, time.Duration(remaining*1e9))
+		run, e = h.prepareConversation(prepareCtx, run, state, runtime)
+		prepareExpired := errors.Is(prepareCtx.Err(), context.DeadlineExceeded)
+		prepareCancel()
+		if prepareExpired && ctx.Err() == nil {
+			return run, agentcontract.NewHostError("run_deadline_exceeded")
+		}
+		if e != nil {
+			return run, e
+		}
+	}
 	state.Status = "running"
 	state.ErrorCode = nil
 	run, e = h.save(run, state, fp, nil, map[string]any{"kind": "run_resumed"})
@@ -1193,6 +1213,11 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 		}
 		remaining := h.runSettings(run).MaxRunSeconds - (h.Now() - run.CreatedAt)
 		stepCtx, cancel := context.WithTimeout(ctx, time.Duration(remaining*1e9))
+		run, e = h.fitConversation(stepCtx, run, state, runtime)
+		if e != nil {
+			cancel()
+			return run, e
+		}
 		stepCtx = h.answers.begin(stepCtx, run)
 		stepCtx = agentcontract.WithModelRequestObserver(stepCtx, func(progress agentcontract.ModelRequestProgress) error {
 			var err error

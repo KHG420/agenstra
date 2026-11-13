@@ -51,6 +51,8 @@ func newWebStore(s *runstore.Store) (*WebStore, error) {
  CREATE INDEX IF NOT EXISTS web_conversations_owner ON web_conversations(owner);
  CREATE TABLE IF NOT EXISTS web_messages(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,owner TEXT NOT NULL,conversation TEXT NOT NULL,client_id TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(conversation,client_id));
  CREATE INDEX IF NOT EXISTS web_messages_conversation ON web_messages(conversation,sequence);
+ CREATE INDEX IF NOT EXISTS web_messages_status ON web_messages(conversation,(payload->>'status'),sequence);
+ CREATE INDEX IF NOT EXISTS web_messages_run ON web_messages(owner,(payload->>'run_id'));
  CREATE TABLE IF NOT EXISTS web_attachments(id TEXT PRIMARY KEY,owner TEXT NOT NULL,conversation TEXT NOT NULL,client_id TEXT NOT NULL,status TEXT NOT NULL,created_at REAL NOT NULL,bound INTEGER NOT NULL DEFAULT 0,reserved_bytes BIGINT NOT NULL,digest TEXT NOT NULL,payload TEXT NOT NULL,document TEXT NOT NULL,data BLOB,UNIQUE(conversation,client_id));
  CREATE INDEX IF NOT EXISTS web_attachments_owner ON web_attachments(owner,conversation);
  CREATE TABLE IF NOT EXISTS web_commands(sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,owner TEXT NOT NULL,session TEXT NOT NULL,run TEXT NOT NULL,payload TEXT NOT NULL);
@@ -153,7 +155,13 @@ func (w *WebStore) commands(tx *sql.Tx, owner, session string) (output []agentco
 func (w *WebStore) messages(q interface {
 	Query(string, ...any) (*sql.Rows, error)
 }, owner, conversation string) (output []agentcontract.ChatMessage, resultErr error) {
-	rows, e := q.Query("SELECT payload FROM web_messages WHERE owner=$1 AND conversation=$2 ORDER BY sequence", owner, conversation)
+	return messageRows(q, "SELECT sequence,payload FROM web_messages WHERE owner=$1 AND conversation=$2 ORDER BY sequence", owner, conversation)
+}
+
+func messageRows(q interface {
+	Query(string, ...any) (*sql.Rows, error)
+}, query string, args ...any) (output []agentcontract.ChatMessage, resultErr error) {
+	rows, e := q.Query(query, args...)
 	if e != nil {
 		return nil, e
 	}
@@ -162,12 +170,14 @@ func (w *WebStore) messages(q interface {
 	for rows.Next() {
 		var raw string
 		var m agentcontract.ChatMessage
-		if e = rows.Scan(&raw); e != nil {
+		var sequence int64
+		if e = rows.Scan(&sequence, &raw); e != nil {
 			return nil, e
 		}
 		if e = agentcontract.DecodeDocument(raw, &m); e != nil {
 			return nil, e
 		}
+		m.Sequence = sequence
 		result = append(result, m)
 	}
 	return result, rows.Err()

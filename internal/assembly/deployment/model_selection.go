@@ -244,6 +244,16 @@ func (s *selectedModels) MeasureMemoryInput(r agentcontract.MemoryExtractionRequ
 	return s.thinkingAdapter(s.memory, "memory_extraction", agentcontract.ContextPacket{}).MeasureMemoryInput(r)
 }
 
+// CompactConversation uses the frozen decision profile for data-only summaries.
+func (s *selectedModels) CompactConversation(ctx context.Context, r agentcontract.ConversationCompactionRequest) (agentcontract.ConversationSummary, agentcontract.ModelCallMetrics, error) {
+	return s.thinkingAdapter(s.decision, "conversation_compaction", agentcontract.ContextPacket{}).CompactConversation(ctx, r)
+}
+
+// MeasureConversationInput measures the same profile and envelope used for compaction.
+func (s *selectedModels) MeasureConversationInput(r agentcontract.ConversationCompactionRequest) (agentcontract.InputMeasurement, error) {
+	return s.thinkingAdapter(s.decision, "conversation_compaction", agentcontract.ContextPacket{}).MeasureConversationInput(r)
+}
+
 // Decide uses the current selected decision profile; durable runs use their pinned selection.
 func (m *ModelManager) Decide(ctx context.Context, p agentcontract.ContextPacket, prompt string) (agentcontract.Decision, error) {
 	s, err := m.selectedModel(m.Snapshot().Config)
@@ -302,6 +312,24 @@ func (m *ModelManager) MeasureMemoryInput(r agentcontract.MemoryExtractionReques
 		return agentcontract.InputMeasurement{}, err
 	}
 	return s.MeasureMemoryInput(r)
+}
+
+// CompactConversation retains usage from the current decision profile.
+func (m *ModelManager) CompactConversation(ctx context.Context, r agentcontract.ConversationCompactionRequest) (agentcontract.ConversationSummary, agentcontract.ModelCallMetrics, error) {
+	s, err := m.selectedModel(m.Snapshot().Config)
+	if err != nil {
+		return agentcontract.ConversationSummary{}, agentcontract.ModelCallMetrics{}, err
+	}
+	return s.CompactConversation(ctx, r)
+}
+
+// MeasureConversationInput measures the current compaction request without dispatch.
+func (m *ModelManager) MeasureConversationInput(r agentcontract.ConversationCompactionRequest) (agentcontract.InputMeasurement, error) {
+	s, err := m.selectedModel(m.Snapshot().Config)
+	if err != nil {
+		return agentcontract.InputMeasurement{}, err
+	}
+	return s.MeasureConversationInput(r)
 }
 
 // Close is a no-op because model adapters have no owned persistent connection.

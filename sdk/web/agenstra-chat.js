@@ -27,6 +27,10 @@ const outcomeLabels = {
     incomplete: "The task is incomplete. Check the action receipts above and avoid resubmitting actions that succeeded."
   }
 };
+const historyLabels = {
+  "zh-CN": { earlier: "加载更早消息", loading: "正在加载…" },
+  en: { earlier: "Load earlier messages", loading: "Loading…" }
+};
 const style = `
 :host{--agenstra-accent:#116b64;--agenstra-text:#18313b;--agenstra-muted:#51636a;--agenstra-surface:#fff;--agenstra-ground:#f4f6f3;--agenstra-line:#d8e0dc;--agenstra-danger:#a5352c;display:block;height:var(--agenstra-height,560px);min-height:320px;color:var(--agenstra-text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;color-scheme:light}
 *{box-sizing:border-box}button,textarea,select,input{font:inherit}button{cursor:pointer}button:disabled{cursor:wait;opacity:.65}button:focus-visible,textarea:focus-visible,select:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid var(--agenstra-accent);outline-offset:3px}::selection{background:var(--agenstra-accent);color:var(--agenstra-surface)}
@@ -136,7 +140,7 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
       this.client.on("error", error => { this.showError(error); })
     ];
   }
-  detach() { this.epoch = (this.epoch || 0) + 1; for (const off of this.off || []) off(); this.off = null; this.signature = null; }
+  detach() { this.epoch = (this.epoch || 0) + 1; for (const off of this.off || []) off(); this.historyAborter?.abort(); this.historyAborter = null; this.historySnapshot = null; this.earlierLoaded = false; this.off = null; this.signature = null; }
   activeInput() { return this.choice.hidden ? this.dateInput.hidden ? this.input : this.dateInput : this.choice; }
   showError(error) {
     if (error?.name === "AbortError") return;
@@ -194,11 +198,43 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
       catch (error) { if (epoch === this.epoch) { this.showError(error); b.disabled = false; } }
     });return b;
   }
-  render(snapshot) {
+  async loadEarlier(button) {
+    const before = this.historySnapshot?.next_before_sequence;
+    if (!before || this.historyAborter) return;
+    const client = this.client, epoch = this.epoch, conversation = this.historySnapshot.conversation;
+    const aborter = new AbortController();
+    this.historyAborter = aborter;
+    button.disabled = true;
+    button.textContent = (historyLabels[this.getAttribute("lang")] || historyLabels["zh-CN"]).loading;
+    const height = this.log.scrollHeight, top = this.log.scrollTop;
+    try {
+      const page = await client.getConversationMessages({ conversationId: conversation.id, beforeSequence: before, signal: aborter.signal });
+      if (epoch !== this.epoch || conversation.id !== this.conversationId || aborter.signal.aborted) return;
+      this.historyAborter = null;
+      this.render(page, { earlier: true });
+      this.log.scrollTop = top + this.log.scrollHeight - height;
+    } catch (error) {
+      if (epoch === this.epoch && conversation.id === this.conversationId) this.showError(error);
+    } finally {
+      if (this.historyAborter === aborter) this.historyAborter = null;
+      button.disabled = false;
+      button.textContent = (historyLabels[this.getAttribute("lang")] || historyLabels["zh-CN"]).earlier;
+    }
+  }
+  render(snapshot, { earlier = false } = {}) {
+    const sameConversation = snapshot.conversation?.id && snapshot.conversation.id === this.historySnapshot?.conversation?.id;
+    if (sameConversation && (earlier || this.earlierLoaded)) {
+      const messages = new Map(this.historySnapshot.messages.map(message => [message.id, message]));
+      for (const message of snapshot.messages) messages.set(message.id, message);
+      snapshot = { ...snapshot, messages: [...messages.values()].sort((a, b) => a.sequence - b.sequence), next_before_sequence: earlier ? snapshot.next_before_sequence : this.historySnapshot.next_before_sequence };
+    }
+    if (!sameConversation) this.earlierLoaded = false;
+    this.earlierLoaded ||= earlier;
+    this.historySnapshot = snapshot;
     // Server telemetry timestamps/deadlines change on every poll. Only its
     // visible tool counter belongs in the render identity; replacing the log
     // for a clock tick invalidates approval buttons and text selections.
-    const signature = JSON.stringify([snapshot.conversation?.id, snapshot.messages?.map(message => {
+    const signature = JSON.stringify([snapshot.conversation?.id, snapshot.next_before_sequence, snapshot.messages?.map(message => {
       if (!message.run) return message;
       const { telemetry, ...run } = message.run;
       return { ...message, run, toolCalls: telemetry?.budget?.tool_calls?.used };
@@ -215,6 +251,13 @@ export class AgenstraChat extends (globalThis.HTMLElement || class {}) {
     const scrollTop = this.log.scrollTop;
     this.log.replaceChildren();
     const t = this.text;const messages = snapshot.messages || [];
+    if (snapshot.next_before_sequence) {
+      const label = historyLabels[this.getAttribute("lang")] || historyLabels["zh-CN"];
+      const earlier = document.createElement("button");
+      earlier.type = "button";earlier.className = "text-button";earlier.textContent = this.historyAborter ? label.loading : label.earlier;earlier.disabled = Boolean(this.historyAborter);
+      earlier.addEventListener("click", () => { void this.loadEarlier(earlier); });
+      this.log.append(earlier);
+    }
     if (!messages.length) {
       const empty = document.createElement("div");empty.className = "empty";
       const h = document.createElement("h3");h.textContent = this.getAttribute("empty-title") ?? t.empty;const p = document.createElement("p");p.textContent = this.getAttribute("empty-hint") ?? t.hint;empty.append(h, p);this.log.append(empty);

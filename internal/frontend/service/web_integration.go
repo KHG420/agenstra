@@ -86,12 +86,13 @@ func compileFrontend(p agentcontract.FrontendProfile) (*compiledFrontend, error)
 }
 
 type webRelease struct {
-	Attachments     bool                          `json:"attachments,omitempty"`
-	IntegrationID   string                        `json:"integration_id"`
-	PackID          string                        `json:"pack_id"`
-	BaseRelease     string                        `json:"base_release"`
-	BaseFingerprint string                        `json:"base_fingerprint"`
-	Profile         agentcontract.FrontendProfile `json:"profile"`
+	Attachments         bool                          `json:"attachments,omitempty"`
+	ConversationContext bool                          `json:"conversation_context,omitempty"`
+	IntegrationID       string                        `json:"integration_id"`
+	PackID              string                        `json:"pack_id"`
+	BaseRelease         string                        `json:"base_release"`
+	BaseFingerprint     string                        `json:"base_fingerprint"`
+	Profile             agentcontract.FrontendProfile `json:"profile"`
 }
 
 // WebIntegration can be attached to a custom Host as well as agenstra-serve.
@@ -116,6 +117,9 @@ type WebIntegration struct {
 // NewWebIntegration validates profiles, opens its store and installs host provider wiring.
 // Close the integration after callers stop; it leaves the host's run store caller-owned.
 func NewWebIntegration(h *durablehost.AgentHost, d *deployassembly.Deployment, c agentcontract.WebIntegrationConfig) (*WebIntegration, error) {
+	if c.ConversationContext && !c.Chat {
+		return nil, errors.New("conversation context requires chat")
+	}
 	if c.Attachments != nil {
 		if !c.Chat {
 			return nil, errors.New("attachments require chat")
@@ -222,6 +226,7 @@ func NewWebIntegration(h *durablehost.AgentHost, d *deployassembly.Deployment, c
 	h.PolicyResolver = w.policy
 	h.ReleaseResolver = w.release
 	h.ReleaseProviderFactory = w.releaseProvider
+	h.ConversationHistory = w
 	return w, nil
 }
 
@@ -258,7 +263,7 @@ func (w *WebIntegration) policy(ctx context.Context, owner, pack string) (agentc
 		if err != nil {
 			return policy, err
 		}
-		return w.attachmentPolicy(policy, pack), nil
+		return w.historyPolicy(w.attachmentPolicy(policy, pack), pack), nil
 	}
 	policyPack := conf.PackID
 	if policyPack == "" {
@@ -321,13 +326,14 @@ func (w *WebIntegration) policy(ctx context.Context, owner, pack string) (agentc
 	}
 	grants["ui.get_context"], grants["ui.command_status"] = true, true
 	p.GrantedCapabilities = grants
-	return w.attachmentPolicy(p, pack), nil
+	return w.historyPolicy(w.attachmentPolicy(p, pack), pack), nil
 }
 
 func (w *WebIntegration) release(ctx context.Context, owner, pack string) (string, error) {
 	p := w.profiles[pack]
 	files := w.attachmentPack(pack)
-	if p == nil && !files {
+	history := w.conversationPack(pack)
+	if p == nil && !files && !history {
 		if w.baseRelease != nil {
 			return w.baseRelease(ctx, owner, pack)
 		}
@@ -368,7 +374,7 @@ func (w *WebIntegration) release(ctx context.Context, owner, pack string) (strin
 	if p != nil {
 		profile = p.profile
 	}
-	r := webRelease{IntegrationID: pack, PackID: conf.PackID, BaseRelease: base, BaseFingerprint: baseFingerprint, Profile: profile, Attachments: files}
+	r := webRelease{IntegrationID: pack, PackID: conf.PackID, BaseRelease: base, BaseFingerprint: baseFingerprint, Profile: profile, Attachments: files, ConversationContext: history}
 	id := "web:" + agentcontract.WebHash(r)
 	raw, e := agentcontract.EncodeDocument(r)
 	if e != nil {
@@ -435,6 +441,9 @@ func (w *WebIntegration) releaseProvider(ctx context.Context, owner, pack, relea
 	}
 	if e == nil && r.Attachments {
 		wrapped, e = w.wrapAttachments(wrapped, owner)
+	}
+	if e == nil && r.ConversationContext {
+		wrapped, e = w.wrapHistory(wrapped, owner)
 	}
 	if e != nil && base != nil {
 		e = errors.Join(e, base.Close())
