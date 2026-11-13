@@ -18,9 +18,13 @@ func readModelStream(reader io.Reader, publish func(string, string), allowedOutp
 	bounded := &io.LimitedReader{R: reader, N: maximum + 1}
 	scanner := bufio.NewScanner(bounded)
 	scanner.Buffer(make([]byte, 4096), 1<<20)
-	var content, reasoning, refusal, model, finish string
+	var content, reasoning, refusal strings.Builder
+	var model, finish string
 	var usage json.RawMessage
-	tools := map[int]*decisionOutputToolCall{}
+	// Each delta is appended once. Rebuilding strings on every token makes a
+	// bounded long response allocate quadratically in its fragmentation count.
+	type streamedTool struct{ kind, name, arguments strings.Builder }
+	tools := map[int]*streamedTool{}
 	var data []string
 	done, sawChoice := false, false
 	var last time.Time
@@ -31,18 +35,18 @@ func readModelStream(reader io.Reader, publish func(string, string), allowedOutp
 		}
 		last = time.Now()
 		text := ""
-		if refusal == "" && finish != "length" && finish != "content_filter" {
-			if len(tools) == 1 && tools[0] != nil && allowedOutput[tools[0].Function.Name] && strings.TrimSpace(content) == "" {
-				switch tools[0].Function.Name {
+		if refusal.Len() == 0 && finish != "length" && finish != "content_filter" {
+			if len(tools) == 1 && tools[0] != nil && allowedOutput[tools[0].name.String()] && strings.TrimSpace(content.String()) == "" {
+				switch tools[0].name.String() {
 				case "submit_final", "final":
-					text = answerPrefix(tools[0].Function.Arguments, false)
+					text = answerPrefix(tools[0].arguments.String(), false)
 				case "submit_decision":
-					text = answerPrefix(tools[0].Function.Arguments, true)
+					text = answerPrefix(tools[0].arguments.String(), true)
 				}
 			} else if len(tools) == 0 && plainConversation {
-				text = nativeConversationText(content)
+				text = nativeConversationText(content.String())
 			} else if len(tools) == 0 && len(allowedOutput) == 0 {
-				text = answerPrefix(content, true)
+				text = answerPrefix(content.String(), true)
 			}
 		}
 		if len(text) > 120000 {
@@ -102,9 +106,9 @@ func readModelStream(reader io.Reader, publish func(string, string), allowedOutp
 				return invalid()
 			}
 			sawChoice = true
-			content += choice.Delta.Content
-			reasoning += choice.Delta.Reasoning
-			refusal += choice.Delta.Refusal
+			content.WriteString(choice.Delta.Content)
+			reasoning.WriteString(choice.Delta.Reasoning)
+			refusal.WriteString(choice.Delta.Refusal)
 			finish = choice.Finish
 			for _, delta := range choice.Delta.Tools {
 				if delta.Index == nil || *delta.Index < 0 || *delta.Index > 31 {
@@ -112,12 +116,12 @@ func readModelStream(reader io.Reader, publish func(string, string), allowedOutp
 				}
 				tool := tools[*delta.Index]
 				if tool == nil {
-					tool = &decisionOutputToolCall{}
+					tool = &streamedTool{}
 					tools[*delta.Index] = tool
 				}
-				tool.Type += delta.Type
-				tool.Function.Name += delta.Function.Name
-				tool.Function.Arguments += delta.Function.Arguments
+				tool.kind.WriteString(delta.Type)
+				tool.name.WriteString(delta.Function.Name)
+				tool.arguments.WriteString(delta.Function.Arguments)
 			}
 		}
 		preview(false)
@@ -156,8 +160,10 @@ func readModelStream(reader io.Reader, publish func(string, string), allowedOutp
 		if tools[i] == nil {
 			return nil, invalid()
 		}
-		calls[i] = tools[i]
+		calls[i] = &decisionOutputToolCall{Type: tools[i].kind.String()}
+		calls[i].Function.Name = tools[i].name.String()
+		calls[i].Function.Arguments = tools[i].arguments.String()
 	}
 	preview(true)
-	return json.Marshal(agentcontract.JSON{"model": model, "usage": usage, "choices": []any{agentcontract.JSON{"finish_reason": finish, "message": agentcontract.JSON{"content": content, "reasoning_content": reasoning, "refusal": refusal, "tool_calls": calls}}}})
+	return json.Marshal(agentcontract.JSON{"model": model, "usage": usage, "choices": []any{agentcontract.JSON{"finish_reason": finish, "message": agentcontract.JSON{"content": content.String(), "reasoning_content": reasoning.String(), "refusal": refusal.String(), "tool_calls": calls}}}})
 }

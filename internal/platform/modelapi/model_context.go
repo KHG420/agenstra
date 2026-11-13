@@ -61,12 +61,23 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 	messages := []any{agentcontract.JSON{"role": "system", "content": prompt}, agentcontract.JSON{"role": "user", "content": string(input)}}
 	var packet agentcontract.ContextPacket
 	decisionPacket := false
+	var skillReads []string
 	if err := jsonvalue.DecodeStrict(input, &packet); err == nil && packet.Schema == "agenstra.context.v1" {
 		decisionPacket = true
+		// Capture read choices before moving retained contents into their result
+		// message. Budget-omitted skills are absent from LoadedSkills and remain
+		// selectable; complete retained contents need no second model round.
+		for _, skill := range packet.Skills {
+			name, _ := skill["name"].(string)
+			if name != "" && packet.LoadedSkills[name] == "" && !slices.Contains(skillReads, name) {
+				skillReads = append(skillReads, name)
+			}
+		}
+		slices.Sort(skillReads)
 		if m.DecisionOutputMode != "output_tools" && m.DecisionOutputMode != "native_tools" {
 			if packet.CompletionReview != nil {
 				prompt = jsonCompletionReviewPrompt(prompt)
-			} else if len(packet.Skills) == 0 {
+			} else if len(skillReads) == 0 {
 				prompt = jsonDecisionPromptWithoutSkills(prompt)
 			}
 			messages[0] = agentcontract.JSON{"role": "system", "content": prompt + "\n\n" + jsonDecisionDisplayGuidance}
@@ -303,7 +314,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 	}
 	if (m.DecisionOutputMode == "output_tools" || m.DecisionOutputMode == "json_schema" || m.DecisionOutputMode == "native_tools") && decisionPacket {
 		tools := decisionOutputTools(packet.CompletionReview != nil)
-		if packet.CompletionReview == nil && len(packet.Skills) == 0 {
+		if packet.CompletionReview == nil && len(skillReads) == 0 {
 			prompt = jsonDecisionPromptWithoutSkills(prompt)
 		}
 		toolPrompt := decisionOutputToolPrompt(prompt, packet.CompletionReview != nil)
@@ -311,12 +322,17 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		// Skill availability is complete even with deferred capabilities. Search
 		// availability comes from the runtime, not the visible catalog length.
 		unavailable := map[string]bool{
-			"submit_read_skill":          len(packet.Skills) == 0,
+			"submit_read_skill":          len(skillReads) == 0,
 			"submit_search_capabilities": !slices.Contains(packet.RuntimeFeatures, "capability_search"),
 		}
 		retainedTools := tools[:0]
 		for _, tool := range tools {
-			name := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)["name"].(string)
+			function := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)
+			name := function["name"].(string)
+			if name == "submit_read_skill" && len(skillReads) > 0 {
+				parameters := function["parameters"].(agentcontract.JSON)
+				parameters["properties"].(agentcontract.JSON)["name"].(agentcontract.JSON)["enum"] = skillReads
+			}
 			// Review can reject publication, but cannot propose calls or user input.
 			// Offer only the decision kind that the runtime accepts in this stage.
 			if packet.CompletionReview != nil && name != "submit_final" && name != "submit_approve_completion" {
@@ -416,10 +432,10 @@ func jsonDecisionPromptWithoutSkills(prompt string) string {
 	// the framework's unavailable skill example, preserving host usage rules.
 	original := prompt
 	prompt = strings.ReplaceAll(prompt, "tool_batch, read_skill, inspect_capability", "tool_batch, inspect_capability")
-	prompt = strings.ReplaceAll(prompt, "Read the relevant skill before using an unfamiliar capability.", "No skills are available in this context; use the capability catalog and inspect_capability for usage contracts.")
+	prompt = strings.ReplaceAll(prompt, "Read the relevant skill before using an unfamiliar capability.", "No unread skill content is available in this context; reuse retained skill results and use the capability catalog and inspect_capability for usage contracts.")
 	prompt = strings.ReplaceAll(prompt, `Skill: {"schema":"agenstra.decision.v1","kind":"read_skill","name":"example-analysis"}. `, "")
 	if prompt == original {
 		return prompt
 	}
-	return prompt + "\nCurrent decision availability: read_skill is unavailable. The skills list is complete, including when capabilities are deferred. Capability names identify callable operations, never skills. To call a capability, use tool_batch with its declared arguments; inspect_capability reads its schema. This does not change capability prerequisites or authorization."
+	return prompt + "\nCurrent decision availability: read_skill is unavailable. The skills list is complete, including when capabilities are deferred; already retained contents are completed read results. Skills omitted from context can be loaded when their contents are absent. Capability names identify callable operations, never skills. To call a capability, use tool_batch with its declared arguments; inspect_capability reads its schema. This does not change capability prerequisites or authorization."
 }
