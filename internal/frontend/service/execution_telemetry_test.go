@@ -29,4 +29,7 @@ func TestRuntimeInfoAndFrozenConversationSelection(t *testing.T) {
 	if err != nil || selection.IncludedMessages != 1 || selection.OmittedMessages != 1 || selection.TruncatedParts != 2 || !strings.Contains(instruction, "current") {
 		t.Fatal(selection, err)
 	}
+	if !strings.Contains(instruction, "use the original exchange when asked what was previously reported") || !strings.Contains(instruction, "query capabilities for current business state") || !strings.Contains(instruction, "never reuse previous run Fact IDs") {
+		t.Fatal("history guidance lost the distinction between recalling an answer and reading current state")
+	}
 }
