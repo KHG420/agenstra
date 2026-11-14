@@ -88,7 +88,7 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet agentcontract
 	if err != nil {
 		return agentcontract.Decision{}, agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
 	}
-	requestModel := *m
+	requestModel := m.decisionRequestModel(prompt)
 	if packet.MaxModelInputTokens > 0 && (requestModel.MaxInputTokens == 0 || packet.MaxModelInputTokens < requestModel.MaxInputTokens) {
 		requestModel.MaxInputTokens = packet.MaxModelInputTokens
 	}

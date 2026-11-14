@@ -21,7 +21,7 @@ func (m *HTTPJSONDecisionModel) MeasureInput(packet agentcontract.ContextPacket,
 	if err != nil {
 		return agentcontract.InputMeasurement{}, err
 	}
-	model := *m
+	model := m.decisionRequestModel(prompt)
 	if packet.MaxModelOutputTokens > 0 && (model.MaxOutputTokens <= 0 || packet.MaxModelOutputTokens < model.MaxOutputTokens) {
 		model.MaxOutputTokens = packet.MaxModelOutputTokens
 	}

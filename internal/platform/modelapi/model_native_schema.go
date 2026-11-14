@@ -4,10 +4,24 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"strings"
 
 	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
+
+// The runtime owns the single format retry and includes this trusted feedback
+// in its prompt. Select the existing single-decision channel for that request
+// in both measurement and execution, without mutating the shared adapter.
+func (m *HTTPJSONDecisionModel) decisionRequestModel(prompt string) HTTPJSONDecisionModel {
+	request := *m
+	if m.DecisionOutputMode == "native_tools" &&
+		strings.Contains(prompt, "\nYour previous response was not a valid agenstra.decision.v1 JSON decision.") &&
+		strings.Contains(prompt, "The response did not contain exactly one valid registered output tool.") {
+		request.DecisionOutputMode = "output_tools"
+	}
+	return request
+}
 
 // nativeDecisionOutputSchema uses the same available decision variants as tool
 // output, retaining the original JSON decision identity and local call references.

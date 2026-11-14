@@ -2,6 +2,7 @@ package modelapi
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -99,15 +100,22 @@ func TestNativeControlGroupingRecoveryRetainsConcreteConstraint(t *testing.T) {
 		for _, correct := range []bool{true, false} {
 			t.Run(grouping+map[bool]string{true: "/corrected", false: "/unchanged"}[correct], func(t *testing.T) {
 				requests := 0
+				business := ""
+				inputLengths := []int64{}
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					requests++
-					var payload agentcontract.JSON
-					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					body, err := io.ReadAll(r.Body)
+					if err != nil {
 						t.Error(err)
 						return
 					}
-					business := ""
-					if grouping != "no-business" {
+					var payload agentcontract.JSON
+					if err := json.Unmarshal(body, &payload); err != nil {
+						t.Error(err)
+						return
+					}
+					inputLengths = append(inputLengths, int64(len(body)+128))
+					if requests == 1 && grouping != "no-business" {
 						business = nativeTestFunction(t, payload, "records.read")["name"].(string)
 					}
 					call := func(name, arguments string) agentcontract.JSON {
@@ -126,6 +134,7 @@ func TestNativeControlGroupingRecoveryRetainsConcreteConstraint(t *testing.T) {
 						calls[0] = call("final", `{"answer_markdown":"private-rejected-argument","fact_ids":[]}`)
 					}
 					if requests == 2 {
+						assertSingleDecisionOutputRequest(t, payload)
 						prompt := payload["messages"].([]any)[0].(agentcontract.JSON)["content"].(string)
 						_, detail, exists := strings.Cut(prompt, "The rejected output failed its declared parameter schema: ")
 						detail, _, _ = strings.Cut(detail, ". Submit corrected parameters")
@@ -144,7 +153,7 @@ func TestNativeControlGroupingRecoveryRetainsConcreteConstraint(t *testing.T) {
 							}
 						}
 						if located && correct {
-							calls = []any{call("final", `{"answer_markdown":"No business operation was performed.","fact_ids":[]}`)}
+							calls = []any{call("submit_decision", `{"kind":"final","answer_markdown":"No business operation was performed.","fact_ids":[]}`)}
 						}
 					}
 					message := agentcontract.JSON{"tool_calls": calls}
@@ -165,6 +174,7 @@ func TestNativeControlGroupingRecoveryRetainsConcreteConstraint(t *testing.T) {
 					t.Fatal(err)
 				}
 				model.DecisionOutputMode = "native_tools"
+				model.MaxOutputTokens = 8192
 				provider := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{
 					"records.read": {Name: "records.read", Effect: "read", InputSchema: agentcontract.JSON{"type": "object"}},
 				}}
@@ -178,6 +188,9 @@ func TestNativeControlGroupingRecoveryRetainsConcreteConstraint(t *testing.T) {
 				}
 				if result.ModelCalls[0].FormatError != "model_output_tool_calls_invalid" || !result.ModelCalls[1].FormatRecovery || result.ModelUsage.FormatRecoveryRequests != 1 {
 					t.Fatal("native grouping recovery changed its format accounting")
+				}
+				if result.ModelCalls[1].EstimatedInputTokens != inputLengths[1] || model.DecisionOutputMode != "native_tools" {
+					t.Fatal("recovery input measurement differs from its actual channel or mutated the shared model", result.ModelCalls[1].EstimatedInputTokens, inputLengths[1], model.DecisionOutputMode)
 				}
 				if (result.Status == "completed") != correct || !correct && result.Status != "failed" {
 					t.Fatal("unchanged grouping was accepted or a corrected final was rejected", result)
