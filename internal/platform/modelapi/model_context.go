@@ -322,6 +322,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		// Skill availability is complete even with deferred capabilities. Search
 		// availability comes from the runtime, not the visible catalog length.
 		unavailable := map[string]bool{
+			"submit_request_reasoning":   packet.ReasoningRequested || !slices.Contains(packet.RuntimeFeatures, "reasoning_request"),
 			"submit_read_skill":          len(skillReads) == 0,
 			"submit_search_capabilities": !slices.Contains(packet.RuntimeFeatures, "capability_search"),
 		}

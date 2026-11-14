@@ -25,6 +25,9 @@ func NewHTTPJSONDecisionModel(model, baseURL, apiKey string, timeout time.Durati
 // ModelInfoProvider is optional. Unknown capacities stay nil; no model-name guesses.
 type ModelInfoProvider = agent.ModelInfoProvider
 
+// ReasoningRequestModel opts an adapter into the one-way request_reasoning decision.
+type ReasoningRequestModel = agent.ReasoningRequestModel
+
 // CompletionReviewModelInfoProvider optionally reports review adapter capacity;
 // the saved run limits continue to bound each request.
 type CompletionReviewModelInfoProvider = agent.CompletionReviewModelInfoProvider

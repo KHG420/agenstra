@@ -47,6 +47,8 @@ func decisionOutputTools(completionReview bool) []any {
 	add := func(kind string, properties agentcontract.JSON, required ...string) {
 		description := "Submit the " + kind + " Agenstra decision. Structured output only; does not execute capabilities or grant permission."
 		switch kind {
+		case "request_reasoning":
+			description = "Enable deeper reasoning for subsequent decisions in this run. Use only for work needing multi-step inference, causal diagnosis or difficult tradeoffs in context. Routine conversation, record lookup, brief explanation and execution of a known tool with complete inputs can proceed directly. No parameters, explanation or hidden reasoning. Consumes a normal model round and budget; available at most once. It does not execute a business capability or grant permission."
 		case "search_capabilities":
 			description = "Search the current authorized capability catalog by name, description or input fields. Use this control function to discover whether a requested operation has a callable authorized capability, including when the visible catalog is incomplete. This reads runtime metadata only and performs no business API call. A result is a discovery hint; inspect a deferred contract before constructing its arguments. A missing match does not by itself establish a host limitation or a permission denial."
 		case "inspect_capability":
@@ -77,6 +79,7 @@ func decisionOutputTools(completionReview bool) []any {
 		"field":  agentcontract.JSON{"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
 		"prompt": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 1000}, "input_schema": inputSchema,
 	}, "field", "prompt")
+	add("request_reasoning", agentcontract.JSON{}, []string{}...)
 	add("search_capabilities", agentcontract.JSON{"query": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 300}}, "query")
 	for _, kind := range []string{"read_skill", "inspect_capability"} {
 		add(kind, agentcontract.JSON{"name": agentcontract.JSON{"type": "string", "minLength": 1, "maxLength": 330}}, "name")

@@ -75,6 +75,9 @@ func updateProgress(state *agentcontract.RuntimeState, limit int, capabilities m
 		}
 		keys[key] = true
 	}
+	if state.ReasoningRequested {
+		keys["reasoning:enabled"] = true
+	}
 	for _, skill := range state.LoadedSkills {
 		keys["skill:"+skill] = true
 	}

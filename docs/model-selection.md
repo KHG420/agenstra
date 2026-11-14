@@ -235,3 +235,14 @@ CLI 使用既有 AGENSTRA_SERVER / AGENSTRA_ADMIN_API_KEY。models.json 包含 M
 配置了任务模型总 token 预算时，已发出的请求若超时、被取消或收到成功响应后正文中断，且没有有效供应商用量，原预留额度继续作为未知用量保留；不将未收到的输出视为零，也不允许记忆超时或提取器取消后释放这部分额度供后续决策使用。兼容 HTTP 适配器在这类有预算的传输超时或成功响应中断后不自动重发。有效供应商计量和发送前失败仍按真实证据结算；未配置任务总 token 预算时保留原重试策略。预算中的未知预留不代表供应商实际计费 token 数。
 
 取消仍保留原错误分类，不被推断为超时；明确的安全错误码仍优先，不因错误链同时包含取消就将已知拒绝改记为未知预留。SDK 直接使用 `AgentRuntime`，或自定义记忆提取器返回保留错误链的 `context.Canceled` 时，已尝试且尚无有效计量的有预算请求同样保留未知预留；已报告用量与未发出的请求仍按真实证据结算。宿主请求整体取消时继续保留已写入检查点的调用预留，不将本地取消当作供应商计费已经终止的证明。
+
+
+## 按需开启思考
+
+Go 宿主可在启动时设置 `ModelManager.ReasoningRequests = true`。当前内置适配支持 `deepseek_chat`，普通决策从 `thinking=disabled` 开始。模型根据完整任务、相关历史及已有证据决定直接回答、调用工具或提交无参数的 `request_reasoning`。记录标题和用户消息的关键词不会触发框架升级，普通任务无需独立分类请求。
+
+运行时仅在模型明确支持、尚未升级且至少剩余两轮时公布 `runtime_features` 中的 `reasoning_request`。JSON 内容决策使用 `{"schema":"agenstra.decision.v1","kind":"request_reasoning"}`。`output_tools` 使用 `submit_decision` 的 `{"kind":"request_reasoning"}`，`native_tools` 使用无参数 `request_reasoning` 函数。`json_schema` 同步声明这一可选种类。升级后检查点和后续 `ContextPacket` 保存 `reasoning_requested=true`，随后的正常决策保持 `thinking=enabled`，恢复运行继续沿用该选择。
+
+每次任务最多接受一次升级。该决策占用一次正常模型轮次，并沿用 token 计量、总预算、超时和取消路径。升级只变更后续模型模式。业务调用继续通过原有授权、参数校验和审批路径。完成复核仅提供 `final` 和 `approve_completion`，记忆提取、会话压缩和复核继续由各自冻结配置及 `ThinkingPolicy` 选择模式。模型推理正文不进入用户回答。
+
+自定义模型可实现 `ReasoningRequestModel.SupportsReasoningRequests() bool` 并根据 `ContextPacket.ReasoningRequested` 选择模式。模型包装器应转发真实的支持状态。未实现或返回 false 的模型沿用既有决策种类。新增布尔字段采用可选 JSON 字段，旧检查点缺省为尚未升级，无需数据库迁移。

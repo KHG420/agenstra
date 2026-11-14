@@ -55,6 +55,13 @@ func ModelErrorCode(err error) string {
 // ModelInfoProvider is optional. Unknown capacities stay nil; no model-name guesses.
 type ModelInfoProvider interface{ ModelInfo() ModelInfo }
 
+// ReasoningRequestModel optionally supports a run-local, one-way reasoning upgrade.
+// Implementations must use ContextPacket.ReasoningRequested to select the mode.
+// Wrappers forward this capability only when their inner model supports it.
+type ReasoningRequestModel interface {
+	SupportsReasoningRequests() bool
+}
+
 // CompletionReviewModelInfoProvider optionally reports the review adapter's
 // capacity. Runtime still applies the saved run limits to every review request.
 type CompletionReviewModelInfoProvider interface{ CompletionReviewModelInfo() ModelInfo }

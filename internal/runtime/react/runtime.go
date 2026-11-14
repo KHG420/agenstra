@@ -512,11 +512,15 @@ func (r *AgentRuntime) contextCandidate(state *agentcontract.RuntimeState) agent
 	if r.MaxContextCapabilities > 0 && !searchStalled {
 		features = append(features, "capability_search")
 	}
+	if model, ok := r.Model.(agentcontract.ReasoningRequestModel); ok && model.SupportsReasoningRequests() && !state.ReasoningRequested && r.MaxModelRounds-state.RoundsUsed > 1 {
+		features = append(features, "reasoning_request")
+	}
 	history, omittedInspections := inspectionHistory(state)
 	if omittedInspections > 0 {
 		omissions = append(omissions, fmt.Sprintf("inspection_history: %d older entries; inspect_fact to reload", omittedInspections))
 	}
 	packet := agentcontract.ContextPacket{OriginPackID: r.OriginPackID, Schema: "agenstra.context.v1", Instruction: state.Instruction, Capabilities: caps, Facts: views, Observations: obs, RoundIndex: state.RoundsUsed, RoundsRemaining: r.MaxModelRounds - state.RoundsUsed, ToolCallsRemaining: r.MaxToolCalls - state.ToolCallsUsed, Skills: skillViews, LoadedSkills: loaded, InspectedCapability: inspected, InspectedFact: state.InspectedFact, InspectionHistory: history, Followups: state.Followups, RuntimeFeatures: features, ContextOmissions: omissions, Memories: append([]agentcontract.MemoryView{}, r.Memories...)}
+	packet.ReasoningRequested = state.ReasoningRequested
 	packet.LastCallReason = lastCallReason
 	packet.Conversation = state.Conversation.View()
 	if r.MaxContextCapabilities > 0 {
@@ -652,7 +656,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			packet.CapabilitySearchResults = nil
 			packet.CapabilitySearchQuery = ""
 			packet.CapabilityCatalogTotal = 0
-			packet.RuntimeFeatures = slices.DeleteFunc(packet.RuntimeFeatures, func(feature string) bool { return feature == "capability_search" })
+			packet.RuntimeFeatures = slices.DeleteFunc(packet.RuntimeFeatures, func(feature string) bool { return feature == "capability_search" || feature == "reasoning_request" })
 			packet.ContextOmissions = slices.DeleteFunc(packet.ContextOmissions, func(note string) bool {
 				return strings.HasPrefix(note, "capability catalog:") || strings.HasPrefix(note, "capability search ")
 			})
@@ -663,6 +667,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			return nil
 		}
 		prompt := r.SystemPrompt() + followupExecutionPrompt(state) + feedback
+		if review == nil && slices.Contains(packet.RuntimeFeatures, "reasoning_request") {
+			prompt += "\n" + reasoningRequestPrompt
+		}
 		if searchStalled {
 			prompt += "\n" + capabilityDiscoveryStopPrompt
 		}
@@ -912,6 +919,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			state.ModelCalls[callIndex].ErrorCode = agentcontract.Strptr("model_decision_invalid")
 			RebuildModelUsage(state)
 		}
+		if err == nil && d.Kind == "request_reasoning" && !slices.Contains(packet.RuntimeFeatures, "reasoning_request") {
+			err = agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
+			state.ModelCalls[callIndex].ErrorCode = agentcontract.Strptr("model_decision_invalid")
+			RebuildModelUsage(state)
+		}
 		if err == nil && review == nil && (d.CompletionFeedback != "" || d.Kind == "approve_completion") {
 			err = agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
 			state.ModelCalls[callIndex].ErrorCode = agentcontract.Strptr("model_decision_invalid")
@@ -1051,6 +1063,8 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		recordDecision(state, decision)
 	}
 	switch decision.Kind {
+	case "request_reasoning":
+		state.ReasoningRequested = true
 	case "search_capabilities":
 		if r.MaxContextCapabilities <= 0 {
 			Reject(state, "search", "agent.search_capabilities", "capability_search_disabled", nil, "")
@@ -1139,7 +1153,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 	case "tool_batch":
 		for _, call := range decision.Calls {
 			kind := strings.TrimPrefix(call.Capability, "agent.")
-			if kind == "read_skill" || kind == "inspect_capability" || kind == "inspect_fact" {
+			if kind == "read_skill" || kind == "inspect_capability" || kind == "inspect_fact" || kind == "request_reasoning" {
 				Reject(state, call.CallRef, call.Capability, "use_"+kind+"_decision", call.Arguments, "")
 				continue
 			}

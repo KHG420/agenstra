@@ -16,6 +16,7 @@ func TestOutputToolsRejectUndeclaredDecisionKinds(t *testing.T) {
 		name, kind, arguments string
 		packet                agentcontract.ContextPacket
 		allowed               bool
+		invalidPayload        bool
 	}{
 		{name: "skill absent", kind: "read_skill", arguments: `{"kind":"read_skill","name":"guide"}`},
 		{name: "skill empty", kind: "read_skill", arguments: `{"kind":"read_skill","name":"guide"}`, packet: agentcontract.ContextPacket{Skills: []agentcontract.JSON{}}},
@@ -23,6 +24,11 @@ func TestOutputToolsRejectUndeclaredDecisionKinds(t *testing.T) {
 		{name: "search absent", kind: "search_capabilities", arguments: `{"kind":"search_capabilities","query":"records"}`},
 		{name: "search absent from durable features", kind: "search_capabilities", arguments: `{"kind":"search_capabilities","query":"records"}`, packet: agentcontract.ContextPacket{RuntimeFeatures: []string{"durable_execution"}}},
 		{name: "search declared", kind: "search_capabilities", arguments: `{"kind":"search_capabilities","query":"records"}`, packet: agentcontract.ContextPacket{RuntimeFeatures: []string{"capability_search"}}, allowed: true},
+		{name: "reasoning absent", kind: "request_reasoning", arguments: `{"kind":"request_reasoning"}`},
+		{name: "reasoning declared", kind: "request_reasoning", arguments: `{"kind":"request_reasoning"}`, packet: agentcontract.ContextPacket{RuntimeFeatures: []string{"reasoning_request"}}, allowed: true},
+		{name: "reasoning already enabled", kind: "request_reasoning", arguments: `{"kind":"request_reasoning"}`, packet: agentcontract.ContextPacket{RuntimeFeatures: []string{"reasoning_request"}, ReasoningRequested: true}},
+		{name: "reasoning rejects payload", invalidPayload: true, kind: "request_reasoning", arguments: `{"kind":"request_reasoning","reason":"hidden"}`, packet: agentcontract.ContextPacket{RuntimeFeatures: []string{"reasoning_request"}}},
+		{name: "review prohibits reasoning", kind: "request_reasoning", arguments: `{"kind":"request_reasoning"}`, packet: agentcontract.ContextPacket{RuntimeFeatures: []string{"reasoning_request"}, CompletionReview: &agentcontract.Decision{Kind: "final", AnswerMarkdown: "draft"}}},
 		{name: "ordinary inspection", kind: "inspect_capability", arguments: `{"kind":"inspect_capability","name":"records.read"}`, allowed: true},
 		{name: "review prohibits execution", kind: "tool_batch", arguments: `{"kind":"tool_batch","calls":[{"capability":"records.write","arguments":{},"reason":"write"}]}`, packet: agentcontract.ContextPacket{CompletionReview: &agentcontract.Decision{Kind: "final", AnswerMarkdown: "draft"}}},
 		{name: "review prohibits inspection", kind: "inspect_capability", arguments: `{"kind":"inspect_capability","name":"records.read"}`, packet: agentcontract.ContextPacket{CompletionReview: &agentcontract.Decision{Kind: "final", AnswerMarkdown: "draft"}}},
@@ -37,7 +43,7 @@ func TestOutputToolsRejectUndeclaredDecisionKinds(t *testing.T) {
 					t.Error(err)
 				}
 				assertSingleDecisionOutputRequest(t, payload)
-				if (outputDecisionSchemas(t, payload)[tc.kind] != nil) != tc.allowed {
+				if (outputDecisionSchemas(t, payload)[tc.kind] != nil) != (tc.allowed || tc.invalidPayload) {
 					t.Error("fixture does not match the actual declared protocol")
 				}
 				if err := json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{agentcontract.JSON{

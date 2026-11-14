@@ -24,9 +24,13 @@ type ModelManager struct {
 	// It selects enabled/disabled only for DeepSeek; measurement and execution use
 	// the same policy without changing frozen profiles, credentials or budgets.
 	ThinkingPolicy func(string, agentcontract.ContextPacket) string
-	mu             sync.RWMutex
-	deployment     *Deployment
-	selection      agentcontract.ModelSelectionSnapshot
+	// ReasoningRequests enables semantic request_reasoning decisions for DeepSeek.
+	// Normal decisions start disabled and stay enabled after an accepted upgrade.
+	// Other purposes continue to use ThinkingPolicy and the frozen profiles.
+	ReasoningRequests bool
+	mu                sync.RWMutex
+	deployment        *Deployment
+	selection         agentcontract.ModelSelectionSnapshot
 }
 
 // NewModel uses the catalog when configured and retains the existing three
@@ -140,6 +144,7 @@ type selectedModels struct {
 	decision, memory, review *modelapi.HTTPJSONDecisionModel
 	prompt                   func(agentcontract.ContextPacket, string) string
 	thinking                 func(string, agentcontract.ContextPacket) string
+	reasoningRequests        bool
 }
 
 func (m *ModelManager) selectedModel(c agentcontract.ModelConfiguration) (*selectedModels, error) {
@@ -163,14 +168,22 @@ func (m *ModelManager) selectedModel(c agentcontract.ModelConfiguration) (*selec
 	}
 	d.StreamAnswers = m.StreamAnswers
 	review.StreamAnswers = m.StreamAnswers
-	return &selectedModels{decision: d, memory: mem, review: review, prompt: m.DecisionPrompt, thinking: m.ThinkingPolicy}, nil
+	return &selectedModels{decision: d, memory: mem, review: review, prompt: m.DecisionPrompt, thinking: m.ThinkingPolicy, reasoningRequests: m.ReasoningRequests && d.APIType == "deepseek_chat"}, nil
 }
 
 func (s *selectedModels) thinkingAdapter(model *modelapi.HTTPJSONDecisionModel, purpose string, packet agentcontract.ContextPacket) *modelapi.HTTPJSONDecisionModel {
-	if s.thinking == nil || model.APIType != "deepseek_chat" {
+	if model.APIType != "deepseek_chat" {
 		return model
 	}
-	mode := s.thinking(purpose, packet)
+	mode := ""
+	if s.reasoningRequests && purpose == "decision" {
+		mode = "disabled"
+		if packet.ReasoningRequested {
+			mode = "enabled"
+		}
+	} else if s.thinking != nil {
+		mode = s.thinking(purpose, packet)
+	}
 	if mode != "enabled" && mode != "disabled" {
 		return model
 	}
@@ -208,6 +221,9 @@ func (s *selectedModels) Decide(ctx context.Context, p agentcontract.ContextPack
 	}
 	return s.decisionAdapter(p).Decide(ctx, p, prompt)
 }
+
+// SupportsReasoningRequests reports the frozen decision adapter's opt-in.
+func (s *selectedModels) SupportsReasoningRequests() bool { return s.reasoningRequests }
 
 // ModelInfo reports the selected decision model capacity without making a request.
 func (s *selectedModels) ModelInfo() agentcontract.ModelInfo { return s.decision.ModelInfo() }
@@ -261,6 +277,12 @@ func (m *ModelManager) Decide(ctx context.Context, p agentcontract.ContextPacket
 		return agentcontract.Decision{}, err
 	}
 	return s.Decide(ctx, p, prompt)
+}
+
+// SupportsReasoningRequests reports whether the current DeepSeek selection opts in.
+func (m *ModelManager) SupportsReasoningRequests() bool {
+	s, err := m.selectedModel(m.Snapshot().Config)
+	return err == nil && s.SupportsReasoningRequests()
 }
 
 // ModelInfo reports the current decision profile's configured capacity.

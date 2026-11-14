@@ -93,6 +93,8 @@ type Observation struct {
 
 // ContextPacket is the bounded decision input; previews do not replace complete facts.
 type ContextPacket struct {
+	// ReasoningRequested records this run's accepted reasoning upgrade.
+	ReasoningRequested      bool              `json:"reasoning_requested,omitempty"`
 	Conversation            *ConversationView `json:"conversation,omitempty"`
 	MaxModelInputTokens     int64             `json:"max_model_input_tokens,omitempty"`
 	OriginPackID            string            `json:"origin_pack_id,omitempty"`
@@ -209,8 +211,8 @@ func (d Decision) Validate() error {
 				return errors.New("model_decision_invalid")
 			}
 		}
-	case "approve_completion":
-		// A verdict can only select the runtime-frozen proposal, never replace it.
+	case "approve_completion", "request_reasoning":
+		// Payload-free controls cannot carry calls, answers or extra parameters.
 		if len(d.Calls) != 0 || d.AnswerMarkdown != "" || len(d.FactIDs) != 0 || len(d.ResultRefs) != 0 || d.CompletionFeedback != "" || d.Field != "" || d.Prompt != "" || d.InputSchema != nil || d.Query != "" || d.Name != "" || d.FactID != "" || len(d.Path) != 0 {
 			return errors.New("model_decision_invalid")
 		}
@@ -302,7 +304,7 @@ func StrictDecision(raw []byte) (Decision, error) {
 	if _, ok := obj["schema"]; !ok {
 		d.Schema = "agenstra.decision.v1"
 	}
-	allowed := map[string]map[string]bool{"approve_completion": {"schema": true, "kind": true}, "tool_batch": {"schema": true, "kind": true, "calls": true}, "final": {"schema": true, "kind": true, "answer_markdown": true, "fact_ids": true, "result_refs": true, "completion_feedback": true}, "request_input": {"schema": true, "kind": true, "field": true, "prompt": true, "input_schema": true}, "search_capabilities": {"schema": true, "kind": true, "query": true}, "read_skill": {"schema": true, "kind": true, "name": true}, "inspect_capability": {"schema": true, "kind": true, "name": true}, "inspect_fact": {"schema": true, "kind": true, "fact_id": true, "path": true, "offset": true, "limit": true}}
+	allowed := map[string]map[string]bool{"request_reasoning": {"schema": true, "kind": true}, "approve_completion": {"schema": true, "kind": true}, "tool_batch": {"schema": true, "kind": true, "calls": true}, "final": {"schema": true, "kind": true, "answer_markdown": true, "fact_ids": true, "result_refs": true, "completion_feedback": true}, "request_input": {"schema": true, "kind": true, "field": true, "prompt": true, "input_schema": true}, "search_capabilities": {"schema": true, "kind": true, "query": true}, "read_skill": {"schema": true, "kind": true, "name": true}, "inspect_capability": {"schema": true, "kind": true, "name": true}, "inspect_fact": {"schema": true, "kind": true, "fact_id": true, "path": true, "offset": true, "limit": true}}
 	keys := allowed[d.Kind]
 	if keys == nil {
 		return d, errors.New("model_decision_invalid")
@@ -383,6 +385,8 @@ type InvocationReceipt struct {
 // RuntimeState is the complete checkpoint for a single run.
 // A driver owns its mutable state; model input is a separate bounded projection.
 type RuntimeState struct {
+	// ReasoningRequested survives checkpoints and can only become true once.
+	ReasoningRequested      bool                  `json:"reasoning_requested,omitempty"`
 	Workflow                *WorkflowExecution    `json:"workflow,omitempty"`
 	WorkflowParent          *WorkflowParent       `json:"workflow_parent,omitempty"`
 	Conversation            *ConversationContext  `json:"conversation,omitempty"`
