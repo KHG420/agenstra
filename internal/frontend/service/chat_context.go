@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -159,12 +160,19 @@ func (w *WebIntegration) ConversationPage(ctx context.Context, run agentcontract
 
 func (w *WebIntegration) conversationParts(ctx context.Context, owner string, m agentcontract.ChatMessage) ([]agentcontract.ConversationEntry, error) {
 	parts := []agentcontract.ConversationEntry{{Role: "user", Field: "text", Text: m.Text}}
-	var raw sql.NullString
+	var raw, evidence sql.NullString
 	field := "(state_json->'runtime')->>'followups'"
+	references := `(SELECT json_group_array(json_object('fact_id',json_extract(value,'$.fact_id'),'capability',json_extract(value,'$.capability')))
+		FROM (SELECT value FROM json_each(state_json,'$.runtime.observations')
+		WHERE json_extract(value,'$.status')='succeeded' AND json_type(value,'$.fact_id')='text' LIMIT 50))`
 	if w.Host.Store.Postgres {
 		field = "(state_json::jsonb->'runtime')->>'followups'"
+		references = `(SELECT COALESCE(jsonb_agg(jsonb_build_object('fact_id',value->>'fact_id','capability',value->>'capability')),'[]'::jsonb)::text
+			FROM (SELECT value FROM jsonb_array_elements(CASE WHEN jsonb_typeof(state_json::jsonb->'runtime'->'observations')='array'
+			THEN state_json::jsonb->'runtime'->'observations' ELSE '[]'::jsonb END)
+			WHERE value->>'status'='succeeded' AND jsonb_typeof(value->'fact_id')='string' LIMIT 50) AS retained)`
 	}
-	err := w.Host.Store.DB.QueryRowContext(ctx, "SELECT "+field+" FROM runs WHERE owner_id=$1 AND run_id=$2", owner, m.RunID).Scan(&raw)
+	err := w.Host.Store.DB.QueryRowContext(ctx, "SELECT "+field+","+references+" FROM runs WHERE owner_id=$1 AND run_id=$2", owner, m.RunID).Scan(&raw, &evidence)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -181,6 +189,15 @@ func (w *WebIntegration) conversationParts(ctx context.Context, owner string, m 
 		parts = append(parts, agentcontract.ConversationEntry{Role: "reference", Field: "attachments", Text: attachmentReferences(m.Attachments)})
 	}
 	parts = append(parts, agentcontract.ConversationEntry{Role: "assistant", Field: "answer_markdown", Text: m.AnswerMarkdown})
+	// Append after existing fields so saved part/offset cursors keep their meaning.
+	// References identify evidence only. Host authorization still controls reuse.
+	if evidence.Valid && evidence.String != "[]" {
+		data, err := agentcontract.CanonicalJSON(agentcontract.JSON{"run_id": m.RunID, "facts": json.RawMessage(evidence.String)})
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, agentcontract.ConversationEntry{Role: "reference", Field: "evidence", Text: string(data)})
+	}
 	return parts, nil
 }
 

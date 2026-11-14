@@ -3,6 +3,7 @@ package service
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -10,6 +11,58 @@ import (
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
+
+func TestConversationHistoryRetainsBoundedOwnerScopedEvidenceReferences(t *testing.T) {
+	f := newWebFixture(t, &hostModel{}, false)
+	conversation, err := f.w.CreateConversation(t.Context(), "alice", "records")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := f.w.SubmitMessage(t.Context(), "alice", conversation.ID, "source", "Generate a report", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.w.advanceConversation(t.Context(), "alice", conversation.ID); err != nil {
+		t.Fatal(err)
+	}
+	observations := []any{agentcontract.JSON{"status": "failed", "fact_id": "failed-reference", "capability": "records.failed"}}
+	for i := range 55 {
+		observations = append(observations, agentcontract.JSON{"status": "succeeded", "fact_id": fmt.Sprintf("10000000-0000-4000-8000-%012d", i), "capability": "records.calculate", "arguments": agentcontract.JSON{"private": "original arguments stay in their retained source"}})
+	}
+	state, err := agentcontract.CanonicalJSON(agentcontract.JSON{"runtime": agentcontract.JSON{"followups": []string{"source input"}, "observations": observations}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.h.Store.DB.ExecContext(t.Context(), "UPDATE runs SET state_json=$1 WHERE owner_id=$2 AND run_id=$3", string(state), "alice", m.RunID); err != nil {
+		t.Fatal(err)
+	}
+	m.AnswerMarkdown = "Original report delivered."
+	parts, err := f.w.conversationParts(t.Context(), "alice", m)
+	if err != nil || len(parts) != 4 || parts[2].Field != "answer_markdown" || parts[3].Role != "reference" || parts[3].Field != "evidence" {
+		t.Fatal("history lost original field positions or retained evidence", parts, err)
+	}
+	var reference struct {
+		RunID string               `json:"run_id"`
+		Facts []agentcontract.JSON `json:"facts"`
+	}
+	if err = json.Unmarshal([]byte(parts[3].Text), &reference); err != nil || reference.RunID != m.RunID || len(reference.Facts) != 50 {
+		t.Fatal("history evidence lost its original run or read bound", reference, err)
+	}
+	if strings.Contains(parts[3].Text, "failed-reference") || strings.Contains(parts[3].Text, "original arguments") || reference.Facts[0]["capability"] != "records.calculate" {
+		t.Fatal("history evidence exposed failed references or original arguments", parts[3])
+	}
+	m.Status = "completed"
+	current := m
+	current.ID, current.Text = "next-message", "Export another format"
+	instruction, _, err := f.w.conversationInstructionSelection(t.Context(), "alice", []agentcontract.ChatMessage{m}, current)
+	if err != nil || !strings.Contains(instruction, m.RunID) || !strings.Contains(instruction, reference.Facts[0]["fact_id"].(string)) || strings.Contains(instruction, "original arguments") {
+		t.Fatal("bounded legacy context lost the original evidence reference", instruction, err)
+	}
+	parts, err = f.w.conversationParts(t.Context(), "bob", m)
+	if err != nil || len(parts) != 2 {
+		t.Fatal("another owner acquired retained run evidence", parts, err)
+	}
+}
 
 func TestConversationContextLoadsHistoryAndInputFromFrameworkCheckpoints(t *testing.T) {
 	f := newWebFixture(t, &hostModel{decisions: []agentcontract.Decision{{Schema: "agenstra.decision.v1", Kind: "request_input", Field: "destination", Prompt: "Where?"}}}, false)

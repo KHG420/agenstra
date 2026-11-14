@@ -20,6 +20,7 @@ func TestPostgresWebParity(t *testing.T) {
 		{"approval_revocation", TestBrowserApprovalAndLiveGrantRevocation},
 		{"chat_queue_recovery", TestChatQueuePrebindingIdempotenceAndRecovery},
 		{"chat_history", TestConversationContextLoadsHistoryAndInputFromFrameworkCheckpoints},
+		{"history_evidence", TestConversationHistoryRetainsBoundedOwnerScopedEvidenceReferences},
 		{"durable_history_ranges", TestDurableConversationKeepsCompleteShortHistoryAndPartialUnicodeRanges},
 		{"durable_compaction_recovery", TestDurableConversationRecoversInterruptedCompactionAndKeepsUsage},
 		{"durable_compaction_retries", TestDurableConversationBoundsInvalidSummaryRetries},

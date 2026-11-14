@@ -25,11 +25,11 @@ func TestRuntimeInfoAndFrozenConversationSelection(t *testing.T) {
 	f.h.Settings.MaxConversationHistoryMessages = 1
 	f.h.Settings.MaxConversationHistoryCharacters = 10
 	messages := []agentcontract.ChatMessage{{ID: "old-1", ConversationID: "c", RunID: agentcontract.NewID(), Status: "completed", Text: strings.Repeat("x", 20), AnswerMarkdown: strings.Repeat("y", 20)}, {ID: "old-2", ConversationID: "c", RunID: agentcontract.NewID(), Status: "completed", Text: strings.Repeat("x", 20), AnswerMarkdown: strings.Repeat("y", 20)}}
-	instruction, selection, err := f.w.conversationInstructionSelection("alice", messages, agentcontract.ChatMessage{ID: "new", ConversationID: "c", Text: "current"})
+	instruction, selection, err := f.w.conversationInstructionSelection(t.Context(), "alice", messages, agentcontract.ChatMessage{ID: "new", ConversationID: "c", Text: "current"})
 	if err != nil || selection.IncludedMessages != 1 || selection.OmittedMessages != 1 || selection.TruncatedParts != 2 || !strings.Contains(instruction, "current") {
 		t.Fatal(selection, err)
 	}
-	if !strings.Contains(instruction, "use the original exchange when asked what was previously reported") || !strings.Contains(instruction, "query capabilities for current business state") || !strings.Contains(instruction, "never reuse previous run Fact IDs") {
+	if !strings.Contains(instruction, "Use the original exchange when asked what was previously reported") || !strings.Contains(instruction, "query capabilities for current business state") || !strings.Contains(instruction, "revalidates current access") {
 		t.Fatal("history guidance lost the distinction between recalling an answer and reading current state")
 	}
 }

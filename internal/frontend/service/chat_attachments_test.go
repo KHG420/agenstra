@@ -64,7 +64,7 @@ func TestChatAttachmentsIsolationReferencesAndRetries(t *testing.T) {
 	if err != nil || len(message.Attachments) != 1 || message.Text != "" {
 		t.Fatal(message, err)
 	}
-	instruction, err := f.w.conversationInstruction("alice", nil, message)
+	instruction, err := f.w.conversationInstruction(t.Context(), "alice", nil, message)
 	if err != nil || !strings.Contains(instruction, file.ID) || strings.Contains(instruction, "末尾") {
 		t.Fatal("message should carry references and partial preview", err)
 	}
