@@ -27,7 +27,7 @@ test("answer snapshots decode split UTF8, replace rejected drafts and finish", a
   await c.destroy();
 });
 
-test("answer stream renews one rejected ticket and reconnects only the read", async () => {
+test("answer stream renews a ticket and continues after a clean connection rotation", async () => {
   let sessions = 0, requests = 0;
   const updates = [];
   const c = client(async (_url, init) => {
@@ -39,8 +39,36 @@ test("answer stream renews one rejected ticket and reconnects only the read", as
   }, async () => `ticket-${++sessions}`);
   const stop = c.watchAnswerStream("run", u => updates.push(u)); await stop.done;
   assert.equal(sessions, 2); assert.equal(requests, 3);
-  assert.ok(updates.some(u => u.phase === "reconnecting" && u.text === ""));
+  assert.equal(updates.some(u => u.phase === "reconnecting"), false);
   assert.equal(updates.at(-1).text, "saved"); await c.destroy();
+});
+
+test("answer stream reports a read failure and resumes the saved answer", async () => {
+  let requests = 0, stream;
+  const updates = [], errors = [];
+  const c = client(async () => {
+    requests++;
+    if (requests > 1) return response(event("saved", "completed"));
+    return new Response(new ReadableStream({ start(controller) {
+      stream = controller;
+      controller.enqueue(encoder.encode(event("draft", "generating")));
+    } }), { headers: { "Content-Type": "text/event-stream" } });
+  });
+  c.on("error", error => errors.push(error));
+  const stop = c.watchAnswerStream("run", update => {
+    updates.push(update);
+    if (update.phase === "generating") stream.error(new Error("connection interrupted"));
+  });
+  await stop.done;
+  assert.equal(requests, 2);
+  assert.equal(errors.length, 1);
+  assert.deepEqual(updates.map(update => [update.text, update.phase]), [
+    ["draft", "generating"], ["", "reconnecting"], ["saved", "completed"],
+  ]);
+  assert.equal(c.runWatchers.size, 0);
+  assert.equal(c.answerReadAborters.size, 0);
+  assert.equal(c.aborters.size, 0);
+  await c.destroy();
 });
 
 for (const mode of ["stop", "abort", "destroy", "suspended"]) test(`answer subscription ${mode} releases its stream without cancelling the run`, async () => {

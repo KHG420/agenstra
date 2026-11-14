@@ -655,12 +655,13 @@ export class AgenstraClient {
               return;
             }
             this.emit("error", error);
+            notify({ run_id: id, text: "", phase: "reconnecting" });
           } finally {
             controller.signal.removeEventListener("abort", abortRead);
             this.answerReadAborters.delete(readController);
           }
           if (stopped || this.closed) return;
-          notify({ run_id: id, text: "", phase: "reconnecting" });
+          // A clean EOF renews the short-lived read while generation continues.
           await new Promise(resolve => { wake = resolve; timer = setTimeout(resolve, delay); });
           wake = null;
           delay = Math.min(delay * 2, 5000);
