@@ -26,6 +26,9 @@ func TestUnproductiveCapabilityDiscoveryCanAnswerBeforeStagnation(t *testing.T) 
 			if slices.Contains(packet.RuntimeFeatures, "capability_search") || !strings.Contains(prompt, capabilityDiscoveryStopPrompt) {
 				t.Fatal("equivalent unsuccessful searches did not trigger bounded discovery")
 			}
+			if packet.CapabilityCatalogTotal != 1 || packet.CapabilitySearchQuery != "unsupported-request-2" || len(packet.CapabilitySearchResults) != 0 {
+				t.Fatal("pausing discovery lost the completed query or full authorized catalog scope", packet)
+			}
 			return agentcontract.Decision{Kind: "final", AnswerMarkdown: "当前接入的功能没有提供这项操作。", FactIDs: []string{}}, nil
 		})}
 	state, err := runtime.NewState("Perform an unsupported request", "")

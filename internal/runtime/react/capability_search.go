@@ -525,6 +525,11 @@ func selectedCapabilityNames(caps map[string]agentcontract.CapabilityDescription
 	for _, name := range filteredSearch {
 		add(name)
 	}
+	// Keep actual discoveries after an empty search. Filling unused slots from
+	// the original task can turn a prohibition into unrelated callable tools.
+	if state.CapabilitySearchQuery != "" && len(filteredSearch) == 0 {
+		return selected, len(authorized), filteredSearch
+	}
 	if len(selected) < limit {
 		significant := capabilityQueryTerms(instruction, true)
 		for _, name := range search(strings.Join(significant, " "), limit) {

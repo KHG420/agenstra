@@ -167,6 +167,27 @@ func TestCapabilitySearchRetainsPriorDiscoveriesWithinCatalogBudget(t *testing.T
 	}
 }
 
+func TestEmptySearchDoesNotFillCatalogWithUnrelatedCapabilities(t *testing.T) {
+	caps := searchTestCapabilities()
+	grants := map[string]bool{"alpha.read": true, "beta.read": true, "omega.submit_invoice": true}
+	state := &agentcontract.RuntimeState{CapabilitySearchQuery: "missing", Decisions: []agentcontract.JSON{{"kind": "search_capabilities", "query": "missing"}}}
+	names, total, results := selectedCapabilityNames(caps, grants, "Do not read accounts", state, 2)
+	if len(names) != 0 || total != 3 || len(results) != 0 {
+		t.Fatal("empty search introduced unrelated fallback tools", names, total, results)
+	}
+	state.Decisions = append([]agentcontract.JSON{{"kind": "search_capabilities", "query": "omega.submit_invoice"}}, state.Decisions...)
+	names, _, _ = selectedCapabilityNames(caps, grants, "Do not read accounts", state, 2)
+	if len(names) != 1 || names[0] != "omega.submit_invoice" {
+		t.Fatal("empty search lost an earlier discovery or filled an unrelated slot", names)
+	}
+	state.InspectedCapability = agentcontract.Strptr("alpha.read")
+	grants["omega.submit_invoice"] = false
+	names, _, _ = selectedCapabilityNames(caps, grants, "Do not read accounts", state, 1)
+	if len(names) != 1 || names[0] != "alpha.read" {
+		t.Fatal("empty search lost an inspected contract or retained revoked discovery", names)
+	}
+}
+
 func TestCapabilitySearchFindsDeferredUnionOperationsAndNestedParameters(t *testing.T) {
 	cap := agentcontract.CapabilityDescription{Name: "records.write", Description: "Manage records", InputSchema: agentcontract.JSON{"anyOf": []agentcontract.JSON{
 		agentcontract.JSON{"properties": agentcontract.JSON{
