@@ -667,9 +667,6 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			return nil
 		}
 		prompt := r.SystemPrompt() + followupExecutionPrompt(state) + feedback
-		if review == nil && slices.Contains(packet.RuntimeFeatures, "reasoning_request") {
-			prompt += "\n" + reasoningRequestPrompt
-		}
 		if searchStalled {
 			prompt += "\n" + capabilityDiscoveryStopPrompt
 		}
@@ -783,6 +780,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 					prompt += fmt.Sprintf("\nThe item you inspected at index %d belongs to an array with %d items. Report the total as %d; do not use the preview length as the total.", inspectedIndex, parentLength, parentLength)
 				}
 			}
+		}
+		if review == nil && slices.Contains(packet.RuntimeFeatures, "reasoning_request") {
+			prompt += "\n" + reasoningRequestPrompt
 		}
 		candidate := packet
 		packet, reason, targetMet := r.characterProjection(state, packet, prompt)
