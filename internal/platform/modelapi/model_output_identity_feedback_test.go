@@ -130,11 +130,13 @@ func TestNativeControlGroupingRecoveryRetainsConcreteConstraint(t *testing.T) {
 						_, detail, exists := strings.Cut(prompt, "The rejected output failed its declared parameter schema: ")
 						detail, _, _ = strings.Cut(detail, ". Submit corrected parameters")
 						located := exists && strings.Contains(detail, "/tool_calls")
-						if grouping != "no-business" && grouping != "empty" {
+						if grouping == "control-business" {
+							located = located && strings.Contains(detail, "/tool_calls/1/function/name") && strings.Contains(detail, "search_capabilities") && !strings.Contains(detail, business)
+						} else if grouping == "proposal-business" || grouping == "final-business" {
 							located = located && strings.Contains(detail, "/tool_calls/0/function/name") && strings.Contains(detail, business)
 						}
 						if !located {
-							t.Error("native grouping recovery omitted the rejected control location or permitted business function")
+							t.Error("native grouping recovery omitted the single control prerequisite or concrete grouping constraint")
 						}
 						for _, secret := range []string{"private-rejected-argument", "file://", "schema.json#"} {
 							if strings.Contains(prompt, secret) {

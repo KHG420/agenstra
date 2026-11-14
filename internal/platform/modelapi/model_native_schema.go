@@ -136,6 +136,11 @@ func invalidModelToolEnvelope(ctx context.Context, calls []decisionOutputToolCal
 			names = append(names, name)
 		}
 	}
+	if control := nativeControlRecoveryFunction(calls, tools); control != "" {
+		// Mixed calls remain wholly rejected. Guide the bounded retry to one
+		// already valid inspection before it proposes further business work.
+		maxCalls, names = 1, []string{control}
+	}
 	metadata := make([]any, 0, len(calls))
 	for _, call := range calls {
 		metadata = append(metadata, agentcontract.JSON{"type": call.Type, "function": agentcontract.JSON{"name": call.Function.Name}})
@@ -158,4 +163,25 @@ func invalidModelToolEnvelope(ctx context.Context, calls []decisionOutputToolCal
 		return modelSchemaError{model: invalid, validation: err}
 	}
 	return invalid
+}
+
+func nativeControlRecoveryFunction(calls []decisionOutputToolCall, tools []any) string {
+	if len(calls) < 2 || len(calls) > 4 {
+		return ""
+	}
+	for _, call := range calls {
+		if call.Type != "function" {
+			continue
+		}
+		switch call.Function.Name {
+		case "read_skill", "inspect_capability", "inspect_fact", "search_capabilities":
+			for _, tool := range tools {
+				function := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)
+				if function["name"] == call.Function.Name && validateNativeDecisionOutput([]byte(call.Function.Arguments), function["parameters"].(agentcontract.JSON)) == "" {
+					return call.Function.Name
+				}
+			}
+		}
+	}
+	return ""
 }
