@@ -2,11 +2,57 @@ package react
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
+
+type completionBudgetModel struct{ decisionModelFunc }
+
+func (completionBudgetModel) MeasureInput(agentcontract.ContextPacket, string) (agentcontract.InputMeasurement, error) {
+	return agentcontract.InputMeasurement{Tokens: 1000, Source: "tokenizer"}, nil
+}
+
+func TestRemainingBudgetReservesTheFinalAnswerAndReview(t *testing.T) {
+	for _, attemptTool := range []bool{false, true} {
+		t.Run(map[bool]string{false: "answer and review", true: "no new tool"}[attemptTool], func(t *testing.T) {
+			runtime, state, provider := contextBudgetRuntime(t, 20000)
+			runtime.MaxModelInputTokens, runtime.MaxModelOutputTokens, runtime.MaxModelTokens = 5000, 100, 3300
+			runtime.CompletionReviewPolicy = func(context.Context, agentcontract.CompletionContext) bool { return true }
+			state.RoundsUsed = 1
+			RecordModelCall(state, agentcontract.ModelCallMetrics{Attempts: 1, Round: 1, UsageAvailable: true, InputTokens: 1000, OutputTokens: 100})
+			calls := 0
+			runtime.Model = completionBudgetModel{decisionModelFunc(func(_ context.Context, packet agentcontract.ContextPacket, prompt string) (agentcontract.Decision, error) {
+				calls++
+				metrics := &agentcontract.ModelCallMetrics{Attempts: 1, UsageAvailable: true, InputTokens: 1000, OutputTokens: 100}
+				if packet.CompletionReview != nil {
+					return agentcontract.Decision{Kind: "approve_completion", ModelCall: metrics}, nil
+				}
+				if !strings.Contains(prompt, "remaining token budget") {
+					t.Fatal("remaining allowance did not reserve a closing reply")
+				}
+				if attemptTool {
+					decision := callDecision("records.get")
+					decision.ModelCall = metrics
+					return decision, nil
+				}
+				return agentcontract.Decision{Kind: "final", AnswerMarkdown: "The requested information remains unverified within this run.", ModelCall: metrics}, nil
+			})}
+			if err := runtime.Step(t.Context(), state, nil); err != nil || provider.called != 0 || len(state.Pending) != 0 {
+				t.Fatal("closing decision dispatched more work", err, provider.called)
+			}
+			if attemptTool {
+				if state.Status != "failed" || state.ErrorCode == nil || *state.ErrorCode != "model_token_budget_exhausted" || calls != 1 {
+					t.Fatal("closing restriction lost its budget failure", state.Status, calls)
+				}
+			} else if state.Status != "completed" || calls != 2 || state.ModelUsage.BudgetTokens > runtime.MaxModelTokens {
+				t.Fatal("answer or required review exceeded the allowance", state.Status, calls, state.ModelUsage)
+			}
+		})
+	}
+}
 
 func TestRemainingRunBudgetProjectsDecisionAndReviewInput(t *testing.T) {
 	for _, review := range []bool{false, true} {

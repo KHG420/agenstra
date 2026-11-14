@@ -622,6 +622,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		return nil
 	}
 	finishing := state.Progress.NoProgressRounds >= max(1, r.MaxStagnantRounds-1)
+	finishingError := "agent_stagnated"
 	searchStalled := r.capabilitySearchStalled(state)
 	facts := map[string]agentcontract.Fact{}
 	for _, f := range state.Facts {
@@ -682,7 +683,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		if packet.Progress != nil {
 			prompt += "\n" + progressUsagePrompt
 			if review == nil && finishing {
-				prompt += "\n" + stagnationCompletionPrompt
+				if finishingError == "model_token_budget_exhausted" {
+					prompt += "\n" + tokenBudgetCompletionPrompt
+				} else {
+					prompt += "\n" + stagnationCompletionPrompt
+				}
 			}
 			if review == nil && packet.RoundsRemaining <= 2 {
 				prompt += "\nOnly the last decision/review rounds remain. Finish using retained evidence and state unresolved work explicitly. Reserve the remaining round for completion review when required."
@@ -794,6 +799,12 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		candidate := packet
 		packet, reason, targetMet := r.characterProjection(state, packet, prompt)
 		packet, window, tokenLimit, reserve, measurement, measureErr := r.tokenProjection(state, packet, prompt)
+		if measureErr == nil && review == nil && !finishing && state.RoundsUsed > 0 && packet.ModelTokensRemaining > 0 && packet.ModelTokensRemaining/2 <= measurement.Tokens+int64(max(1, packet.MaxModelOutputTokens)) {
+			finishing, finishingError = true, "model_token_budget_exhausted"
+			prompt += "\n" + tokenBudgetCompletionPrompt
+			packet, reason, targetMet = r.characterProjection(state, packet, prompt)
+			packet, window, tokenLimit, reserve, measurement, measureErr = r.tokenProjection(state, packet, prompt)
+		}
 		if measureErr == nil && contextCharacters(packet)+utf8.RuneCountInString(prompt) > r.MaxContextCharacters {
 			packet = budgetContext(packet, state, r.MaxContextCharacters-utf8.RuneCountInString(prompt))
 			packet, window, tokenLimit, reserve, measurement, measureErr = r.tokenProjection(state, packet, prompt)
@@ -943,7 +954,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			if finishing && review == nil && d.Kind != "final" && d.Kind != "request_input" {
 				recordDecision(state, d)
 				state.Status = "failed"
-				state.ErrorCode = agentcontract.Strptr("agent_stagnated")
+				state.ErrorCode = agentcontract.Strptr(finishingError)
 				return nil
 			}
 			if review != nil && d.Kind == "approve_completion" {
