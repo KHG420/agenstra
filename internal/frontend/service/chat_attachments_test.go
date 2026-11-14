@@ -111,6 +111,54 @@ func TestChatAttachmentsIsolationReferencesAndRetries(t *testing.T) {
 	}
 }
 
+func TestReadAttachmentFileRequiresPublishedSameConversation(t *testing.T) {
+	f, conversation := attachmentFixture(t)
+	text := "id,value\nzero,0\nmissing,\n" + strings.Repeat("row,original\n", 6000)
+	file, err := f.w.UploadAttachment(t.Context(), "alice", conversation.ID, "raw-file", "data.csv", strings.NewReader(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := f.w.SubmitMessage(t.Context(), "alice", conversation.ID, "before-file", "Import my file", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.w.ReadAttachmentFile(t.Context(), "alice", message.RunID, file.ID); agentcontract.ErrorCode(err) != "attachment_not_found" {
+		t.Fatalf("draft file became available to a run: %v", err)
+	}
+	message, err = f.w.SubmitMessageWithAttachments(t.Context(), "alice", conversation.ID, "published-file", "Import this file", "", nil, []string{file.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, original, err := f.w.ReadAttachmentFile(t.Context(), "alice", message.RunID, file.ID)
+	if err != nil || metadata.ID != file.ID || string(original) != text {
+		t.Fatal(metadata, err)
+	}
+	original[0] = 'x'
+	_, original, err = f.w.ReadAttachmentFile(t.Context(), "alice", message.RunID, file.ID)
+	if err != nil || string(original) != text {
+		t.Fatal("caller mutated stored bytes", err)
+	}
+	if _, _, err := f.w.ReadAttachmentFile(t.Context(), "bob", message.RunID, file.ID); err == nil {
+		t.Fatal("cross-owner original file read")
+	}
+	other, err := f.w.CreateConversation(t.Context(), "alice", "records")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherMessage, err := f.w.SubmitMessage(t.Context(), "alice", other.ID, "other", "Read the file", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.w.ReadAttachmentFile(t.Context(), "alice", otherMessage.RunID, file.ID); agentcontract.ErrorCode(err) != "attachment_not_found" {
+		t.Fatal("cross-conversation original file read", err)
+	}
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, _, err := f.w.ReadAttachmentFile(cancelled, "alice", message.RunID, file.ID); !errors.Is(err, context.Canceled) {
+		t.Fatal("cancelled original file read", err)
+	}
+}
+
 func TestChatAttachmentCancellationQuotaAndVisionCache(t *testing.T) {
 	f, c := attachmentFixture(t)
 	started := make(chan struct{})

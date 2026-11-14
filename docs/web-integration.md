@@ -468,4 +468,6 @@ HTTP 上传使用 `POST /chat/v1/conversations/{id}/attachments?client_id={stabl
 
 未发送的草稿可通过用户附件 API 管理，Agent 仅能读取已关联消息的附件。
 
+Go 宿主的文件导入适配器可调用 `WebIntegration.ReadAttachmentFile(ctx, owner, runID, attachmentID)` 取得原始元数据与独立文件字节。框架核对运行所属会话、文件已关联消息、当前权限、模型数据许可、文件预算和原始摘要。草稿及其他账号或会话的文件不可读取。宿主通过现有业务接口传输原文件，模型工具参数使用 attachment_id，原始二进制字节由适配器处理。
+
 启用附件后，框架为聊天运行增加 `chat.attachments.list` 与 `chat.attachments.read` 只读能力。Agent 从当前运行关联的会话读取，按文件名和原页码引用。历史发行版保留原能力契约，框架附件功能随新运行的发行版固定。
