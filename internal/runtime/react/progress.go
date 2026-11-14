@@ -248,6 +248,8 @@ const progressUsagePrompt = "progress summarizes observed outcomes; pending is u
 
 const stagnationCompletionPrompt = "Finish from the retained evidence now. The next unchanged round reaches the no-progress limit. Return final with the supported results and explicit unresolved parts, or request_input only for specific missing user information that enables an authorized route. No further tool calls, searches, skill reads or inspections are available in this closing decision. Preserve failed, pending and unknown outcomes; do not claim the entire task succeeded. Normal citation, host validation and completion review still apply."
 
+const tokenBudgetCompletionPrompt = "The remaining token budget must cover the answer and its completion review. Finish from retained evidence now with supported results and explicit unresolved parts, or request_input for specific missing user information. No further tool calls, searches, skill reads or inspections are available in this closing decision. Preserve failed, pending and unknown outcomes. Normal citation, host validation and completion review still apply."
+
 func repeatedFailurePrompt(state *agentcontract.RuntimeState, packet agentcontract.ContextPacket) string {
 	if packet.Progress == nil || packet.Progress.NoProgressRounds == 0 || len(packet.Progress.Pending) > 0 {
 		return ""
