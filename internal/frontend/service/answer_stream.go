@@ -47,15 +47,20 @@ func (s *HTTPServer) answerHTTP(w http.ResponseWriter, r *http.Request, owner st
 	if !write(update) {
 		return
 	}
+	var lastAnswer time.Time
 	interval := func(phase string) time.Duration {
-		// Waiting has no draft text to stream. Keep idle readers from consuming
-		// the host's identity-source budget while its workflow is doing work.
-		if phase == "waiting" {
+		if phase != "waiting" {
+			lastAnswer = time.Now()
+		}
+		// A withdrawn draft can be followed immediately by durable completion.
+		// Keep that handoff responsive, then reduce idle identity-source reads.
+		if phase == "waiting" && time.Since(lastAnswer) >= time.Second {
 			return time.Second
 		}
 		return 250 * time.Millisecond
 	}
-	ticker := time.NewTicker(interval(update.Phase))
+	pollInterval := interval(update.Phase)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	deadline := time.NewTimer(25 * time.Second)
 	defer deadline.Stop()
@@ -91,10 +96,11 @@ func (s *HTTPServer) answerHTTP(w http.ResponseWriter, r *http.Request, owner st
 				if !write(next) {
 					return
 				}
-				if next.Phase != update.Phase {
-					ticker.Reset(interval(next.Phase))
-				}
 				update = next
+			}
+			if nextInterval := interval(next.Phase); nextInterval != pollInterval {
+				ticker.Reset(nextInterval)
+				pollInterval = nextInterval
 			}
 		}
 	}

@@ -3,6 +3,7 @@ package service
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -133,6 +134,95 @@ func TestAnswerStreamTemporaryAuthorizationFailureCanReconnect(t *testing.T) {
 			t.Fatal("reconnect did not recover the saved answer", out.Body.String())
 		}
 	})
+}
+
+func TestAnswerStreamWithdrawalKeepsBriefFastPollingThenBacksOff(t *testing.T) {
+	for _, wait := range []bool{false, true} {
+		t.Run(fmt.Sprintf("long_wait=%t", wait), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := newWebFixture(t, &hostModel{}, false)
+				withdraw, finish := make(chan struct{}), make(chan struct{})
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				f.h.Model = contextBudgetModel(func(modelCtx context.Context, _ agentcontract.ContextPacket, _ string) (agentcontract.Decision, error) {
+					agentcontract.ObserveAnswer(modelCtx, agentcontract.AnswerUpdate{Text: "Draft", Phase: "generating"})
+					select {
+					case <-modelCtx.Done():
+						return agentcontract.Decision{}, modelCtx.Err()
+					case <-withdraw:
+					}
+					agentcontract.ObserveAnswer(modelCtx, agentcontract.AnswerUpdate{Phase: "waiting"})
+					select {
+					case <-modelCtx.Done():
+						return agentcontract.Decision{}, modelCtx.Err()
+					case <-finish:
+					}
+					return agentcontract.Decision{Kind: "final", AnswerMarkdown: "Persisted answer"}, nil
+				})
+				run, err := f.w.CreateBrowserRun(ctx, "alice", "records-web", f.session.ID, "Respond", "withdraw-stream")
+				if err != nil {
+					t.Fatal(err)
+				}
+				driven := make(chan error, 1)
+				go func() { _, err := f.h.Drive(ctx, run.RunID, "alice"); driven <- err }()
+				synctest.Wait()
+				resolve := f.h.PolicyResolver
+				var reads atomic.Int32
+				f.h.PolicyResolver = func(ctx context.Context, owner, pack string) (agentcontract.ExecutionPolicy, error) {
+					reads.Add(1)
+					return resolve(ctx, owner, pack)
+				}
+				out := httptest.NewRecorder()
+				s := &HTTPServer{Host: f.h, stop: make(chan struct{})}
+				exited := make(chan struct{})
+				go func() {
+					defer close(exited)
+					s.answerHTTP(out, httptest.NewRequestWithContext(ctx, "GET", "/runs/"+run.RunID+"/answer-stream", nil), "alice", nil)
+				}()
+				synctest.Wait()
+				if !strings.Contains(out.Body.String(), `"phase":"generating"`) {
+					t.Fatal("draft did not reach the stream")
+				}
+				close(withdraw)
+				time.Sleep(250 * time.Millisecond)
+				synctest.Wait()
+				if !strings.Contains(out.Body.String(), `"phase":"waiting"`) {
+					t.Fatal("withdrawn draft remained visible")
+				}
+				if wait {
+					time.Sleep(2750 * time.Millisecond)
+					synctest.Wait()
+					quietReads := reads.Load()
+					if quietReads > 7 {
+						t.Fatal("fast polling continued through an idle wait", quietReads)
+					}
+					time.Sleep(2 * time.Second)
+					synctest.Wait()
+					if reads.Load() != quietReads+2 {
+						t.Fatal("idle stream did not return to the one-second interval")
+					}
+				}
+				close(finish)
+				if err := <-driven; err != nil {
+					t.Fatal(err)
+				}
+				completionWait := 250 * time.Millisecond
+				if wait {
+					completionWait = time.Second
+				}
+				time.Sleep(completionWait)
+				synctest.Wait()
+				select {
+				case <-exited:
+				default:
+					t.Fatal("persisted completion waited for the idle polling interval")
+				}
+				if !strings.Contains(out.Body.String(), `"text":"Persisted answer","phase":"completed"`) {
+					t.Fatal("stream lost the durable completion", out.Body.String())
+				}
+			})
+		})
+	}
 }
 
 func TestAnswerStreamDisconnectExpiryAndServerShutdown(t *testing.T) {
