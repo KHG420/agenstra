@@ -100,6 +100,7 @@ type webRelease struct {
 // It is only used to mint web session tickets; tickets never authorize /runs or /admin.
 type WebIntegration struct {
 	attachmentSlots       chan struct{}
+	workReady             chan<- struct{}
 	Host                  *durablehost.AgentHost
 	Store                 *WebStore
 	Config                agentcontract.WebIntegrationConfig

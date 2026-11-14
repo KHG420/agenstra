@@ -74,7 +74,17 @@ func (s *HTTPServer) answerHTTP(w http.ResponseWriter, r *http.Request, owner st
 			}
 			next, err := s.Host.AnswerSnapshot(r.Context(), id, owner)
 			if err != nil {
-				write(agentcontract.AnswerUpdate{RunID: id, Phase: "failed"})
+				if r.Context().Err() != nil {
+					return
+				}
+				phase := "failed"
+				switch agentcontract.ErrorCode(err) {
+				case "authorization_unavailable", "connection_unavailable", "reconciliation_unavailable":
+					// A clean close lets the existing client reconnect and recheck
+					// access while the independently persisted run continues.
+					phase = "waiting"
+				}
+				write(agentcontract.AnswerUpdate{RunID: id, Phase: phase})
 				return
 			}
 			if next != update {

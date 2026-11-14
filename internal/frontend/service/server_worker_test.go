@@ -5,12 +5,51 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	deployassembly "github.com/KHG420/agenstra/internal/assembly/deployment"
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 	durablehost "github.com/KHG420/agenstra/internal/runtime/host"
 )
+
+func TestHTTPWorkerDispatchesQueuedChatWithoutPollingDelay(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		host := testHost(t, testStore(t), &hostProvider{}, &hostModel{})
+		host.Settings.MaxConcurrentRuns = 1
+		config := agentcontract.WebIntegrationConfig{Chat: true, DatabasePath: "web.sqlite3", SessionKeyEnv: "WEB_KEY", Integrations: map[string]agentcontract.WebProfileConfig{"records": {PackID: "records"}}}
+		deployment := &deployassembly.Deployment{BaseDir: t.TempDir(), Environment: map[string]string{"WEB_KEY": "01234567890123456789012345678901"}, Config: agentcontract.DeploymentConfig{WebIntegration: &config}}
+		server, err := NewHTTPServer(host, deployment, true, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := server.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		synctest.Wait()
+		conversation, err := server.Web.CreateConversation(t.Context(), "alice", "records")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var messages []agentcontract.ChatMessage
+		for _, text := range []string{"first", "second"} {
+			message, err := server.Web.SubmitMessage(t.Context(), "alice", conversation.ID, text, text, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			messages = append(messages, message)
+		}
+		synctest.Wait()
+		for _, message := range messages {
+			run, err := host.Store.GetRun(message.RunID, "alice")
+			if err != nil || run.Status != "completed" {
+				t.Fatalf("queued chat waited for the polling interval: status=%s err=%v", run.Status, err)
+			}
+		}
+	})
+}
 
 type independentWorkerModel struct {
 	started chan struct{}

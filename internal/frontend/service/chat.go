@@ -197,6 +197,14 @@ func (w *WebIntegration) SubmitMessageWithAttachments(ctx context.Context, owner
 		_, e = tx.Exec("INSERT INTO web_messages(id,owner,conversation,client_id,payload) VALUES($1,$2,$3,$4,$5)", m.ID, owner, conversation, clientID, raw)
 		return e
 	})
+	if e == nil {
+		// Coalesce notifications after commit. The periodic scan still recovers
+		// persisted work created by another process or before a restart.
+		select {
+		case w.workReady <- struct{}{}:
+		default:
+		}
+	}
 	return m, e
 }
 

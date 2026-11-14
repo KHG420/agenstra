@@ -91,6 +91,50 @@ func TestWaitingAnswerStreamBoundsAuthorizationReadsAndRechecksRevocation(t *tes
 	})
 }
 
+func TestAnswerStreamTemporaryAuthorizationFailureCanReconnect(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newWebFixture(t, &hostModel{}, false)
+		run, err := f.w.CreateBrowserRun(t.Context(), "alice", "records-web", f.session.ID, "Respond", "temporary-stream")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolve := f.h.PolicyResolver
+		var reads atomic.Int32
+		f.h.PolicyResolver = func(ctx context.Context, owner, pack string) (agentcontract.ExecutionPolicy, error) {
+			if reads.Add(1) == 2 {
+				return agentcontract.ExecutionPolicy{}, agentcontract.NewHostError("authorization_unavailable")
+			}
+			return resolve(ctx, owner, pack)
+		}
+		s := &HTTPServer{Host: f.h, stop: make(chan struct{})}
+		out := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.answerHTTP(out, httptest.NewRequest("GET", "/runs/"+run.RunID+"/answer-stream", nil), "alice", nil)
+		}()
+		synctest.Wait()
+		time.Sleep(time.Second)
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			t.Fatal("temporary read failure did not release the stream")
+		}
+		if strings.Contains(out.Body.String(), `"phase":"failed"`) {
+			t.Fatal("temporary authorization failure terminated the answer watcher", out.Body.String())
+		}
+		if _, err = f.h.Drive(t.Context(), run.RunID, "alice"); err != nil {
+			t.Fatal(err)
+		}
+		out = httptest.NewRecorder()
+		s.answerHTTP(out, httptest.NewRequest("GET", "/runs/"+run.RunID+"/answer-stream", nil), "alice", nil)
+		if !strings.Contains(out.Body.String(), `"phase":"completed"`) || !strings.Contains(out.Body.String(), `"text":"Done"`) {
+			t.Fatal("reconnect did not recover the saved answer", out.Body.String())
+		}
+	})
+}
+
 func TestAnswerStreamDisconnectExpiryAndServerShutdown(t *testing.T) {
 	for _, mode := range []string{"disconnect", "expiry", "shutdown"} {
 		t.Run(mode, func(t *testing.T) {

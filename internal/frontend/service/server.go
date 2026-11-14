@@ -31,6 +31,7 @@ type HTTPServer struct {
 	ready, workerFailed bool
 	stop                chan struct{}
 	done                chan struct{}
+	workReady           chan struct{}
 	workerCtx           context.Context
 	cancel              context.CancelFunc
 	handler             http.Handler
@@ -52,7 +53,7 @@ func NewHTTPServer(host *durablehost.AgentHost, deployment *deployassembly.Deplo
 	if host.Workflows == nil {
 		host.Workflows = deployment.Config.Workflows
 	}
-	s := &HTTPServer{Host: host, Deployment: deployment, WorkerEnabled: workerEnabled, WorkerInterval: interval, stop: make(chan struct{}), done: make(chan struct{})}
+	s := &HTTPServer{Host: host, Deployment: deployment, WorkerEnabled: workerEnabled, WorkerInterval: interval, stop: make(chan struct{}), done: make(chan struct{}), workReady: make(chan struct{}, 1)}
 	registryOpened := false
 	if deployment.Registry != nil {
 		if _, e := deployment.AdminKey(); e != nil {
@@ -78,6 +79,7 @@ func NewHTTPServer(host *durablehost.AgentHost, deployment *deployassembly.Deplo
 			}
 			return nil, e
 		}
+		s.Web.workReady = s.workReady
 	}
 	s.handler = http.HandlerFunc(s.serveHTTP)
 	s.workerCtx, s.cancel = context.WithCancel(context.Background())
@@ -158,7 +160,7 @@ func (s *HTTPServer) worker() {
 					}
 					active[run.RunID] = true
 					workers.Go(func() {
-						_, driveErr := s.Host.Drive(s.workerCtx, run.RunID, run.OwnerID)
+						completed, driveErr := s.Host.Drive(s.workerCtx, run.RunID, run.OwnerID)
 						var hostErr *agentcontract.HostError
 						if errors.Is(driveErr, runstore.ErrStoreConflict) || errors.Is(driveErr, runstore.ErrLeaseLost) || errors.As(driveErr, &hostErr) {
 							driveErr = nil
@@ -166,6 +168,12 @@ func (s *HTTPServer) worker() {
 						select {
 						case finished <- result{runID: run.RunID, err: driveErr}:
 						case <-s.workerCtx.Done():
+						}
+						if durablehost.Terminal(completed.Status) {
+							select {
+							case s.workReady <- struct{}{}:
+							default:
+							}
 						}
 					})
 				}
@@ -183,6 +191,7 @@ func (s *HTTPServer) worker() {
 		select {
 		case <-s.stop:
 			return
+		case <-s.workReady:
 		case <-ticker.C:
 		}
 	}
