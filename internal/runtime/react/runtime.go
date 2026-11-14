@@ -621,6 +621,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		state.ErrorCode = agentcontract.Strptr("agent_stagnated")
 		return nil
 	}
+	finishing := state.Progress.NoProgressRounds >= max(1, r.MaxStagnantRounds-1)
 	searchStalled := r.capabilitySearchStalled(state)
 	facts := map[string]agentcontract.Fact{}
 	for _, f := range state.Facts {
@@ -680,6 +681,12 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		}
 		if packet.Progress != nil {
 			prompt += "\n" + progressUsagePrompt
+			if review == nil && finishing {
+				prompt += "\n" + stagnationCompletionPrompt
+			}
+			if review == nil && packet.RoundsRemaining <= 2 {
+				prompt += "\nOnly the last decision/review rounds remain. Finish using retained evidence and state unresolved work explicitly. Reserve the remaining round for completion review when required."
+			}
 			if repeated := r.repeatedReadPrompt(state, packet); repeated != "" {
 				prompt += "\n" + repeated
 			}
@@ -932,6 +939,12 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		if err == nil {
 			if err := ctx.Err(); err != nil {
 				return err
+			}
+			if finishing && review == nil && d.Kind != "final" && d.Kind != "request_input" {
+				recordDecision(state, d)
+				state.Status = "failed"
+				state.ErrorCode = agentcontract.Strptr("agent_stagnated")
+				return nil
 			}
 			if review != nil && d.Kind == "approve_completion" {
 				// The detached model packet cannot replace this frozen proposal.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
@@ -109,6 +110,29 @@ func TestRepeatedUnchangedReadsStillStagnate(t *testing.T) {
 	result, err := r.Run(t.Context(), "Read until the record changes")
 	if err != nil || result.Status != "failed" || result.ErrorCode == nil || *result.ErrorCode != "agent_stagnated" || p.called <= 2 {
 		t.Fatalf("unchanged reads: calls=%d result=%+v err=%v", p.called, result, err)
+	}
+}
+
+func TestStagnationReservesAnEvidenceBasedReplyBeforeTheHardStop(t *testing.T) {
+	provider := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{"records.get": {Name: "records.get", Effect: "read", Replay: "safe"}}}
+	calls, closingCalls := 0, 0
+	runtime := &AgentRuntime{Provider: provider, Grants: map[string]bool{"records.get": true}, MaxStagnantRounds: 3,
+		Model: decisionModelFunc(func(_ context.Context, packet agentcontract.ContextPacket, prompt string) (agentcontract.Decision, error) {
+			calls++
+			if packet.CompletionReview != nil {
+				return agentcontract.Decision{Kind: "approve_completion"}, nil
+			}
+			if strings.Contains(prompt, "Finish from the retained evidence now") {
+				closingCalls++
+				return agentcontract.Decision{Kind: "final", AnswerMarkdown: "The available record was read. Further requested information remains unavailable.", FactIDs: []string{packet.Facts[0].FactID}}, nil
+			}
+			decision := callDecision("records.get")
+			decision.Calls[0].CallRef = fmt.Sprintf("read-%d", calls)
+			return decision, nil
+		})}
+	result, err := runtime.Run(t.Context(), "Read the requested records and explain any unavailable information")
+	if err != nil || result.Status != "completed" || closingCalls != 1 || provider.called > 3 {
+		t.Fatalf("no bounded reply before stagnation: status=%s closing=%d reads=%d err=%v", result.Status, closingCalls, provider.called, err)
 	}
 }
 
