@@ -21,6 +21,9 @@ func (p *specialistTestProvider) Skills() map[string]agentcontract.Skill {
 type specialistTestModel struct{ t *testing.T }
 
 func (m *specialistTestModel) Decide(_ context.Context, packet agentcontract.ContextPacket, prompt string) (agentcontract.Decision, error) {
+	if packet.Instruction != "Collect the record." && !strings.Contains(prompt, "specialist") {
+		m.t.Fatal("coordinator cannot discover the configured specialist")
+	}
 	if packet.CompletionReview != nil {
 		return agentcontract.Decision{Schema: "agenstra.decision.v1", Kind: "approve_completion"}, nil
 	}
@@ -77,6 +80,10 @@ func queuedSpecialist(t *testing.T) (*AgentHost, *hostProvider, agentcontract.St
 	parent, err := h.Create(t.Context(), "alice", "records", "Delegate the record task.", "parent")
 	if err != nil {
 		t.Fatal(err)
+	}
+	provider, err := h.wrapWorkflows(parent, &specialistTestProvider{base})
+	if err != nil || !strings.Contains(provider.Capabilities()["workflows.list"].Description, definition.Description) {
+		t.Fatal("specialist purpose is absent from capability discovery", err)
 	}
 	parent, err = h.Drive(t.Context(), parent.RunID, "alice")
 	if err != nil || parent.Status != "waiting" {

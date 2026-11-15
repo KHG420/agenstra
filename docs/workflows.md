@@ -8,7 +8,7 @@
 
 ### 隔离子 Agent
 
-`SubagentDefinition.Workflow()` 将一个专家声明转换为单 Agent 工作流，沿用 `workflows.list/start/status/cancel`。主 Agent 依据任务目标和专家描述选择调用，传入 `input.task`。专家使用独立的提示词、声明的技能与工具范围，按当前账号授权执行。父运行等待工作流时释放运行名额。
+`SubagentDefinition.Workflow()` 将一个专家声明转换为单 Agent 工作流，沿用 `workflows.list/start/status/cancel`。主 Agent 依据任务目标和专家描述选择调用，传入 `input.task`。专家名称与用途进入协调上下文及 `workflows.list` 的能力描述，使延迟工具搜索能够按业务语义发现专家入口。专家使用独立的提示词、声明的技能与工具范围，按当前账号授权执行。父运行等待工作流时释放运行名额。
 
 ```go
 specialist, err := (agenstra.SubagentDefinition{
