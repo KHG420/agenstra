@@ -1212,6 +1212,9 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 			if e := settleWorkflowSteps(state); e != nil {
 				return run, e
 			}
+			if e := h.accountSubagentUsage(run, state); e != nil {
+				return run, e
+			}
 			state.Pending = []agentcontract.Invocation{}
 			run, e = h.save(run, state, "", nil, nil)
 			if e != nil {

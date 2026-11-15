@@ -93,7 +93,7 @@ func EvaluateRun(ctx context.Context, run agentcontract.StoredRun, c agentcontra
 		if err != nil {
 			return result, err
 		}
-		err = check(ctx, agentcontract.CompletionContext{RunID: run.RunID, OriginPackID: run.PackID, Instruction: state.Instruction, AnswerMarkdown: state.AnswerMarkdown, FactIDs: citations, Facts: state.Facts, Observations: state.Observations})
+		err = check(ctx, agentcontract.CompletionContext{RunID: run.RunID, OriginPackID: run.PackID, Instruction: state.Instruction, AnswerMarkdown: state.AnswerMarkdown, FactIDs: citations, Facts: state.Facts, Observations: state.Observations, LoadedSkills: append([]string{}, state.LoadedSkills...)})
 		code := ""
 		if err != nil {
 			code = agentcontract.ErrorCode(err)

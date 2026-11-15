@@ -16,6 +16,13 @@ type workflowProvider struct {
 }
 
 func (h *AgentHost) wrapWorkflows(run agentcontract.StoredRun, base agentcontract.CapabilityProvider) (agentcontract.CapabilityProvider, error) {
+	parent, err := workflowAgentScope(run)
+	if err != nil {
+		return nil, err
+	}
+	if parent.StepID != "" && parent.SystemPrompt != "" {
+		return scopedWorkflowAgent(base, parent)
+	}
 	value := run.State["workflow_catalog"]
 	if value == nil {
 		return base, nil

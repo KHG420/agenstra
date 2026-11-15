@@ -108,7 +108,22 @@ func (h *AgentHost) createWorkflow(ctx context.Context, owner, pack, name string
 	if parent == nil {
 		envelope, err = h.prepareRun(ctx, owner, pack, instruction, id)
 	} else {
-		envelope, err = h.prepareWorkflowChild(ctx, *parent, instruction, id, nil)
+		var progress *agentcontract.RuntimeState
+		if definition.Subagent {
+			current, readErr := h.Store.GetRun(parent.RunID, parent.OwnerID)
+			if readErr != nil {
+				return agentcontract.StoredRun{}, readErr
+			}
+			parent = &current
+			if err := h.subagentSlot(current, id); err != nil {
+				return agentcontract.StoredRun{}, err
+			}
+			progress, err = h.Restore(current)
+			if err != nil {
+				return agentcontract.StoredRun{}, err
+			}
+		}
+		envelope, err = h.prepareWorkflowChild(ctx, *parent, instruction, id, progress)
 	}
 	if err != nil {
 		return agentcontract.StoredRun{}, err

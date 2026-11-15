@@ -422,6 +422,7 @@ type RuntimeState struct {
 	InputPrompt             *string               `json:"input_prompt"`
 	InputSchema             *RequestedInputSchema `json:"input_schema,omitempty"`
 	ModelCalls              []ModelCallMetrics    `json:"model_calls,omitempty"`
+	DelegatedModelCalls     []ModelCallMetrics    `json:"delegated_model_calls,omitempty"`
 	ModelUsage              ModelUsage            `json:"model_usage"`
 	Progress                *ProgressTracker      `json:"progress_tracker,omitempty"`
 	SteeringCursor          int                   `json:"steering_cursor,omitempty"`

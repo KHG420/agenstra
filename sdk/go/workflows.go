@@ -11,6 +11,10 @@ type WorkflowStep = agent.WorkflowStep
 // WorkflowAgent declares a bounded Agent task and its allowed tool subset.
 type WorkflowAgent = agent.WorkflowAgent
 
+// SubagentDefinition declares a specialist with isolated instructions, skills,
+// tool scope and returned evidence, using the durable workflow execution path.
+type SubagentDefinition = agent.SubagentDefinition
+
 // WorkflowCondition compares a resolved JSON value with a literal value.
 type WorkflowCondition = agent.WorkflowCondition
 

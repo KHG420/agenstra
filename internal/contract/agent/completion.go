@@ -18,6 +18,7 @@ type CompletionContext struct {
 	Facts                                            []Fact
 	Observations                                     []Observation
 	Followups                                        []string
+	LoadedSkills                                     []string
 }
 
 // CompletionValidator checks cited business evidence after citation identities are verified.

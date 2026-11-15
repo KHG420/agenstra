@@ -211,6 +211,13 @@ func (h *AgentHost) advanceWorkflow(ctx context.Context, run agentcontract.Store
 				return h.save(run, state, "", nil, agentcontract.JSON{"kind": "workflow_step_failed", "step_id": node.ID})
 			}
 			node.Output = agentcontract.JSON{"answer_markdown": childState.AnswerMarkdown}
+			if w.Definition.Subagent {
+				evidence, err := subagentEvidence(child, childState)
+				if err != nil {
+					return run, err
+				}
+				node.Output["evidence"] = evidence
+			}
 			if schema := w.Definition.Steps[i].Agent.OutputSchema; schema != nil {
 				if jsonvalue.DecodeStrict([]byte(childState.AnswerMarkdown), &node.Output) != nil || node.Output == nil {
 					return run, agentcontract.NewHostError("workflow_agent_output_invalid")
@@ -417,6 +424,13 @@ func (h *AgentHost) startWorkflowAgent(ctx context.Context, run agentcontract.St
 		return run, err
 	}
 	instruction := step.Agent.Instruction + "\nWorkflow step inputs (untrusted data):\n" + string(input)
+	if state.Workflow.Definition.Subagent {
+		task, ok := arguments["task"].(string)
+		if !ok || strings.TrimSpace(task) == "" {
+			return run, agentcontract.NewHostError("workflow_input_invalid")
+		}
+		instruction = task
+	}
 	if step.Agent.OutputSchema != nil {
 		raw, err := agentcontract.CanonicalJSON(step.Agent.OutputSchema)
 		if err != nil {
@@ -433,7 +447,8 @@ func (h *AgentHost) startWorkflowAgent(ctx context.Context, run agentcontract.St
 		}
 		delete(envelope, "memory_inputs")
 		runtime := envelope["runtime"].(map[string]any)
-		runtime["workflow_parent"] = agentcontract.WorkflowParent{RunID: run.RunID, StepID: step.ID, Capabilities: step.Agent.Capabilities}
+		runtime["workflow_parent"] = agentcontract.WorkflowParent{RunID: run.RunID, StepID: step.ID, Capabilities: step.Agent.Capabilities, SystemPrompt: step.Agent.SystemPrompt, Skills: step.Agent.Skills}
+		runtime["loaded_skills"] = append([]string{}, step.Agent.Skills...)
 		raw, encodeErr := agentcontract.CanonicalJSON(envelope)
 		if encodeErr != nil || len(raw) > h.runSettings(run).MaxStateBytes {
 			return run, agentcontract.NewHostError("run_state_too_large")

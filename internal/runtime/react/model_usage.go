@@ -16,6 +16,9 @@ func RebuildModelUsage(state *agentcontract.RuntimeState) {
 	for _, metrics := range state.ModelCalls {
 		AddModelUsage(&state.ModelUsage, metrics)
 	}
+	for _, metrics := range state.DelegatedModelCalls {
+		AddModelUsage(&state.ModelUsage, metrics)
+	}
 }
 
 // AddModelUsage accumulates reported and estimated usage without treating unavailable provider usage as reported zero.

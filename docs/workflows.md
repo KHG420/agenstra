@@ -6,6 +6,32 @@
 
 ## 宿主声明
 
+### 隔离子 Agent
+
+`SubagentDefinition.Workflow()` 将一个专家声明转换为单 Agent 工作流，沿用 `workflows.list/start/status/cancel`。主 Agent 依据任务目标和专家描述选择调用，传入 `input.task`。专家使用独立的提示词、声明的技能与工具范围，按当前账号授权执行。父运行等待工作流时释放运行名额。
+
+```go
+specialist, err := (agenstra.SubagentDefinition{
+    Name: "record-specialist", Version: "1",
+    Description: "读取并解释授权记录",
+    SystemPrompt: agenstra.AgentPrompt("按记录证据回答当前任务。"),
+    Capabilities: []string{"records.get"},
+    Skills: []string{"record-analysis"},
+}).Workflow()
+if err != nil {
+    return err
+}
+host.Workflows["reports"] = append(host.Workflows["reports"], specialist)
+```
+
+专家输入是本次委派的任务正文。`SystemPrompt` 与 `Skills` 由受信任定义提供并冻结，技能在子运行中预加载。专家工具目录按声明裁剪，并与父级实时授权取交集。子运行通过原有 Host 检查点恢复，模型配置继承父运行，聊天历史由主 Agent 持有。子任务正文按工作流输入处理，长期记忆提取沿用既有子运行限制。
+
+完成后，`output.answer_markdown` 保存专家回答，`output.evidence` 保存来源运行及被引用 Fact 的模型可见值。主 Agent 引用当前运行的工作流 Fact，嵌套 `source_run_id` 和 `source_fact_id` 用于追溯原始证据。业务写入仍通过原有权限与审批。首个性能专家接入可以声明读取类工具。
+
+每个父运行同时执行一个专家委派。稳定 invocation ID 使恢复复用原子任务，第二个在途专家返回 `subagent_busy`。专家继承父运行剩余的时间、轮次、Token 和工具预算，完成的调用用量与父级已结算批次一并原子入账。运行遥测包含 `delegated_model_calls`，取消沿父子链传播。专家目录中只保留其声明的工具和技能。
+
+### 多步骤工作流
+
 ```go
 host.Workflows = map[string][]agenstra.WorkflowDefinition{
     "reports": {{

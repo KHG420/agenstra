@@ -987,7 +987,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 					return nil
 				}
 				if !needsReview {
-					completion, err := jsonvalue.Clone(agentcontract.CompletionContext{RunID: state.RunID, OriginPackID: r.OriginPackID, Instruction: state.Instruction, AnswerMarkdown: d.AnswerMarkdown, FactIDs: d.FactIDs, Facts: state.Facts, Observations: state.Observations, Followups: state.Followups})
+					completion, err := jsonvalue.Clone(agentcontract.CompletionContext{RunID: state.RunID, OriginPackID: r.OriginPackID, Instruction: state.Instruction, AnswerMarkdown: d.AnswerMarkdown, FactIDs: d.FactIDs, Facts: state.Facts, Observations: state.Observations, Followups: state.Followups, LoadedSkills: append([]string{}, state.LoadedSkills...)})
 					if err != nil {
 						state.Status = "failed"
 						state.ErrorCode = agentcontract.Strptr("run_state_invalid")
@@ -1003,7 +1003,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 					}
 				}
 				if r.CompletionPreflight != nil {
-					completion, err := jsonvalue.Clone(agentcontract.CompletionContext{RunID: state.RunID, OriginPackID: r.OriginPackID, Instruction: state.Instruction, AnswerMarkdown: d.AnswerMarkdown, FactIDs: d.FactIDs, Facts: state.Facts, Observations: state.Observations, Followups: state.Followups})
+					completion, err := jsonvalue.Clone(agentcontract.CompletionContext{RunID: state.RunID, OriginPackID: r.OriginPackID, Instruction: state.Instruction, AnswerMarkdown: d.AnswerMarkdown, FactIDs: d.FactIDs, Facts: state.Facts, Observations: state.Observations, Followups: state.Followups, LoadedSkills: append([]string{}, state.LoadedSkills...)})
 					if err != nil {
 						state.Status = "failed"
 						state.ErrorCode = agentcontract.Strptr("run_state_invalid")
@@ -1157,7 +1157,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		if code != "" {
 			Reject(state, "final", "agent.final", code, agentcontract.JSON{"feedback": feedback}, "")
 		} else if r.CompletionValidator != nil {
-			err := r.CompletionValidator(ctx, agentcontract.CompletionContext{RunID: state.RunID, OriginPackID: r.OriginPackID, Instruction: state.Instruction, AnswerMarkdown: decision.AnswerMarkdown, FactIDs: decision.FactIDs, Facts: state.Facts, Observations: state.Observations, Followups: state.Followups})
+			err := r.CompletionValidator(ctx, agentcontract.CompletionContext{RunID: state.RunID, OriginPackID: r.OriginPackID, Instruction: state.Instruction, AnswerMarkdown: decision.AnswerMarkdown, FactIDs: decision.FactIDs, Facts: state.Facts, Observations: state.Observations, Followups: state.Followups, LoadedSkills: append([]string{}, state.LoadedSkills...)})
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}

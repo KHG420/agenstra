@@ -14,6 +14,7 @@ var workflowName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,47}$`)
 // Arguments, output and answer accept {"$workflow":"/input/field"} or
 // {"$workflow":"/steps/step_id/data/field"} JSON Pointer references.
 type WorkflowDefinition struct {
+	Subagent    bool           `json:"subagent,omitempty"`
 	Name        string         `json:"name"`
 	Version     string         `json:"version"`
 	Description string         `json:"description"`
@@ -40,6 +41,8 @@ type WorkflowAgent struct {
 	Instruction  string   `json:"instruction"`
 	Capabilities []string `json:"capabilities"`
 	OutputSchema JSON     `json:"output_schema,omitempty"`
+	SystemPrompt string   `json:"system_prompt,omitempty"`
+	Skills       []string `json:"skills,omitempty"`
 }
 
 // WorkflowCondition compares a resolved value with a literal JSON value.
@@ -72,6 +75,8 @@ type WorkflowParent struct {
 	RunID        string   `json:"run_id"`
 	StepID       string   `json:"step_id,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty"`
+	SystemPrompt string   `json:"system_prompt,omitempty"`
+	Skills       []string `json:"skills,omitempty"`
 }
 
 // WorkflowInfo is the authorized catalog entry disclosed to clients and models.
@@ -107,6 +112,9 @@ func (w WorkflowDefinition) Validate() error {
 	if w.InputSchema == nil {
 		return bad()
 	}
+	if w.Subagent && (len(w.Steps) != 1 || w.Steps[0].Agent == nil || strings.TrimSpace(w.Steps[0].Agent.SystemPrompt) == "" || w.Steps[0].Agent.OutputSchema != nil) {
+		return bad()
+	}
 	if _, err := ValidateLocalSchema(w.InputSchema, false); err != nil {
 		return bad()
 	}
@@ -116,6 +124,14 @@ func (w WorkflowDefinition) Validate() error {
 			return bad()
 		}
 		if step.Agent != nil {
+			if len(step.Agent.SystemPrompt) > 32000 || len(step.Agent.Skills) > 64 {
+				return bad()
+			}
+			for _, skill := range step.Agent.Skills {
+				if strings.TrimSpace(skill) == "" || len(skill) > 128 {
+					return bad()
+				}
+			}
 			if strings.TrimSpace(step.Agent.Instruction) == "" || len(step.Agent.Instruction) > 12000 || len(step.Agent.Capabilities) > 200 {
 				return bad()
 			}
