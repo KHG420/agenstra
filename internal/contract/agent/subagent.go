@@ -3,6 +3,7 @@ package agent
 import "strings"
 
 // SubagentDefinition declares an isolated specialist called through workflows.start.
+// Its declared tools and skills are exposed only within the specialist context.
 // Its tools remain a subset of the originating owner's live grants. Execution
 // uses the existing durable workflow, child-run, cancellation and budget paths.
 type SubagentDefinition struct {

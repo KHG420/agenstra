@@ -37,6 +37,16 @@ func (m *specialistTestModel) Decide(_ context.Context, packet agentcontract.Con
 			return callDecision("records.get"), nil
 		}
 	} else if len(packet.Facts) == 0 {
+		for _, skill := range packet.Skills {
+			if skill["name"] == "domain" {
+				m.t.Fatal("coordinator still exposes the specialist skill")
+			}
+		}
+		for _, capability := range packet.Capabilities {
+			if capability["name"] == "records.get" {
+				m.t.Fatal("coordinator still exposes the specialist capability")
+			}
+		}
 		return agentcontract.Decision{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []agentcontract.ToolCall{{CallRef: "specialist-1", Capability: "workflows.start", Arguments: agentcontract.JSON{"workflow": "specialist", "input": agentcontract.JSON{"task": "Collect the record."}}, Reason: "Delegate the focused task"}}}, nil
 	}
 	ids := []string{}
