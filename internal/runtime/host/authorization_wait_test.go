@@ -292,3 +292,78 @@ func TestOperationPollAuthorizationWaitKeepsTheExistingReceipt(t *testing.T) {
 		t.Fatal("authorization retry changed a submitted operation", item)
 	}
 }
+
+func TestOperationPollTemporaryAuthorizationRecoversWithoutResubmitting(t *testing.T) {
+	h, provider, now := asyncReceiptHost(t, func(agentcontract.JSON) agentcontract.JSON {
+		return agentcontract.JSON{"id": "private-job-token", "status": "succeeded"}
+	}, nil)
+	run := createTestHostRun(t, h)
+	run, err := h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "waiting" || provider.calls != 1 {
+		t.Fatal(run.Status, provider.calls, err)
+	}
+	state, err := h.Restore(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocationID, operationID, factID := state.Pending[0].InvocationID, state.Pending[0].Operation.OperationID, *state.Pending[0].FactID
+	original := provider.hook
+	polls := 0
+	provider.hook = func(ctx context.Context, name string, args agentcontract.JSON, inv *agentcontract.InvocationContext) (agentcontract.CapabilityResult, error) {
+		if name == "job.status" {
+			polls++
+			if polls == 1 {
+				return agentcontract.CapabilityResult{ErrorCode: "authorization_unavailable"}, nil
+			}
+		}
+		return original(ctx, name, args, inv)
+	}
+	*now = *run.NextWakeAt + 1
+	run, err = h.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "waiting" || run.NextWakeAt == nil || provider.calls != 2 {
+		t.Fatalf("temporary read-poll authorization failure did not wait: status=%s calls=%d err=%v", run.Status, provider.calls, err)
+	}
+	state, err = h.Restore(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := state.Pending[0]
+	if item.InvocationID != invocationID || item.Operation.OperationID != operationID || *item.FactID != factID || item.Status != "waiting" || item.PollInFlight || state.PollCallsUsed != 1 {
+		t.Fatal("read-poll recovery changed the submitted operation", item)
+	}
+	restarted := NewAgentHost(h.Store, h.ProviderFactory, h.Model, h.PolicyResolver)
+	restarted.Settings, restarted.Clock = h.Settings, h.Clock
+	*now = *run.NextWakeAt + 1
+	run, err = restarted.Drive(t.Context(), run.RunID, "alice")
+	if err != nil || run.Status != "completed" || provider.calls != 3 || polls != 2 {
+		t.Fatal("read-poll recovery resubmitted or failed to complete the operation", run.Status, provider.calls, polls, err)
+	}
+}
+
+func TestOperationPollAuthorizationRecoveryKeepsDenialAndDeadline(t *testing.T) {
+	for _, mode := range []string{"denial", "deadline"} {
+		t.Run(mode, func(t *testing.T) {
+			h, provider, now := asyncReceiptHost(t, nil, nil)
+			run := createTestHostRun(t, h)
+			run, err := h.Drive(t.Context(), run.RunID, "alice")
+			if err != nil || run.Status != "waiting" {
+				t.Fatal(run.Status, err)
+			}
+			code, want := "access_denied", "needs_authorization"
+			if mode == "deadline" {
+				code, want = "authorization_unavailable", "needs_reconciliation"
+			}
+			provider.hook = func(context.Context, string, agentcontract.JSON, *agentcontract.InvocationContext) (agentcontract.CapabilityResult, error) {
+				if mode == "deadline" {
+					*now = run.CreatedAt + h.runSettings(run).MaxRunSeconds
+				}
+				return agentcontract.CapabilityResult{ErrorCode: code}, nil
+			}
+			*now = *run.NextWakeAt + 1
+			run, err = h.Drive(t.Context(), run.RunID, "alice")
+			if err != nil || run.Status != want || run.NextWakeAt != nil || provider.calls != 2 {
+				t.Fatal(mode, run.Status, provider.calls, err)
+			}
+		})
+	}
+}

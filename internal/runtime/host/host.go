@@ -900,6 +900,13 @@ func (h *AgentHost) poll(ctx context.Context, run agentcontract.StoredRun, state
 		outcome = agentcontract.CallOutcome{ErrorCode: "provider_outcome_unknown"}
 	}
 	item.PollInFlight = false
+	if outcome.ErrorCode == "authorization_unavailable" {
+		// pollAccess admits read-only status checks. Keep the submitted operation
+		// and its evidence while retrying authorization within the original budget.
+		receipt.NextPollAt = h.Now() + receipt.Binding.IntervalSeconds
+		item.ErrorCode = agentcontract.Strptr(outcome.ErrorCode)
+		return h.waitForAuthorization(ctx, run, state, agentcontract.NewHostError(outcome.ErrorCode))
+	}
 	if definiteAuth(outcome.ErrorCode) {
 		state.Status = "needs_authorization"
 		state.ErrorCode = agentcontract.Strptr(outcome.ErrorCode)
