@@ -85,6 +85,16 @@ func queuedSpecialist(t *testing.T) (*AgentHost, *hostProvider, agentcontract.St
 	if err != nil || !strings.Contains(provider.Capabilities()["workflows.list"].Description, definition.Description) {
 		t.Fatal("specialist purpose is absent from capability discovery", err)
 	}
+	start := provider.Capabilities()["workflows.start"]
+	validator, err := agentcontract.ValidateLocalSchema(start.InputSchema, false)
+	if err != nil || !strings.Contains(start.Description, definition.Description) {
+		t.Fatal("specialist start contract is not directly discoverable", err)
+	}
+	valid := agentcontract.JSON{"workflow": "specialist", "input": agentcontract.JSON{"task": "Collect the record."}}
+	invalid := agentcontract.JSON{"workflow": "specialist", "input": agentcontract.JSON{"task": "Collect the record.", "extra": true}}
+	if agentcontract.ValidateSchema(validator, valid) != nil || agentcontract.ValidateSchema(validator, invalid) == nil {
+		t.Fatal("start schema lost the selected specialist input contract")
+	}
 	parent, err = h.Drive(t.Context(), parent.RunID, "alice")
 	if err != nil || parent.Status != "waiting" {
 		t.Fatal(parent.Status, err)
