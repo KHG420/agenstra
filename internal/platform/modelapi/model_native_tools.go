@@ -148,11 +148,11 @@ func nativeDecisionOutputTools(tools []any, packet agentcontract.ContextPacket) 
 	return result, nil
 }
 
-// DeepSeek thinking requires auto tool choice. Its ordinary conversation text
-// is a final answer only before any business evidence exists. It cannot propose
-// calls, supply citations or approve a completion review.
+// Ordinary DeepSeek conversation text can be a final answer before business
+// evidence exists. Native calls, citations and completion review use their
+// declared structured functions in both thinking modes.
 func (m *HTTPJSONDecisionModel) allowsNativeConversation(packet agentcontract.ContextPacket) bool {
-	return m.DecisionOutputMode == "native_tools" && m.APIType == "deepseek_chat" && m.Thinking != "disabled" && packet.Schema == "agenstra.context.v1" && packet.CompletionReview == nil && len(packet.Facts) == 0 && len(packet.Observations) == 0 && len(packet.ActionOutcomes) == 0
+	return m.DecisionOutputMode == "native_tools" && m.APIType == "deepseek_chat" && packet.Schema == "agenstra.context.v1" && packet.CompletionReview == nil && len(packet.Facts) == 0 && len(packet.Observations) == 0 && len(packet.ActionOutcomes) == 0
 }
 
 func nativeConversationText(content string) string {

@@ -294,8 +294,14 @@ func TestThinkingPolicyMeasuresAndSendsSameModeWithoutReroutingProfiles(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, task := range []string{"simple", "complex", "simple"} {
-		p := agentcontract.ContextPacket{Schema: "agenstra.context.v1", Instruction: task}
+	for _, sample := range []struct {
+		task     string
+		evidence bool
+	}{{"simple", false}, {"complex", false}, {"simple", false}, {"simple", true}} {
+		p := agentcontract.ContextPacket{Schema: "agenstra.context.v1", Instruction: sample.task}
+		if sample.evidence {
+			p.Facts = []agentcontract.FactView{{Fact: agentcontract.Fact{FactID: "existing-evidence"}}}
+		}
 		measurement, err := selected.MeasureInput(p, "Use native functions.")
 		if err != nil {
 			t.Fatal(err)
@@ -310,8 +316,11 @@ func TestThinkingPolicyMeasuresAndSendsSameModeWithoutReroutingProfiles(t *testi
 			t.Error(err)
 		}
 		mode, choice := "enabled", "auto"
-		if task == "simple" {
-			mode, choice = "disabled", "required"
+		if sample.task == "simple" {
+			mode = "disabled"
+			if sample.evidence {
+				choice = "required"
+			}
 		}
 		if payload["thinking"].(map[string]any)["type"] != mode || payload["tool_choice"] != choice || decision.ModelCall.Thinking != mode || decision.ModelCall.Profile != "business" {
 			t.Fatal("actual mode or frozen profile differs", payload["thinking"], decision.ModelCall)
@@ -319,7 +328,7 @@ func TestThinkingPolicyMeasuresAndSendsSameModeWithoutReroutingProfiles(t *testi
 		if measurement.Tokens != int64(len(raw)+128) || decision.ModelCall.EstimatedInputTokens != measurement.Tokens || decision.ModelCall.Attempts != 1 {
 			t.Fatal("measurement or request count changed", measurement, decision.ModelCall)
 		}
-		if task == "simple" && payload["reasoning_effort"] != nil {
+		if sample.task == "simple" && payload["reasoning_effort"] != nil {
 			t.Fatal("disabled thinking retained incompatible effort")
 		}
 	}

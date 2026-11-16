@@ -351,7 +351,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 		}
 		// DeepSeek rejects forced tool choices while thinking is enabled (also
 		// the default). Keep the declared tools and strict local output checks.
-		if m.APIType == "deepseek_chat" && m.Thinking != "disabled" {
+		if m.APIType == "deepseek_chat" && (m.Thinking != "disabled" || m.allowsNativeConversation(packet)) {
 			toolChoice = "auto"
 		}
 		if m.DecisionOutputMode == "native_tools" {
@@ -363,7 +363,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 			delete(payload, "response_format")
 			nativePrompt := nativeDecisionToolPrompt(prompt, packet.CompletionReview != nil, len(nativeFunctionCapabilities(packet)) > 0)
 			if m.allowsNativeConversation(packet) {
-				nativePrompt += "\nFor an ordinary conversational reply that needs no business lookup, you may also answer directly in natural language. Do not write JSON decisions or proposed function calls in message content. Business operations still require declared native functions. Once business evidence exists, final must include its fact_ids through the declared final function."
+				nativePrompt += "\nFor an ordinary conversational reply that needs no business lookup, you may also answer directly in natural language. Do not write JSON decisions or proposed function calls in message content. For requested JSON or code-block output, use the declared final function and put the requested content in answer_markdown. Business operations still require declared native functions. Once business evidence exists, final must include its fact_ids through the declared final function."
 			}
 			messages[0] = agentcontract.JSON{"role": "system", "content": nativePrompt}
 			for _, item := range messages[1:] {

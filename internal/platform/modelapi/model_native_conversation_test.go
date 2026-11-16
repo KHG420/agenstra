@@ -13,9 +13,13 @@ import (
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
 
-func TestNativeThinkingConversationText(t *testing.T) {
-	for _, streaming := range []bool{false, true} {
-		t.Run(fmt.Sprintf("stream=%t", streaming), func(t *testing.T) {
+func TestNativeConversationTextPreservesThinkingAndStreaming(t *testing.T) {
+	for _, mode := range []struct {
+		thinking  string
+		streaming bool
+	}{{"enabled", false}, {"enabled", true}, {"disabled", false}, {"disabled", true}} {
+		streaming := mode.streaming
+		t.Run(fmt.Sprintf("thinking=%s/stream=%t", mode.thinking, streaming), func(t *testing.T) {
 			var requests atomic.Int32
 			release := make(chan struct{})
 			defer close(release)
@@ -26,7 +30,7 @@ func TestNativeThinkingConversationText(t *testing.T) {
 					t.Error(err)
 					return
 				}
-				if payload["tool_choice"] != "auto" || payload["thinking"].(map[string]any)["type"] != "enabled" {
+				if payload["tool_choice"] != "auto" || payload["thinking"].(map[string]any)["type"] != mode.thinking {
 					t.Error("configured thinking or native tool choice changed")
 				}
 				if streaming {
@@ -53,7 +57,7 @@ func TestNativeThinkingConversationText(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			model.APIType, model.Thinking, model.DecisionOutputMode = "deepseek_chat", "enabled", "native_tools"
+			model.APIType, model.Thinking, model.DecisionOutputMode = "deepseek_chat", mode.thinking, "native_tools"
 			model.StreamAnswers, model.MaxAttempts = streaming, 1
 			updates := make(chan agentcontract.AnswerUpdate, 8)
 			ctx := agentcontract.WithAnswerObserver(t.Context(), func(u agentcontract.AnswerUpdate) { updates <- u })
@@ -88,7 +92,11 @@ func TestNativeThinkingConversationText(t *testing.T) {
 }
 
 func TestNativeConversationTextCannotBecomeExecutionOrReview(t *testing.T) {
-	for _, streaming := range []bool{false, true} {
+	for _, mode := range []struct {
+		thinking  string
+		streaming bool
+	}{{"enabled", false}, {"enabled", true}, {"disabled", false}, {"disabled", true}} {
+		streaming := mode.streaming
 		for _, tc := range []struct {
 			name, content, finish string
 			review, facts, tool   bool
@@ -102,7 +110,7 @@ func TestNativeConversationTextCannotBecomeExecutionOrReview(t *testing.T) {
 			{name: "truncated", content: "hello", finish: "length"},
 			{name: "filtered", content: "hello", finish: "content_filter"},
 		} {
-			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, streaming), func(t *testing.T) {
+			t.Run(fmt.Sprintf("%s/thinking=%s/stream=%t", tc.name, mode.thinking, streaming), func(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					message := agentcontract.JSON{"content": tc.content}
 					if tc.tool {
@@ -125,7 +133,7 @@ func TestNativeConversationTextCannotBecomeExecutionOrReview(t *testing.T) {
 				if valueErr1 != nil {
 					t.Fatal(valueErr1)
 				}
-				model.APIType, model.Thinking, model.DecisionOutputMode = "deepseek_chat", "enabled", "native_tools"
+				model.APIType, model.Thinking, model.DecisionOutputMode = "deepseek_chat", mode.thinking, "native_tools"
 				model.StreamAnswers, model.MaxAttempts = streaming, 1
 				packet := agentcontract.ContextPacket{Schema: "agenstra.context.v1"}
 				if tc.review {
