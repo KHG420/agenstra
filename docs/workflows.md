@@ -30,6 +30,8 @@ host.Workflows["reports"] = append(host.Workflows["reports"], specialist)
 
 专家完成结果通过既有 `ModelOutput` 投影向主 Agent 呈现一次规范的 `output` 及状态。原始 Fact 与 HTTP 工作流视图保留完整步骤和输出，供审计及客户端读取。该投影减少重复答案与证据造成的上下文预览省略。
 
+已保存运行按原发现和启动契约恢复。框架仅在原契约指纹完整匹配时复用此前的目录发现流程，其他提示、工具或技能变更仍由原指纹校验拒绝。
+
 每个父运行同时执行一个专家委派。稳定 invocation ID 使恢复复用原子任务，第二个在途专家返回 `subagent_busy`。专家继承父运行剩余的时间、轮次、Token 和工具预算，完成的调用用量与父级已结算批次一并原子入账。运行遥测包含 `delegated_model_calls`，取消沿父子链传播。专家目录中只保留其声明的工具和技能。
 
 ### 多步骤工作流

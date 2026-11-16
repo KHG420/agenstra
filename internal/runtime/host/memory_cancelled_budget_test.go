@@ -33,6 +33,7 @@ func TestCancelledMemoryCannotReleaseUnknownBoundedBudget(t *testing.T) {
 		failure error
 	}{
 		{name: "dispatched unknown", limit: 10000, metrics: agentcontract.ModelCallMetrics{Attempts: 1, EstimatedInputTokens: 500}, reserve: true},
+		{name: "adapter bounded unknown", limit: 10000, metrics: agentcontract.ModelCallMetrics{Attempts: 1, EstimatedInputTokens: 500, EstimatedOutputTokens: 2000, Reservation: true}, reserve: true},
 		{name: "valid usage", limit: 10000, metrics: agentcontract.ModelCallMetrics{Attempts: 1, UsageAvailable: true, InputTokens: 50, OutputTokens: 20}},
 		{name: "unsent", limit: 10000},
 		{name: "unbounded", metrics: agentcontract.ModelCallMetrics{Attempts: 1, EstimatedInputTokens: 500}},
@@ -59,7 +60,11 @@ func TestCancelledMemoryCannotReleaseUnknownBoundedBudget(t *testing.T) {
 			if call.Reservation != tc.reserve || call.UsageAvailable != tc.metrics.UsageAvailable || call.InputTokens != tc.metrics.InputTokens || call.OutputTokens != tc.metrics.OutputTokens || call.Attempts != tc.metrics.Attempts {
 				t.Fatalf("cancellation changed unknown/known/unsent settlement: %+v", call)
 			}
-			if tc.reserve {
+			if tc.metrics.Reservation {
+				if model.calls != 1 || state.ModelCalls[0].EstimatedInputTokens != 500 || state.ModelCalls[0].EstimatedOutputTokens != 2000 {
+					t.Fatalf("bounded extraction consumed the remaining decision allowance: model_calls=%d calls=%+v", model.calls, state.ModelCalls)
+				}
+			} else if tc.reserve {
 				if model.calls != 0 || run.Status != "failed" || state.ErrorCode == nil || *state.ErrorCode != "model_token_budget_exhausted" || state.ModelUsage.BudgetTokens != 10000 {
 					t.Fatalf("cancelled extraction released budget for decision: model_calls=%d status=%s usage=%+v", model.calls, run.Status, state.ModelUsage)
 				}

@@ -19,6 +19,7 @@ func TestCancelledDecisionKeepsOnlyUnknownDispatchedBoundedBudget(t *testing.T) 
 		code          string
 	}{
 		{name: "dispatched unknown", limit: 10000, budget: 10000, metrics: agentcontract.ModelCallMetrics{Attempts: 1, EstimatedInputTokens: 500}, reserve: true},
+		{name: "adapter bounded unknown", limit: 10000, budget: 2500, metrics: agentcontract.ModelCallMetrics{Attempts: 1, EstimatedInputTokens: 500, EstimatedOutputTokens: 2000, Reservation: true}, reserve: true},
 		{name: "valid usage", limit: 10000, budget: 70, metrics: agentcontract.ModelCallMetrics{Attempts: 1, UsageAvailable: true, InputTokens: 50, OutputTokens: 20}},
 		{name: "unsent", limit: 10000},
 		{name: "unbounded", budget: 500, metrics: agentcontract.ModelCallMetrics{Attempts: 1, EstimatedInputTokens: 500}},

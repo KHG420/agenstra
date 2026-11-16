@@ -33,6 +33,7 @@ func TestModelRequestDeadlineRetainsCauseAndSafeTimeoutMetrics(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			model.MaxOutputTokens = 512
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
 			var metrics *agentcontract.ModelCallMetrics
@@ -50,6 +51,9 @@ func TestModelRequestDeadlineRetainsCauseAndSafeTimeoutMetrics(t *testing.T) {
 			}
 			if requests.Load() != 1 || metrics.Attempts != 1 || metrics.FormatError != "" || metrics.FormatRecovery {
 				t.Fatal("deadline retried or became a format error", requests.Load(), metrics)
+			}
+			if !metrics.Reservation || metrics.UsageAvailable || metrics.EstimatedOutputTokens != 512 {
+				t.Fatal("deadline lost the bounded unknown allowance", metrics)
 			}
 		})
 	}

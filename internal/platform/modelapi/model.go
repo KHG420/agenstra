@@ -137,7 +137,7 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet agentcontract
 	return decision, nil
 }
 
-func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, prompt string) ([]byte, error) {
+func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, prompt string) (body []byte, resultErr error) {
 	if metrics := modelMetrics(ctx); metrics != nil {
 		metrics.Profile, metrics.Model, metrics.APIType = m.Profile, m.Model, m.APIType
 		metrics.Thinking, metrics.ReasoningEffort = m.Thinking, m.ReasoningEffort
@@ -151,6 +151,17 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		return nil, agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
 	}
 	outputLimit := int64(m.MaxOutputTokens)
+	defer func() {
+		code := agentcontract.ModelErrorCode(resultErr)
+		interrupted := code == "model_timeout" || code == "model_outcome_unknown" || (code == "model_unavailable" && errors.Is(resultErr, context.Canceled))
+		metrics := modelMetrics(ctx)
+		if interrupted && metrics != nil && !metrics.UsageAvailable && metrics.Attempts > 0 && outputLimit > 0 {
+			// The request's enforced output cap bounds its unresolved allowance.
+			// Keep all attempts charged without consuming unrelated run budget.
+			metrics.Reservation = true
+			metrics.EstimatedOutputTokens = outputLimit * int64(metrics.Attempts)
+		}
+	}()
 	if metrics := modelMetrics(ctx); metrics != nil {
 
 		// UTF-8 bytes plus a framing allowance are a bounded fallback, not a
@@ -227,7 +238,6 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 			allowedOutput[function["name"].(string)] = true
 		}
 	}
-	var body []byte
 	for attempt := 0; attempt < attempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err

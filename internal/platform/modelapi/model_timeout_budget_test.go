@@ -45,6 +45,9 @@ func TestBoundedModelBudgetCannotReplayTimedOutRequest(t *testing.T) {
 			if agentcontract.ModelErrorCode(err) != "model_timeout" || requests.Load() != tc.attempts || decision.ModelCall == nil || int64(decision.ModelCall.Attempts) != tc.attempts {
 				t.Fatalf("bounded request replayed after unknown output: error=%v requests=%d metrics=%+v", err, requests.Load(), decision.ModelCall)
 			}
+			if tc.limit > 0 && (!decision.ModelCall.Reservation || decision.ModelCall.UsageAvailable || decision.ModelCall.EstimatedInputTokens <= 0 || decision.ModelCall.EstimatedOutputTokens != 512) {
+				t.Fatalf("interrupted request lost its enforced output allowance: %+v", decision.ModelCall)
+			}
 		})
 	}
 }

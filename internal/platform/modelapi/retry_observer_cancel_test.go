@@ -92,7 +92,11 @@ func TestRetryObserverCancellationDoesNotMultiplyUnknownRuntimeBudget(t *testing
 	})
 	runtime := &reactcore.AgentRuntime{Provider: &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{}}, Model: model, MaxModelTokens: 200000, MaxModelOutputTokens: 64}
 	result, err := runtime.Run(ctx, "reply")
-	if !errors.Is(err, context.Canceled) || result.Status != "failed" || len(result.ModelCalls) != 1 || result.ModelCalls[0].Attempts != 1 || !result.ModelCalls[0].Reservation || result.ModelCalls[0].UsageAvailable || result.ModelUsage.Requests != 1 || result.ModelUsage.BudgetTokens != 200000 || transport.calls != 1 || len(result.Observations) != 0 {
+	if !errors.Is(err, context.Canceled) || result.Status != "failed" || len(result.ModelCalls) != 1 || result.ModelCalls[0].Attempts != 1 || !result.ModelCalls[0].Reservation || result.ModelCalls[0].UsageAvailable || result.ModelUsage.Requests != 1 || transport.calls != 1 || len(result.Observations) != 0 {
 		t.Fatalf("cancelled retry multiplied the unknown dispatched budget: transport=%d usage=%+v calls=%+v err=%v", transport.calls, result.ModelUsage, result.ModelCalls, err)
+	}
+	call := result.ModelCalls[0]
+	if call.EstimatedInputTokens <= 0 || call.EstimatedOutputTokens != 64 || result.ModelUsage.BudgetTokens != call.EstimatedInputTokens+64 || result.ModelUsage.BudgetTokens >= runtime.MaxModelTokens {
+		t.Fatalf("cancelled retry lost the single dispatched allowance: %+v", result.ModelUsage)
 	}
 }

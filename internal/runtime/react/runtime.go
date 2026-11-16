@@ -910,6 +910,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		metrics.FormatRecovery = formatRecovery
 		metrics.Round = state.RoundsUsed
 		metrics.Purpose = purpose
+		hasBoundedReservation := metrics.Reservation && metrics.EstimatedInputTokens > 0 && metrics.EstimatedOutputTokens > 0
 		metrics.Reservation = false
 		if metrics.UsageAvailable && state.ContextTelemetry != nil {
 			n := metrics.InputTokens
@@ -918,10 +919,13 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		if err != nil {
 			metrics.ErrorCode = agentcontract.Strptr(agentcontract.ModelErrorCode(err))
 			if r.MaxModelTokens > 0 && (*metrics.ErrorCode == "model_timeout" || *metrics.ErrorCode == "model_outcome_unknown" || (*metrics.ErrorCode == "model_unavailable" && errors.Is(err, context.Canceled))) && !metrics.UsageAvailable && metrics.Attempts > 0 {
-				// Interrupted transport cannot release a bounded allowance already dispatched.
+				// Keep the adapter's enforced allowance when known. An adapter
+				// without a bound retains the full dispatched run allowance.
 				metrics.Reservation = true
-				metrics.EstimatedInputTokens = reservation.EstimatedInputTokens
-				metrics.EstimatedOutputTokens = reservation.EstimatedOutputTokens
+				if !hasBoundedReservation {
+					metrics.EstimatedInputTokens = reservation.EstimatedInputTokens
+					metrics.EstimatedOutputTokens = reservation.EstimatedOutputTokens
+				}
 			}
 		}
 		state.ModelCalls[callIndex] = metrics

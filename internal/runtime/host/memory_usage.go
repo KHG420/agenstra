@@ -86,6 +86,7 @@ func (h *AgentHost) extractRunMemories(ctx context.Context, run agentcontract.St
 	}
 	metrics.Purpose = "memory_extraction"
 	metrics.SourceID = sourceID
+	hasBoundedReservation := metrics.Reservation && metrics.EstimatedInputTokens > 0 && metrics.EstimatedOutputTokens > 0
 	metrics.Reservation = false
 	if metrics.ElapsedMilliseconds == 0 {
 		metrics.ElapsedMilliseconds = time.Since(started).Milliseconds()
@@ -93,10 +94,12 @@ func (h *AgentHost) extractRunMemories(ctx context.Context, run agentcontract.St
 	if err != nil {
 		metrics.ErrorCode = agentcontract.Strptr(agentcontract.ModelErrorCode(err))
 		if remaining > 0 && (*metrics.ErrorCode == "model_timeout" || *metrics.ErrorCode == "model_outcome_unknown" || (*metrics.ErrorCode == "model_unavailable" && errors.Is(err, context.Canceled))) && !metrics.UsageAvailable && metrics.Attempts > 0 {
-			// Interrupted transport does not settle the upstream output cost.
+			// Retain a known request bound while its actual usage is unresolved.
 			metrics.Reservation = true
-			metrics.EstimatedInputTokens = reservation.EstimatedInputTokens
-			metrics.EstimatedOutputTokens = reservation.EstimatedOutputTokens
+			if !hasBoundedReservation {
+				metrics.EstimatedInputTokens = reservation.EstimatedInputTokens
+				metrics.EstimatedOutputTokens = reservation.EstimatedOutputTokens
+			}
 		}
 	}
 	state.ModelCalls[index] = metrics

@@ -189,6 +189,46 @@ func TestSubagentIsolatesContextAndReturnsEvidenceWithinParentBudgets(t *testing
 	}
 }
 
+func TestSavedWorkflowStartContractKeepsItsFingerprint(t *testing.T) {
+	h, base, parent, _, _ := queuedSpecialist(t)
+	for _, test := range []struct {
+		name       string
+		specialist bool
+	}{{name: "workflow"}, {name: "specialist", specialist: true}} {
+		t.Run(test.name, func(t *testing.T) {
+			parent, err := h.Store.GetRun(parent.RunID, parent.OwnerID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !test.specialist {
+				parent.State["workflow_catalog"] = []agentcontract.WorkflowDefinition{{Name: "report", Version: "1", InputSchema: agentcontract.JSON{"type": "object"}, Steps: []agentcontract.WorkflowStep{{ID: "read", Capability: "records.get", Arguments: agentcontract.JSON{}}}}}
+			}
+			delete(parent.State, "pack_fingerprint")
+			provider, err := h.wrapWorkflows(parent, &specialistTestProvider{base})
+			if err != nil {
+				t.Fatal(err)
+			}
+			legacy := provider.(*workflowProvider)
+			capability := legacy.caps["workflows.start"]
+			delete(capability.InputSchema, "oneOf")
+			capability.Description = "workflows.start"
+			legacy.caps["workflows.start"] = capability
+			legacy.legacyStart = true
+			saved := Fingerprint(legacy)
+			parent.State["pack_fingerprint"] = saved
+			restored, err := h.wrapWorkflows(parent, &specialistTestProvider{base})
+			if err != nil || Fingerprint(restored) != saved || restored.Capabilities()["workflows.start"].InputSchema["oneOf"] != nil {
+				t.Fatal("saved start contract changed", err)
+			}
+			parent.State["pack_fingerprint"] = "different-contract"
+			changed, err := h.wrapWorkflows(parent, &specialistTestProvider{base})
+			if err != nil || Fingerprint(changed) == "different-contract" || changed.Capabilities()["workflows.start"].InputSchema["oneOf"] == nil {
+				t.Fatal("start compatibility bypassed the ordinary fingerprint check", err)
+			}
+		})
+	}
+}
+
 func TestSubagentCancellationAndRevokedGrantUseExistingChildLifecycle(t *testing.T) {
 	t.Run("cancel", func(t *testing.T) {
 		h, provider, parent, workflow, child := queuedSpecialist(t)
