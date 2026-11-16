@@ -688,6 +688,9 @@ func (h *AgentHost) settleInvocation(run agentcontract.StoredRun, state *agentco
 		return h.save(run, state, "", wake, map[string]any{"kind": "call_outcome_unknown", "invocation_id": item.InvocationID})
 	}
 	if outcome.Fact != nil {
+		if e := projectSubagentResult(run, outcome.Fact); e != nil {
+			return run, e
+		}
 		b, e := agentcontract.CanonicalJSON(outcome.Fact)
 		if e != nil {
 			return run, e
@@ -912,6 +915,9 @@ func (h *AgentHost) poll(ctx context.Context, run agentcontract.StoredRun, state
 		}
 		if item.Status == "succeeded" || item.Status == "waiting" {
 			item.ErrorCode = nil
+		}
+		if e := projectSubagentResult(run, outcome.Fact); e != nil {
+			return run, e
 		}
 		b, e := agentcontract.CanonicalJSON(outcome.Fact)
 		if e != nil {

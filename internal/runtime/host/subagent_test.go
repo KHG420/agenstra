@@ -145,6 +145,25 @@ func TestSubagentIsolatesContextAndReturnsEvidenceWithinParentBudgets(t *testing
 	if err != nil || len(state.LoadedSkills) != 0 || len(state.DelegatedModelCalls) == 0 || state.RoundsUsed < 4 {
 		t.Fatal("parent lost isolation or delegated usage", state, err)
 	}
+	projected := false
+	for _, fact := range state.Facts {
+		if fact.SourceCapability != "workflows.status" {
+			continue
+		}
+		original := fact.Value["data"].(map[string]any)
+		visible := agentcontract.ModelFactValue(fact)["data"].(map[string]any)
+		if original["steps"] == nil || visible["steps"] != nil || visible["answer_markdown"] != nil {
+			t.Fatal("specialist model view duplicated step output or changed stored evidence", original, visible)
+		}
+		output := visible["output"].(map[string]any)
+		if output["answer_markdown"] != "Record value is 7." || output["evidence"] == nil || visible["status"] != "completed" {
+			t.Fatal("specialist projection lost its answer, evidence or status", visible)
+		}
+		projected = true
+	}
+	if !projected {
+		t.Fatal("completed specialist result was not projected")
+	}
 	telemetry, err := h.Telemetry(parent)
 	if err != nil || telemetry.Budget.Tokens.ChargedTokens != state.ModelUsage.BudgetTokens {
 		t.Fatal("delegated usage differs from charged usage", telemetry, err)

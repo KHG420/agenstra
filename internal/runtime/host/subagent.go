@@ -90,6 +90,37 @@ func subagentEvidence(child agentcontract.StoredRun, state *agentcontract.Runtim
 	return agentcontract.JSON{"source_run_id": child.RunID, "facts": facts}, nil
 }
 
+// Workflow views retain complete step output for clients and auditing. A
+// specialist result exposes its canonical output once to the model, avoiding
+// duplicated answers and evidence overflowing the bounded Fact preview.
+func projectSubagentResult(run agentcontract.StoredRun, fact *agentcontract.Fact) error {
+	if fact.SourceCapability != "workflows.start" && fact.SourceCapability != "workflows.status" {
+		return nil
+	}
+	data, _ := fact.Value["data"].(map[string]any)
+	if data["status"] != "completed" {
+		return nil
+	}
+	raw, err := agentcontract.CanonicalJSON(run.State["workflow_catalog"])
+	if err != nil {
+		return err
+	}
+	var definitions []agentcontract.WorkflowDefinition
+	if jsonvalue.DecodeStrict(raw, &definitions) != nil {
+		return agentcontract.NewHostError("workflow_definition_invalid")
+	}
+	for _, definition := range definitions {
+		if definition.Subagent && data["name"] == definition.Name && data["version"] == definition.Version {
+			fact.ModelOutput = &agentcontract.ModelOutput{Paths: [][]string{
+				{"run_id"}, {"name"}, {"version"}, {"status"}, {"output"},
+				{"error_code"}, {"blocked_run_id"}, {"blocked_state"},
+			}}
+			break
+		}
+	}
+	return nil
+}
+
 // A delegated specialist occupies one child slot per parent. Stable invocation
 // IDs preserve retries; other workflow definitions keep their existing behavior.
 func (h *AgentHost) subagentSlot(parent agentcontract.StoredRun, candidateID string) error {

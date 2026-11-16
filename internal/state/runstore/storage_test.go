@@ -177,3 +177,36 @@ func TestCancelSurvivesCheckpointAndWakesPauses(t *testing.T) {
 		})
 	}
 }
+
+func TestDueRunsOrdersByReadyTimeAfterAParentPoll(t *testing.T) {
+	s := testStore(t)
+	now := 1000.0
+	s.Clock = func() float64 { return now }
+	parent := testRun(t, s, "waiting-parent")
+	parent, err := s.Claim(parent.RunID, parent.OwnerID, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wake := 1010.0
+	parent, err = s.Checkpoint(parent.RunID, parent.OwnerID, parent.LeaseToken, parent.State, "waiting", &wake, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Release(parent.RunID, parent.OwnerID, parent.LeaseToken); err != nil {
+		t.Fatal(err)
+	}
+	now = 1005
+	child := testRun(t, s, "queued-child")
+	now = 1011
+	due, err := s.DueRuns(1)
+	if err != nil || len(due) != 1 || due[0].RunID != child.RunID {
+		t.Fatalf("repeated parent polls displaced ready child: due=%v err=%v", due, err)
+	}
+	if _, err := s.RequestCancel(parent.RunID, parent.OwnerID); err != nil {
+		t.Fatal(err)
+	}
+	due, err = s.DueRuns(1)
+	if err != nil || len(due) != 1 || due[0].RunID != parent.RunID || !due[0].CancelRequested {
+		t.Fatalf("cancellation lost priority: due=%v err=%v", due, err)
+	}
+}

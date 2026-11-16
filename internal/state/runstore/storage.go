@@ -488,10 +488,12 @@ func (s *SQLiteStore) queryRuns(query string, args ...any) (output []agentcontra
 	return result, rows.Err()
 }
 
-// DueRuns selects a bounded set of runs eligible for a worker claim.
+// DueRuns selects a bounded set of runs eligible for a worker claim. A waiting
+// run re-enters the queue at its wake time so repeated parent polls cannot
+// displace children that have already been ready. Cancellation takes priority.
 func (s *SQLiteStore) DueRuns(limit int) ([]agentcontract.StoredRun, error) {
 	now := s.Now()
-	return s.queryRuns("SELECT "+runColumns+" FROM runs WHERE (lease_until IS NULL OR lease_until<=$1) AND (status IN ('queued','running') OR (cancel_requested=1 AND status NOT IN ('completed','failed','cancelled')) OR (status='waiting' AND next_wake_at IS NOT NULL AND next_wake_at<=$2)) ORDER BY created_at,run_id LIMIT $3", now, now, limit)
+	return s.queryRuns("SELECT "+runColumns+" FROM runs WHERE (lease_until IS NULL OR lease_until<=$1) AND (status IN ('queued','running') OR (cancel_requested=1 AND status NOT IN ('completed','failed','cancelled')) OR (status='waiting' AND next_wake_at IS NOT NULL AND next_wake_at<=$2)) ORDER BY cancel_requested DESC,COALESCE(next_wake_at,created_at),created_at,run_id LIMIT $3", now, now, limit)
 }
 
 // ListRuns returns a bounded list of the owner's newest runs.
