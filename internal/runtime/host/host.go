@@ -868,7 +868,7 @@ func (h *AgentHost) poll(ctx context.Context, run agentcontract.StoredRun, state
 	}
 	policy, e := h.ProjectPolicy(ctx, run)
 	if e != nil {
-		return run, e
+		return h.waitForAuthorization(ctx, run, state, e)
 	}
 	if e = pollAccess(provider, policy, receipt.Binding); e != nil {
 		return run, e
@@ -973,6 +973,25 @@ func (h *AgentHost) poll(ctx context.Context, run agentcontract.StoredRun, state
 	return h.save(run, state, "", nil, map[string]any{"kind": "operation_polled", "invocation_id": item.InvocationID, "poll": receipt.Polls, "fact_id": item.FactID, "error_code": agentcontract.Strptr(outcome.ErrorCode)})
 }
 
+// waitForAuthorization retains the checkpoint during pre-dispatch availability
+// failures and schedules a fresh check within the original run deadline.
+func (h *AgentHost) waitForAuthorization(ctx context.Context, run agentcontract.StoredRun, state *agentcontract.RuntimeState, cause error) (agentcontract.StoredRun, error) {
+	if agentcontract.ErrorCode(cause) != "authorization_unavailable" {
+		return run, cause
+	}
+	if err := ctx.Err(); err != nil {
+		return run, err
+	}
+	settings := h.runSettings(run)
+	now, deadline := h.Now(), run.CreatedAt+settings.MaxRunSeconds
+	if now >= deadline {
+		return run, agentcontract.NewHostError("run_deadline_exceeded")
+	}
+	wake := min(now+max(1, settings.RetryIntervalSeconds), deadline)
+	state.Status, state.ErrorCode = "waiting", agentcontract.Strptr("authorization_unavailable")
+	return h.save(run, state, "", &wake, agentcontract.JSON{"kind": "authorization_waiting", "code": "authorization_unavailable"})
+}
+
 func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (result agentcontract.StoredRun, err error) {
 	claimedToken := run.LeaseToken
 	state, e := h.Restore(run)
@@ -1047,7 +1066,7 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 	}
 	policy, e := h.ProjectPolicy(ctx, run)
 	if e != nil {
-		return run, e
+		return h.waitForAuthorization(ctx, run, state, e)
 	}
 	config, configErr := h.effectiveRunConfig(run)
 	if configErr != nil {
