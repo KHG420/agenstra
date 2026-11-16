@@ -37,7 +37,7 @@ func (h *AgentHost) executeParallel(ctx context.Context, run agentcontract.Store
 		var call *preparedInvocation
 		var err error
 		run, call, err = h.prepareInvocation(ctx, run, state, item, provider, runtime)
-		if err != nil {
+		if err != nil && agentcontract.ErrorCode(err) != "authorization_unavailable" {
 			return run, err
 		}
 		if call == nil {
@@ -47,6 +47,9 @@ func (h *AgentHost) executeParallel(ctx context.Context, run agentcontract.Store
 			for _, index := range indices {
 				state.Pending[index].Status = "prepared"
 				state.Pending[index].Attempts--
+			}
+			if err != nil {
+				return run, err
 			}
 			return h.save(run, state, "", nil, agentcontract.JSON{"kind": "parallel_preparation_stopped"})
 		}

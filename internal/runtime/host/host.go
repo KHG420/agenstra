@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -1002,7 +1003,23 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 		return run, agentcontract.NewHostError("workflow_checkpoint_invalid")
 	}
 	defer func() {
-		if err == nil || errors.Is(err, runstore.ErrLeaseLost) || ctx.Err() != nil {
+		if errors.Is(err, runstore.ErrLeaseLost) || ctx.Err() != nil {
+			return
+		}
+		cause := err
+		if cause == nil && state.Status == "needs_authorization" && state.ErrorCode != nil {
+			cause = agentcontract.NewHostError(*state.ErrorCode)
+		}
+		// Later model, invocation and workflow checks can lose the authorization
+		// source after initial admission. Only fully settled checkpoints can wait.
+		if agentcontract.ErrorCode(cause) == "authorization_unavailable" && !slices.ContainsFunc(state.Pending, unsettledInvocation) {
+			result, err = h.waitForAuthorization(ctx, run, state, cause)
+			if err == nil || ctx.Err() != nil || errors.Is(err, runstore.ErrLeaseLost) {
+				return
+			}
+			run = result
+		}
+		if err == nil {
 			return
 		}
 		code := "connection_or_execution_failed"
