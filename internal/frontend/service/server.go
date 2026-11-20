@@ -161,6 +161,7 @@ func (s *HTTPServer) worker() {
 					active[run.RunID] = true
 					workers.Go(func() {
 						completed, driveErr := s.Host.Drive(s.workerCtx, run.RunID, run.OwnerID)
+						yielded := driveErr == nil && completed.Status == "waiting"
 						var hostErr *agentcontract.HostError
 						if errors.Is(driveErr, runstore.ErrStoreConflict) || errors.Is(driveErr, runstore.ErrLeaseLost) || errors.As(driveErr, &hostErr) {
 							driveErr = nil
@@ -169,7 +170,9 @@ func (s *HTTPServer) worker() {
 						case finished <- result{runID: run.RunID, err: driveErr}:
 						case <-s.workerCtx.Done():
 						}
-						if durablehost.Terminal(completed.Status) {
+						// A waiting parent releases this slot and may have queued a
+						// child. Its durable next_at still governs the next poll.
+						if yielded || durablehost.Terminal(completed.Status) {
 							select {
 							case s.workReady <- struct{}{}:
 							default:

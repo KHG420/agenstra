@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	deployassembly "github.com/KHG420/agenstra/internal/assembly/deployment"
@@ -180,4 +181,34 @@ func TestWorkflowWorkerOneSlotExecutesAgentStartedWorkflowAndChild(t *testing.T)
 			return
 		}
 	}
+}
+
+func TestWorkflowWorkerStartsChildWhenParentYieldsItsSlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		decision := callDecision("workflows.start")
+		decision.Calls[0].Arguments = agentcontract.JSON{"workflow": "report", "input": agentcontract.JSON{"id": "R-1"}}
+		host, provider := workflowServiceHost(t, &hostModel{decisions: []agentcontract.Decision{decision}})
+		host.Settings.MaxConcurrentRuns = 1
+		parent := createTestHostRun(t, host)
+		server, err := NewHTTPServer(host, &deployassembly.Deployment{}, true, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := server.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		synctest.Wait()
+		run, err := host.Store.GetRun(parent.RunID, "alice")
+		if err != nil || run.Status != "waiting" {
+			t.Fatalf("parent did not retain its polling checkpoint: %s %v", run.Status, err)
+		}
+		provider.mu.Lock()
+		calls := provider.calls
+		provider.mu.Unlock()
+		if calls != 1 {
+			t.Fatalf("ready workflow waited for the periodic worker scan: %d calls", calls)
+		}
+	})
 }
