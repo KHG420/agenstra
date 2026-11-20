@@ -48,6 +48,36 @@ func memoryProposal(r agentcontract.MemoryExtractionRequest, scope, key, value, 
 	return []agentcontract.MemoryProposal{{Scope: scope, Key: key, Value: value, Kind: "preference", Mode: mode, Quote: r.Text}}
 }
 
+func TestStandaloneRepliesUseSavedMemoriesWithoutExtraction(t *testing.T) {
+	const preference = "你好！以后报告默认用英文。"
+	model := &memoryTestModel{hostModel: &hostModel{}, extract: func(r agentcontract.MemoryExtractionRequest) ([]agentcontract.MemoryProposal, error) {
+		if r.Text != preference {
+			t.Fatalf("standalone reply called the memory model: %q", r.Text)
+		}
+		return memoryProposal(r, "user", "report.language", "en", "explicit"), nil
+	}}
+	host, store := memoryTestHost(t, model)
+	if _, err := host.SetMemory(t.Context(), "alice", "records", agentcontract.MemoryUpdate{Scope: "user", Key: "report.language", Value: "zh-CN", Kind: "preference"}); err != nil {
+		t.Fatal(err)
+	}
+	for i, text := range []string{" 你好！ ", "收到。", "继续吧", "Please continue!"} {
+		run := memoryRun(t, host, "alice", "records", text, fmt.Sprintf("simple-reply-%d", i))
+		done, err := store.MemoryInputDone("alice", runstore.MemoryInput{ID: run.RunID + ":instruction", Text: text})
+		if err != nil || !done {
+			t.Fatal("standalone reply was not consumed idempotently", done, err)
+		}
+		views, err := host.runMemories(run)
+		if err != nil || len(views) != 1 || views[0].Value != "zh-CN" {
+			t.Fatal("standalone reply lost its saved preferences", views, err)
+		}
+	}
+	memoryRun(t, host, "alice", "records", preference, "greeting-with-durable-preference")
+	memories, err := host.ListMemories(t.Context(), "alice", "records", 20, 0)
+	if err != nil || len(model.inputs) != 1 || len(memories) != 1 || memories[0].Value != "en" {
+		t.Fatal("a durable instruction was skipped alongside a greeting", model.inputs, memories, err)
+	}
+}
+
 func TestMemoryExtractionTelemetryDoesNotExposeUncodedErrors(t *testing.T) {
 	model := &memoryTestModel{hostModel: &hostModel{}, extract: func(agentcontract.MemoryExtractionRequest) ([]agentcontract.MemoryProposal, error) {
 		return nil, errors.New("private endpoint and token details")

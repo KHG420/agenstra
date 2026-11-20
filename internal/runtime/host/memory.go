@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
@@ -89,6 +90,18 @@ func setMemoryInput(envelope map[string]any, id, text string) {
 	envelope["memory_inputs"] = []runstore.MemoryInput{{ID: id, Text: text}}
 }
 
+// Match the whole input so a greeting followed by a lasting instruction still
+// goes through normal extraction. These standalone replies contain no rule to save.
+func memoryInputNeedsExtraction(text string) bool {
+	switch strings.ToLower(strings.TrimRight(strings.TrimSpace(text), "。！？.!?")) {
+	case "", "你好", "您好", "谢谢", "好的", "收到", "明白了", "继续", "继续吧", "继续执行",
+		"hello", "hi", "thanks", "thank you", "ok", "okay", "continue", "please continue":
+		return false
+	default:
+		return true
+	}
+}
+
 func (h *AgentHost) prepareMemories(ctx context.Context, run agentcontract.StoredRun) (agentcontract.StoredRun, error) {
 	raw, err := agentcontract.CanonicalJSON(run.State["memory_inputs"])
 	if err != nil {
@@ -107,6 +120,15 @@ func (h *AgentHost) prepareMemories(ctx context.Context, run agentcontract.Store
 			return run, err
 		}
 		if done || !enabled {
+			continue
+		}
+		if !memoryInputNeedsExtraction(input.Text) {
+			if err := ctx.Err(); err != nil {
+				return run, err
+			}
+			if err := h.Store.ApplyMemoryInput(run, input, nil, ""); err != nil {
+				return run, err
+			}
 			continue
 		}
 		existing, err := h.Store.ListMemories(run.OwnerID, run.PackID, -1, 0)
