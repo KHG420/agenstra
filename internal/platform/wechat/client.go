@@ -93,14 +93,22 @@ type Login struct {
 	RedirectHost string `json:"redirect_host"`
 }
 
-// Item contains incoming text or a platform-provided voice transcription.
+// VoiceMedia contains the platform's encrypted voice download reference.
+type VoiceMedia struct {
+	EncryptedQuery string `json:"encrypt_query_param"`
+	AESKey         string `json:"aes_key"`
+	FullURL        string `json:"full_url"`
+}
+
+// Item contains incoming text, a voice transcription, or a voice reference.
 type Item struct {
 	Type int `json:"type"`
 	Text struct {
 		Text string `json:"text"`
 	} `json:"text_item"`
 	Voice struct {
-		Text string `json:"text"`
+		Text  string      `json:"text"`
+		Media *VoiceMedia `json:"media,omitempty"`
 	} `json:"voice_item"`
 }
 

@@ -33,6 +33,8 @@ if err != nil {
 
 调用 `PollUpdates` 时传入最后提交的 `Credentials.Cursor`。对每条消息先执行 `credentials.Accepts(message)`，再通过 `WeChatMessageKey` 取得 bot 与 peer 范围内的稳定标识。在同一宿主事务中保存入站消息与下一游标，重复标识复用原聊天消息和任务。`WeChatID` 保留平台字符串或数值 ID 的精度。
 
+语音消息通过 `Item.Voice.Text` 保留平台提供的转写文本。平台附带原始录音引用时，`Item.Voice.Media` 提供可选的加密下载参数、密钥和完整地址。下载和解析由宿主管理。宿主应校验平台 CDN 地址，并按凭据保护媒体引用和密钥。
+
 宿主按绑定读取当前 `owner` 的策略和能力授权，将输入提交到该账号的现有聊天会话。手机号、微信 peer 和模型文本都通过可信绑定解析为业务账号。会话、记忆、用量和后台任务继续调用框架原有接口。
 
 ## 文本与文件回复

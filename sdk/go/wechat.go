@@ -25,8 +25,11 @@ type WeChatLogin = wechat.Login
 // WeChatID preserves platform string and numeric message identities exactly.
 type WeChatID = wechat.ID
 
-// WeChatItem contains the incoming text and platform-transcribed voice fields.
+// WeChatItem contains incoming text, platform-transcribed voice, or its encrypted reference.
 type WeChatItem = wechat.Item
+
+// WeChatVoiceMedia describes a recording available from the platform CDN.
+type WeChatVoiceMedia = wechat.VoiceMedia
 
 // WeChatMessage contains one peer message and its original reply context.
 type WeChatMessage = wechat.Incoming

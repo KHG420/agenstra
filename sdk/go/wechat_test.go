@@ -44,7 +44,11 @@ func TestWeChatPluginQRLoginPollingAndCallerOwnership(t *testing.T) {
 			if r.Header.Get("Authorization") != "Bearer private-token" {
 				t.Error("saved channel credentials lost")
 			}
-			return wechatJSON(`{"ret":0,"get_updates_buf":"next-cursor","msgs":[{"message_id":9223372036854775807,"from_user_id":"peer-a","to_user_id":"bot-a","context_token":"reply-context","item_list":[{"type":1,"text_item":{"text":"hello"}}]}]}`), nil
+			return wechatJSON(`{"ret":0,"get_updates_buf":"next-cursor","msgs":[{"message_id":9223372036854775807,"from_user_id":"peer-a","to_user_id":"bot-a","context_token":"reply-context","item_list":[
+				{"type":1,"text_item":{"text":"hello"}},
+				{"type":3,"voice_item":{"text":"transcribed voice"}},
+				{"type":3,"voice_item":{"media":{"encrypt_query_param":"voice-reference","aes_key":"fixture-key","full_url":"https://novac2c.cdn.weixin.qq.com/voice"}}}
+			]}]}`), nil
 		}
 		t.Error("unexpected channel request", r.URL.Path)
 		return wechatJSON(`{"ret":-1}`), nil
@@ -61,8 +65,20 @@ func TestWeChatPluginQRLoginPollingAndCallerOwnership(t *testing.T) {
 	}
 	credentials.Token, credentials.PeerID = login.Token, login.PeerID
 	updates, err := plugin.PollUpdates(t.Context(), credentials)
-	if err != nil || updates.Cursor != "next-cursor" || len(updates.Messages) != 1 || updates.Messages[0].MessageID.String() != "9223372036854775807" || updates.Messages[0].Items[0].Text.Text != "hello" {
-		t.Fatal("polling corrupted the platform message", updates, err)
+	if err != nil || updates.Cursor != "next-cursor" || len(updates.Messages) != 1 || updates.Messages[0].MessageID.String() != "9223372036854775807" {
+		t.Fatal("polling corrupted the platform message identity", err)
+	}
+	items := updates.Messages[0].Items
+	if len(items) != 3 || items[0].Text.Text != "hello" || items[1].Voice.Text != "transcribed voice" || items[1].Voice.Media != nil {
+		t.Fatal("polling lost the text or text-only voice item")
+	}
+	wantMedia := agenstra.WeChatVoiceMedia{
+		EncryptedQuery: "voice-reference",
+		AESKey:         "fixture-key",
+		FullURL:        "https://novac2c.cdn.weixin.qq.com/voice",
+	}
+	if media := items[2].Voice.Media; media == nil || *media != wantMedia {
+		t.Fatal("polling lost the encrypted voice reference")
 	}
 	if client.Timeout != 0 || client.Jar != jar || client.CheckRedirect != nil {
 		t.Fatal("plugin modified the caller HTTP client")
