@@ -74,12 +74,56 @@ func TestOutputToolsPairSavedCallWithItsActualOutcome(t *testing.T) {
 					t.Fatal("saved outcome changed or lost its data boundary", value)
 				}
 			}
+			if strings.Contains(content, `"id":23`) {
+				t.Fatal("saved outcome repeated the paired call arguments")
+			}
 			if status == "failed" && !strings.Contains(content, "host_request_rejected") {
 				t.Fatal("failed outcome lost its error")
 			}
 			after, err := agentcontract.CanonicalJSON(packet)
 			if err != nil || !bytes.Equal(before, after) {
 				t.Fatal("message construction mutated the caller's evidence")
+			}
+		})
+	}
+}
+
+func TestSavedResultValueAppearsOnceInEveryDecisionProtocol(t *testing.T) {
+	const latestValue = "latest-result-marker-8d2a"
+	const earlierValue = "earlier-result-marker-56d1"
+	previous, latest := "10000000-0000-4000-8000-000000000011", "10000000-0000-4000-8000-000000000012"
+	packet := agentcontract.ContextPacket{
+		Schema: "agenstra.context.v1", Instruction: "Read both retained results.",
+		Facts: []agentcontract.FactView{
+			{Fact: agentcontract.Fact{FactID: previous, Value: agentcontract.JSON{"text": earlierValue}}},
+			{Fact: agentcontract.Fact{FactID: latest, Value: agentcontract.JSON{"text": latestValue}}, OmittedPaths: [][]any{{"details"}}, ReferenceAvailable: true},
+		},
+		Observations: []agentcontract.Observation{{CallRef: "read-2", Capability: "records.read", Status: "succeeded", FactID: &latest, Arguments: agentcontract.JSON{}}},
+	}
+	for _, mode := range []string{"json_object", "json_schema", "output_tools", "native_tools"} {
+		t.Run(mode, func(t *testing.T) {
+			model := &HTTPJSONDecisionModel{Model: "test", APIType: "deepseek_chat", DecisionOutputMode: mode, Thinking: "enabled"}
+			raw, err := agentcontract.CanonicalJSON(packet)
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, err := model.requestPayload(raw, "Read verified results.")
+			if err != nil {
+				t.Fatal(err)
+			}
+			messages := payload["messages"].([]any)
+			cumulative := messages[1].(agentcontract.JSON)["content"].(string)
+			if !strings.Contains(cumulative, earlierValue) || !strings.Contains(cumulative, latest) || strings.Contains(cumulative, latestValue) {
+				t.Fatal("the cumulative packet lost Fact identity or retained a duplicate value")
+			}
+			outcome := messages[len(messages)-1].(agentcontract.JSON)["content"].(string)
+			if !strings.Contains(outcome, latestValue) || !strings.Contains(outcome, `"omitted_paths":[["details"]]`) {
+				t.Fatal("the saved result lost its value or omission markers")
+			}
+			measured, err := model.MeasureInput(packet, "Read verified results.")
+			encoded, encodeErr := agentcontract.CanonicalJSON(payload)
+			if err != nil || encodeErr != nil || measured.Tokens != int64(len(encoded)+128) || strings.Count(string(encoded), latestValue) != 1 {
+				t.Fatal("input measurement or actual request duplicated the saved result", err, encodeErr)
 			}
 		})
 	}

@@ -60,7 +60,7 @@ func nativeFunctionCapabilities(packet agentcontract.ContextPacket) map[string]a
 }
 
 // Keep the original task in the native user-message channel and each callable
-// input contract in its native tool definition. Runtime evidence stays data.
+// contract and description in its native tool definition. Runtime evidence stays data.
 func nativeDecisionMessages(messages []any, packet agentcontract.ContextPacket) ([]any, error) {
 	var data agentcontract.JSON
 	if err := jsonvalue.DecodeStrict([]byte(messages[1].(agentcontract.JSON)["content"].(string)), &data); err != nil {
@@ -68,21 +68,24 @@ func nativeDecisionMessages(messages []any, packet agentcontract.ContextPacket) 
 	}
 	delete(data, "instruction")
 	declared := nativeFunctionCapabilities(packet)
-	stripDeclaredInput := func(value any) {
+	stripDeclaredContract := func(value any) {
 		capability, ok := value.(agentcontract.JSON)
 		if !ok {
 			return
 		}
 		name, _ := capability["name"].(string)
-		if declared[name] != nil {
+		if tool := declared[name]; tool != nil {
 			delete(capability, "input_schema")
+			if description, ok := capability["description"].(string); ok && description == tool["description"] {
+				delete(capability, "description")
+			}
 		}
 	}
 	capabilities, _ := data["capabilities"].([]any)
 	for _, capability := range capabilities {
-		stripDeclaredInput(capability)
+		stripDeclaredContract(capability)
 	}
-	stripDeclaredInput(data["inspected_capability"])
+	stripDeclaredContract(data["inspected_capability"])
 	encoded, err := agentcontract.CanonicalJSON(data)
 	if err != nil {
 		return nil, err
@@ -152,7 +155,9 @@ func nativeDecisionOutputTools(tools []any, packet agentcontract.ContextPacket) 
 // evidence exists. Native calls, citations and completion review use their
 // declared structured functions in both thinking modes.
 func (m *HTTPJSONDecisionModel) allowsNativeConversation(packet agentcontract.ContextPacket) bool {
-	return m.DecisionOutputMode == "native_tools" && m.APIType == "deepseek_chat" && packet.Schema == "agenstra.context.v1" && packet.CompletionReview == nil && len(packet.Facts) == 0 && len(packet.Observations) == 0 && len(packet.ActionOutcomes) == 0
+	return m.DecisionOutputMode == "native_tools" && m.APIType == "deepseek_chat" &&
+		packet.Schema == "agenstra.context.v1" && packet.CompletionReview == nil &&
+		len(packet.Facts) == 0 && len(packet.Observations) == 0 && len(packet.ActionOutcomes) == 0
 }
 
 func nativeConversationText(content string) string {

@@ -151,6 +151,7 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		return nil, agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
 	}
 	outputLimit := int64(m.MaxOutputTokens)
+	var measurement *agentcontract.InputMeasurement
 	defer func() {
 		code := agentcontract.ModelErrorCode(resultErr)
 		interrupted := code == "model_timeout" || code == "model_outcome_unknown" || (code == "model_unavailable" && errors.Is(resultErr, context.Canceled))
@@ -166,11 +167,12 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 
 		// UTF-8 bytes plus a framing allowance are a bounded fallback, not a
 		// tokenizer result. Provider usage replaces these estimates when available.
-		measurement, measureErr := m.measurePayload(raw)
+		initial, measureErr := m.measurePayload(raw)
 		if measureErr != nil {
 			return nil, measureErr
 		}
-		metrics.EstimatedInputTokens = measurement.Tokens
+		measurement = &initial
+		metrics.EstimatedInputTokens = initial.Tokens
 		if remaining := packetTokenBudget(ctx); remaining > 0 && metrics.EstimatedInputTokens >= remaining {
 			return nil, agentcontract.ModelDecisionError{Kind: "model_token_budget_exhausted"}
 		}
@@ -186,18 +188,24 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 			if field != "max_tokens" && field != "max_completion_tokens" {
 				return nil, agentcontract.ModelDecisionError{Kind: "model_token_limit_invalid"}
 			}
-			payload[field] = limit
-			outputLimit = limit
-			raw, err = agentcontract.CanonicalJSON(payload)
-			if err != nil {
-				return nil, agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
+			if limit != outputLimit {
+				payload[field] = limit
+				outputLimit = limit
+				raw, err = agentcontract.CanonicalJSON(payload)
+				if err != nil {
+					return nil, agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
+				}
+				measurement = nil
 			}
 		}
 	}
 	if m.MaxInputTokens > 0 || m.ContextWindowTokens > 0 {
-		measured, measureErr := m.measurePayload(raw)
-		if measureErr != nil {
-			return nil, measureErr
+		if measurement == nil {
+			measured, measureErr := m.measurePayload(raw)
+			if measureErr != nil {
+				return nil, measureErr
+			}
+			measurement = &measured
 		}
 		limit := m.MaxInputTokens
 		if m.ContextWindowTokens > 0 {
@@ -212,7 +220,7 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 				limit = available
 			}
 		}
-		if measured.Tokens > limit {
+		if measurement.Tokens > limit {
 			return nil, agentcontract.ModelDecisionError{Kind: "context_too_large"}
 		}
 	}

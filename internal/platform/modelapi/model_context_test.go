@@ -174,3 +174,96 @@ func TestModelContextWindowReservesOutputAndCountsSerializedInput(t *testing.T) 
 		t.Fatalf("%+v requests=%d", state, requests)
 	}
 }
+
+func TestModelReviewOmitsOnlyUnusedInputSchemas(t *testing.T) {
+	capability := func(name, marker string) agentcontract.JSON {
+		return agentcontract.JSON{"name": name, "input_schema": agentcontract.JSON{"type": "object", "description": marker}}
+	}
+	packet := agentcontract.ContextPacket{
+		Schema: "agenstra.context.v1", Instruction: "Check the shipment.",
+		Capabilities: []agentcontract.JSON{
+			capability("shipments.get", "observed-contract-marker"),
+			capability("shipments.cancel", "unrelated-contract-marker"),
+		},
+		Observations:     []agentcontract.Observation{{Capability: "shipments.get", Status: "succeeded"}},
+		CompletionReview: &agentcontract.Decision{Kind: "final", AnswerMarkdown: "Shipment checked."},
+	}
+	raw, err := agentcontract.CanonicalJSON(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := &HTTPJSONDecisionModel{Model: "fake", DecisionOutputMode: "output_tools"}
+	payload, err := model.requestPayload(raw, "Review the answer.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := agentcontract.CanonicalJSON(payload)
+	if err != nil || bytes.Contains(encoded, []byte("unrelated-contract-marker")) ||
+		!bytes.Contains(encoded, []byte("observed-contract-marker")) || !bytes.Contains(encoded, []byte("Shipment checked.")) ||
+		!bytes.Contains(encoded, []byte("shipments.cancel")) {
+		t.Fatal("review lost recorded evidence, metadata or retained a redundant schema", err)
+	}
+}
+
+func TestNativeFactInspectionStartsWithAvailableEvidence(t *testing.T) {
+	model := &HTTPJSONDecisionModel{Model: "fake", DecisionOutputMode: "native_tools"}
+	packet := agentcontract.ContextPacket{Schema: "agenstra.context.v1", Instruction: "Read the status."}
+	for _, want := range []bool{false, true} {
+		if want {
+			packet.Facts = []agentcontract.FactView{{Fact: agentcontract.Fact{FactID: "result"}}}
+		}
+		raw, err := agentcontract.CanonicalJSON(packet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := model.requestPayload(raw, "Use the supported tools.")
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, tool := range payload["tools"].([]any) {
+			function := tool.(agentcontract.JSON)["function"].(agentcontract.JSON)
+			found = found || function["name"] == "inspect_fact"
+		}
+		if found != want {
+			t.Fatalf("inspect_fact availability differs from the available evidence: want %t", want)
+		}
+	}
+}
+
+func TestModelMeasuresUnchangedPayloadOnlyOnce(t *testing.T) {
+	for _, tc := range []struct{ budget, output, counts int }{{1000, 128, 1}, {60, 20, 2}} {
+		var received int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var request struct {
+				MaxTokens int `json:"max_tokens"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+			}
+			received = request.MaxTokens
+			if err := json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{agentcontract.JSON{
+				"message": agentcontract.JSON{"content": `{"schema":"agenstra.decision.v1","kind":"final","answer_markdown":"Done","fact_ids":[]}`},
+			}}}); err != nil {
+				t.Error(err)
+			}
+		}))
+		model, err := NewHTTPJSONDecisionModel("fake", server.URL, "key", time.Second, server.Client())
+		if err != nil {
+			server.Close()
+			t.Fatal(err)
+		}
+		model.MaxInputTokens, model.MaxOutputTokens = 1000, 128
+		counts := 0
+		model.CountInputTokens = func(string, []byte) (int64, error) {
+			counts++
+			return 40, nil
+		}
+		packet := agentcontract.ContextPacket{Schema: "agenstra.context.v1", Instruction: "Finish.", ModelTokensRemaining: int64(tc.budget)}
+		result, err := model.Decide(t.Context(), packet, "Finish.")
+		server.Close()
+		if err != nil || result.AnswerMarkdown != "Done" || received != tc.output || counts != tc.counts {
+			t.Fatalf("changed token bound or repeated tokenization: budget=%d cap=%d counts=%d err=%v", tc.budget, received, counts, err)
+		}
+	}
+}

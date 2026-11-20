@@ -140,6 +140,9 @@ func TestNativeToolsPreserveParameterContractsAndBudget(t *testing.T) {
 	if err != nil || encodeErr != nil || measured.Tokens != int64(len(encoded)+128) {
 		t.Fatal("native definitions escaped the actual request budget", measured, err, encodeErr)
 	}
+	if strings.Count(string(encoded), "Read an inventory record") != 1 || !strings.Contains(string(encoded), "Deferred contract") {
+		t.Fatal("a tool description was duplicated or deferred discovery lost its description")
+	}
 	after, err := agentcontract.CanonicalJSON(packet)
 	if err != nil || string(after) != string(raw) {
 		t.Fatal("native schema generation mutated caller context")

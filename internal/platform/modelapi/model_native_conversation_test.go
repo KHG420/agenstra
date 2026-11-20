@@ -35,19 +35,19 @@ func TestNativeConversationTextPreservesThinkingAndStreaming(t *testing.T) {
 				}
 				if streaming {
 					w.Header().Set("Content-Type", "text/event-stream")
-					streamFrame(t, w, agentcontract.JSON{"choices": []any{agentcontract.JSON{"index": 0, "delta": agentcontract.JSON{"content": "你好，", "reasoning_content": "private reasoning"}}}})
+					streamFrame(t, w, agentcontract.JSON{"choices": []any{agentcontract.JSON{"index": 0, "delta": agentcontract.JSON{"content": "JSON 是一种", "reasoning_content": "private reasoning"}}}})
 					select {
 					case <-release:
 					case <-r.Context().Done():
 						return
 					}
-					streamFrame(t, w, agentcontract.JSON{"choices": []any{agentcontract.JSON{"index": 0, "delta": agentcontract.JSON{"content": "我是小π。"}, "finish_reason": "stop"}}})
+					streamFrame(t, w, agentcontract.JSON{"choices": []any{agentcontract.JSON{"index": 0, "delta": agentcontract.JSON{"content": "数据交换格式。"}, "finish_reason": "stop"}}})
 					streamFrame(t, w, agentcontract.JSON{"choices": []any{}, "usage": agentcontract.JSON{"prompt_tokens": 40, "completion_tokens": 12}})
 					if _, err := fmt.Fprint(w, "data: [DONE]\n\n"); err != nil {
 						t.Error(err)
 					}
 				} else {
-					if err := json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{agentcontract.JSON{"message": agentcontract.JSON{"content": "你好，我是小π。", "reasoning_content": "private reasoning"}, "finish_reason": "stop"}}, "usage": agentcontract.JSON{"prompt_tokens": 40, "completion_tokens": 12}}); err != nil {
+					if err := json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{agentcontract.JSON{"message": agentcontract.JSON{"content": "JSON 是一种数据交换格式。", "reasoning_content": "private reasoning"}, "finish_reason": "stop"}}, "usage": agentcontract.JSON{"prompt_tokens": 40, "completion_tokens": 12}}); err != nil {
 						t.Error(err)
 					}
 				}
@@ -64,14 +64,14 @@ func TestNativeConversationTextPreservesThinkingAndStreaming(t *testing.T) {
 			result := make(chan agentcontract.Decision, 1)
 			failure := make(chan error, 1)
 			go func() {
-				d, e := model.Decide(ctx, agentcontract.ContextPacket{Schema: "agenstra.context.v1", Instruction: "你好"}, "Use declared tools for business operations.")
+				d, e := model.Decide(ctx, agentcontract.ContextPacket{Schema: "agenstra.context.v1", Instruction: "什么是 JSON？"}, "Use declared tools for business operations.")
 				result <- d
 				failure <- e
 			}()
 			if streaming {
 				select {
 				case update := <-updates:
-					if update.Text != "你好，" || update.Phase != "generating" {
+					if update.Text != "JSON 是一种" || update.Phase != "generating" {
 						t.Error("ordinary reply did not stream safely", update)
 					}
 					release <- struct{}{}
@@ -84,8 +84,55 @@ func TestNativeConversationTextPreservesThinkingAndStreaming(t *testing.T) {
 			if err := <-failure; err != nil {
 				t.Fatal("ordinary native conversation was rejected", err)
 			}
-			if d.Kind != "final" || d.AnswerMarkdown != "你好，我是小π。" || len(d.FactIDs) != 0 || requests.Load() != 1 || d.ModelCall.FormatError != "" || !d.ModelCall.UsageAvailable || d.ModelCall.OutputTokens != 12 {
+			if d.Kind != "final" || d.AnswerMarkdown != "JSON 是一种数据交换格式。" || len(d.FactIDs) != 0 || requests.Load() != 1 || d.ModelCall.FormatError != "" || !d.ModelCall.UsageAvailable || d.ModelCall.OutputTokens != 12 {
 				t.Fatal("reply lost semantics, usage, or was replayed", d)
+			}
+		})
+	}
+}
+
+func TestNativeConversationKeepsExplicitFormatsInFinal(t *testing.T) {
+	for _, tc := range []struct {
+		name, instruction, answer string
+	}{
+		{name: "JSON", instruction: "只返回 JSON 对象，不用业务工具。", answer: `{"status":"ready"}`},
+		{name: "code block", instruction: "只给我一个代码块。", answer: "```text\nready\n```"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var payload agentcontract.JSON
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Error(err)
+					return
+				}
+				prompt := payload["messages"].([]any)[0].(map[string]any)["content"].(string)
+				if payload["tool_choice"] != "auto" || !strings.Contains(prompt, "requested JSON or code blocks") {
+					t.Error("structured display guidance changed the automatic tool choice")
+				}
+				arguments, err := agentcontract.CanonicalJSON(agentcontract.JSON{"answer_markdown": tc.answer, "fact_ids": []string{}})
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				message := agentcontract.JSON{"tool_calls": []any{
+					agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": "final", "arguments": string(arguments)}},
+				}}
+				if err := json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{
+					agentcontract.JSON{"message": message, "finish_reason": "tool_calls"},
+				}}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer upstream.Close()
+			model, err := NewHTTPJSONDecisionModel("test", upstream.URL, "fixture", time.Second, upstream.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			model.APIType, model.Thinking, model.DecisionOutputMode = "deepseek_chat", "disabled", "native_tools"
+			packet := agentcontract.ContextPacket{Schema: "agenstra.context.v1", Instruction: tc.instruction}
+			decision, err := model.Decide(t.Context(), packet, "Use declared functions.")
+			if err != nil || decision.Kind != "final" || decision.AnswerMarkdown != tc.answer {
+				t.Fatal("native final lost the requested display format", decision, err)
 			}
 		})
 	}
