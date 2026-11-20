@@ -633,7 +633,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 	var decision agentcontract.Decision
 	approvedProposal := false
 	var review *agentcontract.Decision
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt < 3; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -1049,7 +1049,10 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			state.ErrorCode = agentcontract.Strptr(code)
 			return nil
 		}
-		if attempt == 1 || state.RoundsUsed >= r.MaxModelRounds {
+		// A rejected tool envelope has not dispatched any business action. Give
+		// that protocol failure one final correction within the same run budget.
+		finalEnvelopeCorrection := attempt == 1 && metrics.FormatError == "model_output_tool_calls_invalid"
+		if (attempt >= 1 && !finalEnvelopeCorrection) || state.RoundsUsed >= r.MaxModelRounds {
 			state.Status = "failed"
 			state.ErrorCode = agentcontract.Strptr(code)
 			return nil
@@ -1090,6 +1093,9 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			if review == nil {
 				feedback += " In a tool_batch, each calls[i] object permits only call_ref, capability, arguments and reason. Keep every capability input property inside that call's single arguments object, closing arguments only after all of its properties and before closing the call object."
 			}
+		}
+		if finalEnvelopeCorrection {
+			feedback += "\nSelect only one next function from the tools declared for this request. Return that function with its complete native arguments and wait for its result. Do not combine control functions, invent function names, or repeat completed operations."
 		}
 	}
 	if !approvedProposal {

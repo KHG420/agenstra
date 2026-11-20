@@ -154,7 +154,7 @@ DeepSeek 开启或默认推理时，`output_tools` 与 `native_tools` 使用 `to
 
 输出函数名必须与当前请求声明的 `submit_decision` 完全一致；参数中的 `kind` 也必须属于该请求实际声明的决策联合。没有技能时返回 `read_skill`、没有搜索功能时返回 `search_capabilities`，或在完成复核阶段返回非 `final`，均在模型适配器内按格式错误拒绝，不交给运行内核尝试。`submit_final`、`submit_tool_batch` 等未声明名称即使携带有效参数也会被拒绝，不转换为决策或派发业务调用；拒绝仍保留模型用量，并沿用原有的有界格式纠正与预算。这与 Pydantic AI 按当轮可用工具名查找、再校验输出参数的方式一致（[固定版本源码](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/tool_manager.py)）。
 
-`output_tools` 的网关仍可能在 `parallel_tool_calls=false` 时返回多个输出工具。框架拒绝整个响应，在原有纠正次数与预算内明确反馈每轮只能有一个输出工具，包括检查 Fact 时也须逐轮进行，不选择其中一个执行或自动合并。类型化输出的纠正提示移除旧内容 JSON 示例，保留字段、引用和完成复核约束。明确反馈多个结构化输出的参考实现见 [LangChain](https://github.com/langchain-ai/langchain/blob/007cc15b713cea17df63ba603aca6c7b27086638/libs/langchain_v1/langchain/agents/factory.py#L1287-L1308)。
+`output_tools` 的网关仍可能在 `parallel_tool_calls=false` 时返回多个输出工具。框架拒绝整个响应，并明确反馈每轮只能有一个输出工具，包括检查 Fact 时也须逐轮进行。第一次纠正仍返回无效的工具调用封装时，最多再纠正一次。两次纠正均计入原有轮次、token 和时间预算。类型化输出的纠正提示移除旧内容 JSON 示例，保留字段、引用和完成复核约束。明确反馈多个结构化输出的参考实现见 [LangChain](https://github.com/langchain-ai/langchain/blob/007cc15b713cea17df63ba603aca6c7b27086638/libs/langchain_v1/langchain/agents/factory.py#L1287-L1308)。
 
 可选限制包括 `max_output_tokens`、`token_limit_field`、`timeout_seconds`、`max_attempts`、`context_window_tokens`、`max_input_tokens`、`protocol_reserve_tokens`。最大尝试次数包含首次请求，1 表示不做传输重试。配置的超时及 token 上限仍受任务冻结的部署限制、总预算和截止时间约束；选大模型不能扩大原有运行预算。已知上下文窗口应配合明确的输出预留。
 
@@ -176,7 +176,7 @@ JSON 内容输出的首次决策说明与格式纠正说明都提供本地 `call
 
 输出上限包含供应商计入输出的推理 tokens。`finish_reason=length` 返回 `model_output_truncated`；兼容网关返回空白正文、报告的输出量达到本次实际请求上限时，也归入该错误，而非普通 JSON 格式错误。空输出规则同时适用于 JSON 内容模式和 `output_tools`：工具输出模式还要求响应没有任何工具调用，才推断空输出耗尽。JSON 正文非空、解析返回 `unexpected EOF` 且报告的输出量达到本次实际上限时，同样按耗尽处理，即使网关标记 `stop`。`output_tools` 的单个已声明输出函数也采用该规则：先核验调用数量、类型和函数名，再检查未完成的参数 JSON；网关标记 `tool_calls` 不证明参数完整。不补全或执行被截断的内容。其他语法错误、完整但契约无效的 JSON，以及数量、类型或名称无效的工具调用仍保留原格式错误。没有已知请求上限或有效输出量时，不猜测未完成正文的原因。完整且通过契约校验的正文或工具调用不会仅因用量达到上限而被拒绝。
 
-业务决策遇到输出耗尽时，在现有每个决策或完成复核阶段最多两次模型请求（含首次请求）的范围内，提示模型缩短决策、分步处理并使用已有回执。恢复继续消耗原有轮次、累计 token 和时间预算，不自动提高配置的输出限制，不执行被截断的工具调用；完成复核仍只允许 final。每次失败与恢复请求分别保留用量，输出耗尽恢复不计作 `format_recovery_requests`。记忆抽取和控制台合成检查保留直接返回错误的行为。
+业务决策遇到输出耗尽时，框架最多安排一次针对截断的纠正，提示模型缩短决策、分步处理并使用已有回执。恢复继续消耗原有轮次、累计 token 和时间预算，不自动提高配置的输出限制，不执行被截断的工具调用；完成复核仍只允许 final。每次失败与恢复请求分别保留用量，输出耗尽恢复不计作 `format_recovery_requests`。记忆抽取和控制台合成检查保留直接返回错误的行为。
 
 模型调用被请求上下文的期限终止时，业务决策与记忆抽取的用量记录均使用 `model_timeout`，保留原始 `context.DeadlineExceeded` 错误链供调用方处理；明确的安全错误码仍优先。未知错误继续归为 `model_unavailable`，取消不推断为超时，不暴露私有错误正文，也不增加重试或延长期限。单次请求与步骤总期限继续分别生效；步骤内的纠正和完成复核仍共享剩余时间。这与 [Pydantic AI 对请求、工具和整体期限的区分](https://ai.pydantic.dev/timeouts/) 一致。
 

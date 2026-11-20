@@ -81,10 +81,14 @@ func TestOutputToolEnvelopeRecoveryRetainsConcreteConstraint(t *testing.T) {
 				}}
 				runtime := &reactcore.AgentRuntime{Provider: provider, Model: model, MaxModelRounds: 4, Grants: map[string]bool{"records.write": true}}
 				result, err := runtime.Run(t.Context(), "Report the outcome without executing business operations")
-				if err != nil || requests != 2 || len(result.ModelCalls) != 2 || provider.called != 0 || len(result.Observations) != 0 {
+				wantCalls := 3
+				if correct {
+					wantCalls = 2
+				}
+				if err != nil || requests != wantCalls || len(result.ModelCalls) != wantCalls || provider.called != 0 || len(result.Observations) != 0 {
 					t.Fatal("tool-envelope rejection changed the budget or dispatched a business operation", result, err)
 				}
-				if result.ModelCalls[0].FormatError != "model_output_tool_calls_invalid" || !result.ModelCalls[1].FormatRecovery || result.ModelUsage.FormatRecoveryRequests != 1 {
+				if result.ModelCalls[0].FormatError != "model_output_tool_calls_invalid" || !result.ModelCalls[wantCalls-1].FormatRecovery || result.ModelUsage.FormatRecoveryRequests != wantCalls-1 {
 					t.Fatal("tool-envelope recovery changed its format accounting")
 				}
 				if (result.Status == "completed") != correct || !correct && result.Status != "failed" {
@@ -183,14 +187,18 @@ func TestNativeControlGroupingRecoveryRetainsConcreteConstraint(t *testing.T) {
 					runtime.Grants = map[string]bool{}
 				}
 				result, err := runtime.Run(t.Context(), "Report the outcome without executing business operations")
-				if err != nil || requests != 2 || len(result.ModelCalls) != 2 || provider.called != 0 || len(result.Observations) != 0 {
+				wantCalls := 3
+				if correct {
+					wantCalls = 2
+				}
+				if err != nil || requests != wantCalls || len(result.ModelCalls) != wantCalls || provider.called != 0 || len(result.Observations) != 0 {
 					t.Fatal("native grouping rejection changed the budget or partially dispatched a batch", result, err)
 				}
-				if result.ModelCalls[0].FormatError != "model_output_tool_calls_invalid" || !result.ModelCalls[1].FormatRecovery || result.ModelUsage.FormatRecoveryRequests != 1 {
+				if result.ModelCalls[0].FormatError != "model_output_tool_calls_invalid" || !result.ModelCalls[wantCalls-1].FormatRecovery || result.ModelUsage.FormatRecoveryRequests != wantCalls-1 {
 					t.Fatal("native grouping recovery changed its format accounting")
 				}
-				if result.ModelCalls[1].EstimatedInputTokens != inputLengths[1] || model.DecisionOutputMode != "native_tools" {
-					t.Fatal("recovery input measurement differs from its actual channel or mutated the shared model", result.ModelCalls[1].EstimatedInputTokens, inputLengths[1], model.DecisionOutputMode)
+				if result.ModelCalls[wantCalls-1].EstimatedInputTokens != inputLengths[wantCalls-1] || model.DecisionOutputMode != "native_tools" {
+					t.Fatal("recovery input measurement differs from its actual channel or mutated the shared model", result.ModelCalls[wantCalls-1].EstimatedInputTokens, inputLengths[wantCalls-1], model.DecisionOutputMode)
 				}
 				if (result.Status == "completed") != correct || !correct && result.Status != "failed" {
 					t.Fatal("unchanged grouping was accepted or a corrected final was rejected", result)

@@ -22,7 +22,7 @@ Go 完成回调中的 `CompletionContext.LoadedSkills` 提供本次运行已选�
 
 同一份回答同时违反多项本地证据规则时，一次反馈所有已发现的问题，避免模型改好一处后才收到另一处已知错误。观察仍保留原有首个错误码优先级，不新增响应字段；所有问题修正后仍须正常复核，纠正消耗原预算且不重放业务调用。这参考 [Pydantic AI 在重试反馈中保留完整校验错误列表](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/messages.py#L1809-L1854)，不保证模型首次输出或下一次纠正一定正确。
 
-默认情况下，没有写操作、也没有引用截断证据的只读、计算和对话运行不增加复核请求。宿主可通过下述 Go 策略为选定回答请求复核。正常复核增加一次模型请求；格式错误最多使用现有的一次格式纠正，并始终受轮次、Token、输入上下文、超时和费用统计约束。复核无法完成时，任务保持未完成、草稿不发布，已有业务回执继续保留。该反馈方式参考 [Pydantic AI 将输出校验失败反馈回模型循环](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_agent_graph.py#L2393-L2399)。
+默认情况下，没有写操作、也没有引用截断证据的只读、计算和对话运行不增加复核请求。宿主可通过下述 Go 策略为选定回答请求复核。正常复核增加一次模型请求。格式错误可纠正一次，若纠正后仍返回无效的工具调用封装，最多再纠正一次。所有请求继续受轮次、token、输入上下文和超时限制，并记录用量。复核无法完成时，任务保持未完成、草稿不发布，已有业务回执继续保留。该反馈方式参考 [Pydantic AI 将输出校验失败反馈回模型循环](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/_agent_graph.py#L2393-L2399)。
 
 使用 `output_tools` 时，复核请求只提供 `submit_decision` 的 `final` 和 `approve_completion` 分支，`final` 保留上述反馈字段，通过明确的 `tool_choice` 选择该函数，保持单个输出决策限制；内置复核工具 Schema 要求显式提供 `completion_feedback`。业务调用、追问、搜索和检查工具不作为此阶段的可选输出。普通决策工具不暴露复核反馈。已保存调用及结果仍作为历史证据呈现，输入测量与实际请求一致。该限制依据框架已有的复核阶段，不按模型名称分支；JSON 正文复核使用同一反馈语义，记忆提取不变。此取舍参考 [Pydantic AI 按可选工具限制模型请求](https://github.com/pydantic/pydantic-ai/blob/72d89d136b5d155e52f5c2b054175420459fb6f4/pydantic_ai_slim/pydantic_ai/models/openai.py#L1583-L1616)。筛选输出工具使模型请求与运行内核一致，不能保证最终回答不混用字段来源或遗漏用户要求的数据。
 

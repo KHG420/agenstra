@@ -9,9 +9,17 @@ import (
 )
 
 func TestCancelledStepCannotBeginAnotherDecisionAttempt(t *testing.T) {
-	for _, code := range []string{"model_decision_invalid", "model_output_truncated"} {
+	for _, test := range []struct {
+		code            string
+		formatError     string
+		invalidAttempts int
+	}{
+		{"model_decision_invalid", "", 1},
+		{"model_output_truncated", "", 1},
+		{"model_decision_invalid", "model_output_tool_calls_invalid", 2},
+	} {
 		for _, stop := range []bool{false, true} {
-			label := code + map[bool]string{false: "/live caller", true: "/cancelled caller"}[stop]
+			label := test.code + "/" + test.formatError + map[bool]string{false: "/live caller", true: "/cancelled caller"}[stop]
 			t.Run(label, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
@@ -19,11 +27,12 @@ func TestCancelledStepCannotBeginAnotherDecisionAttempt(t *testing.T) {
 				model := decisionModelFunc(func(context.Context, agentcontract.ContextPacket, string) (agentcontract.Decision, error) {
 					modelCalls++
 					metrics := &agentcontract.ModelCallMetrics{Attempts: 1, UsageAvailable: true, InputTokens: 50, OutputTokens: 20}
-					if modelCalls == 1 {
-						if stop {
+					if modelCalls <= test.invalidAttempts {
+						metrics.FormatError = test.formatError
+						if stop && modelCalls == test.invalidAttempts {
 							cancel()
 						}
-						return agentcontract.Decision{ModelCall: metrics}, agentcontract.ModelDecisionError{Kind: code}
+						return agentcontract.Decision{ModelCall: metrics}, agentcontract.ModelDecisionError{Kind: test.code}
 					}
 					return agentcontract.Decision{Kind: "final", AnswerMarkdown: "hello", FactIDs: []string{}, ModelCall: metrics}, nil
 				})
@@ -33,9 +42,9 @@ func TestCancelledStepCannotBeginAnotherDecisionAttempt(t *testing.T) {
 					t.Fatal(err)
 				}
 				err = runtime.Step(ctx, state, func() error { checkpoints++; return nil })
-				wantCalls := 2
+				wantCalls := test.invalidAttempts + 1
 				if stop {
-					wantCalls = 1
+					wantCalls = test.invalidAttempts
 					if !errors.Is(err, context.Canceled) {
 						t.Fatalf("cancelled Step swallowed cancellation: model=%d checkpoints=%d rounds=%d err=%v", modelCalls, checkpoints, state.RoundsUsed, err)
 					}
@@ -49,7 +58,7 @@ func TestCancelledStepCannotBeginAnotherDecisionAttempt(t *testing.T) {
 					t.Fatal("cancelled attempt published an answer")
 				}
 				first := state.ModelCalls[0]
-				if first.ErrorCode == nil || *first.ErrorCode != code || first.Reservation || first.InputTokens != 50 || first.OutputTokens != 20 {
+				if first.ErrorCode == nil || *first.ErrorCode != test.code || first.Reservation || first.InputTokens != 50 || first.OutputTokens != 20 {
 					t.Fatal("received model diagnostics or usage lost", first)
 				}
 			})

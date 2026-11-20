@@ -12,7 +12,66 @@ import (
 	"time"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
+	reactcore "github.com/KHG420/agenstra/internal/runtime/react"
 )
+
+func TestNativeEnvelopeRecoveryHasTwoCorrectionsWithinRunBounds(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		validThird  bool
+		maxRounds   int
+		wantCalls   int
+		wantStatus  string
+		wantRepairs int
+	}{
+		{"second correction succeeds", true, 6, 3, "completed", 2},
+		{"persistent invalid envelope", false, 6, 3, "failed", 2},
+		{"run round limit", true, 2, 2, "failed", 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				requests++
+				var payload agentcontract.JSON
+				if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+					t.Error(err)
+				}
+				name, arguments := "undeclared_write", `{"id":7}`
+				if requests == 3 && test.validThird {
+					prompt := payload["messages"].([]any)[0].(map[string]any)["content"].(string)
+					if !strings.Contains(prompt, "one next function") {
+						t.Error("second correction lost its narrowed function guidance")
+					}
+					assertSingleDecisionOutputRequest(t, payload)
+					name, arguments = "submit_decision", `{"kind":"final","answer_markdown":"The requested explanation is complete.","fact_ids":[]}`
+				}
+				if err := json.NewEncoder(w).Encode(agentcontract.JSON{"choices": []any{agentcontract.JSON{
+					"message":       agentcontract.JSON{"tool_calls": []any{agentcontract.JSON{"type": "function", "function": agentcontract.JSON{"name": name, "arguments": arguments}}}},
+					"finish_reason": "tool_calls",
+				}}, "usage": agentcontract.JSON{"prompt_tokens": 10, "completion_tokens": 5}}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			model, err := NewHTTPJSONDecisionModel("test", server.URL, "test-key", time.Second, server.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			model.DecisionOutputMode = "native_tools"
+			provider := &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{
+				"records.write": {Name: "records.write", Effect: "write", InputSchema: agentcontract.JSON{"type": "object"}},
+			}}
+			runtime := &reactcore.AgentRuntime{Provider: provider, Model: model, MaxModelRounds: test.maxRounds}
+			result, err := runtime.Run(t.Context(), "Explain the prerequisites")
+			if err != nil || result.Status != test.wantStatus || requests != test.wantCalls || provider.called != 0 || len(result.Observations) != 0 {
+				t.Fatalf("envelope recovery outcome changed: result=%+v err=%v requests=%d calls=%d", result, err, requests, provider.called)
+			}
+			if result.ModelUsage.FormatRecoveryRequests != test.wantRepairs || len(result.ModelCalls) != test.wantCalls {
+				t.Fatal("envelope recovery lost its budget or accounting", result.ModelUsage, result.ModelCalls)
+			}
+		})
+	}
+}
 
 func nativeTestPacket() agentcontract.ContextPacket {
 	return agentcontract.ContextPacket{Schema: "agenstra.context.v1", Instruction: "Read inventory", RuntimeFeatures: []string{"capability_search"},
