@@ -25,8 +25,8 @@ type ModelManager struct {
 	// the same policy without changing frozen profiles, credentials or budgets.
 	ThinkingPolicy func(string, agentcontract.ContextPacket) string
 	// ReasoningRequests enables semantic request_reasoning decisions for DeepSeek.
-	// Normal decisions start disabled and stay enabled after an accepted upgrade.
-	// Other purposes continue to use ThinkingPolicy and the frozen profiles.
+	// Normal decisions default to disabled, honor an enabled ThinkingPolicy, and
+	// stay enabled after an accepted upgrade. Other purposes retain their policy.
 	ReasoningRequests bool
 	mu                sync.RWMutex
 	deployment        *Deployment
@@ -176,13 +176,15 @@ func (s *selectedModels) thinkingAdapter(model *modelapi.HTTPJSONDecisionModel, 
 		return model
 	}
 	mode := ""
+	if s.thinking != nil {
+		mode = s.thinking(purpose, packet)
+	}
 	if s.reasoningRequests && purpose == "decision" {
-		mode = "disabled"
 		if packet.ReasoningRequested {
 			mode = "enabled"
+		} else if mode != "enabled" {
+			mode = "disabled"
 		}
-	} else if s.thinking != nil {
-		mode = s.thinking(purpose, packet)
 	}
 	if mode != "enabled" && mode != "disabled" {
 		return model

@@ -250,7 +250,7 @@ LangChain 的 JSON 工具包含代码围栏、字符串换行和部分 JSON 解�
 
 ## 按需开启思考
 
-Go 宿主可在启动时设置 `ModelManager.ReasoningRequests = true`。当前内置适配支持 `deepseek_chat`，普通决策从 `thinking=disabled` 开始。模型根据完整任务、相关历史及已有证据决定直接回答、调用工具或提交无参数的 `request_reasoning`。记录标题和用户消息的关键词不会触发框架升级，普通任务无需独立分类请求。
+Go 宿主可在启动时设置 `ModelManager.ReasoningRequests = true`。当前内置适配支持 `deepseek_chat`，普通决策默认从 `thinking=disabled` 开始。宿主同时设置 `ThinkingPolicy` 时，其 `enabled` 结果对当前请求生效。模型根据完整任务、相关历史及已有证据决定直接回答、调用工具或提交无参数的 `request_reasoning`。接受升级后，后续普通决策保持思考，宿主策略返回 `disabled` 也保留该升级。计量与发送使用同一组合规则。记录标题和用户消息的关键词不会触发框架升级，普通任务无需独立分类请求。
 
 运行时仅在模型明确支持、尚未升级且至少剩余两轮时公布 `runtime_features` 中的 `reasoning_request`。JSON 内容决策使用 `{"schema":"agenstra.decision.v1","kind":"request_reasoning"}`。`output_tools` 使用 `submit_decision` 的 `{"kind":"request_reasoning"}`，`native_tools` 使用无参数 `request_reasoning` 函数。`json_schema` 同步声明这一可选种类。升级后检查点和后续 `ContextPacket` 保存 `reasoning_requested=true`，随后的正常决策保持 `thinking=enabled`，恢复运行继续沿用该选择。
 
