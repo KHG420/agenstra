@@ -30,7 +30,7 @@ func (m *HTTPJSONDecisionModel) ExtractMemoriesMeasured(ctx context.Context, req
 		return nil, metrics, err
 	}
 	model := m.memoryRequestModel(request)
-	raw, err := model.requestJSON(ctx, input, agentcontract.MemoryExtractionPrompt)
+	raw, err := model.requestJSON(ctx, input, agentcontract.MemoryExtractionPrompt, false)
 	if err != nil {
 		return nil, metrics, err
 	}

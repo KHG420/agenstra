@@ -6,6 +6,18 @@
 
 决策中的自然语言文本按 Unicode 码点计算字符数，与 JSON Schema 的 `maxLength` 一致：调用 `reason` 最多 500 字符，最终 `answer_markdown` 最多 30,000 字符，追问 `prompt` 最多 1,000 字符，业务对象引用 `label` 最多 100 字符。中文和 emoji 各按一个码点计算；组合字符中的每个码点分别计数。例如 200 个汉字占 600 个 UTF-8 字节，仍符合 `reason` 的字符上限。这些限制同时适用于 JSON 正文和类型化输出工具；HTTP 响应大小与模型 Token、上下文预算继续独立执行。
 
+## 结构化最终答案
+
+自动接收结果的应用可以在部署中按来源包设置本地 JSON Schema。框架启动时编译每份契约（最多 16 KiB），并将同一份契约放入模型提示。省略此设置的包继续输出普通 Markdown。下面的包要求字符串字段 `id`。
+
+```json
+{"final_answer_schemas":{"records":{"type":"object","required":["id"],"properties":{"id":{"type":"string"}},"additionalProperties":false}}}
+```
+
+运行时先尝试读取裸 JSON。对象或数组带有说明或单个 JSON 代码围栏时，框架可以提取唯一值；在字符串、布尔值、null 或子容器完整结束之后，可以补齐确定的闭合符。多个候选、重复键、半截 ID、缺少的值和违反契约的字段交给模型纠正。具体错误会随现有证据返回模型一次，使用原任务的轮数、Token 和时间预算。只有通过校验的答案才会用于完成复核和发布。模型明确报告截断时沿用截断重试；工具动作继续按原权限和参数校验执行。
+
+实现参考了 LangChain 的 Markdown / 部分 JSON 解析与结构化输出纠错、Pydantic AI 的输出校验反馈，以及 OpenAI 对截断和拒绝的区分。[LangChain 解析器](https://github.com/langchain-ai/langchain/blob/master/libs/core/langchain_core/utils/json.py) · [LangChain 结构化输出](https://docs.langchain.com/oss/python/langchain/structured-output) · [Pydantic AI 输出](https://pydantic.dev/docs/ai/core-concepts/output/) · [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+
 ## 发布前的回答一致性复核
 
 Go 完成回调中的 `CompletionContext.LoadedSkills` 提供本次运行已选择的技能名称。宿主据此为专业校验确定生效范围，再核对当前工具回执与引用。业务规则应绑定当前执行领域或实际能力调用，引用文本、共享术语和最终回答的措辞只用于解释内容。独立专家通过自己的技能与提示词执行，父级按其工作流结果进行证据核对。

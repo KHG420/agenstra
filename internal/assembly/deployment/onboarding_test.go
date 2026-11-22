@@ -195,3 +195,24 @@ func TestDeclarativeReconciliationChecksOriginalIdentityAndReadPermission(t *tes
 		t.Fatal("uncorrelated query accepted")
 	}
 }
+
+func TestDeploymentFinalAnswerSchemasAreScopedAndCompiledBeforeUse(t *testing.T) {
+	rule := agentcontract.JSON{"type": "string"}
+	d := &Deployment{Config: agentcontract.DeploymentConfig{FinalAnswerSchemas: map[string]agentcontract.JSON{"records": rule}}}
+	h := &durablehost.AgentHost{}
+	if err := ConfigureDeploymentChecks(h, d); err != nil {
+		t.Fatal(err)
+	}
+	rule["type"] = "number"
+	s := h.FinalAnswerSchemas["records"]
+	if s == nil || h.FinalAnswerSchemas["other"] != nil {
+		t.Fatal("schema was not scoped to the origin pack")
+	}
+	if _, err := s.Normalize("3"); err == nil {
+		t.Fatal("deployment mutation changed the compiled contract")
+	}
+	d.Config.FinalAnswerSchemas["bad"] = agentcontract.JSON{"$ref": "https://example.invalid/external"}
+	if err := ConfigureDeploymentChecks(h, d); err == nil || h.FinalAnswerSchemas["bad"] != nil {
+		t.Fatal("invalid contract installed")
+	}
+}

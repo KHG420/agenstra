@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"strings"
 
 	"github.com/KHG420/agenstra/internal/base/jsonvalue"
@@ -77,6 +78,17 @@ func validCheckPath(path []any) bool {
 // start. Explicit Go callbacks take precedence over deployment configuration.
 func ConfigureDeploymentChecks(h *durablehost.AgentHost, d *Deployment) error {
 	compiledCompletion, compiledReconciler := h.CompletionValidator, h.Reconciler
+	finalSchemas := make(map[string]*agentcontract.FinalAnswerSchema, len(d.Config.FinalAnswerSchemas))
+	for pack, schema := range d.Config.FinalAnswerSchemas {
+		if strings.TrimSpace(pack) == "" {
+			return fmt.Errorf("final_answer_schemas pack required")
+		}
+		compiled, err := agentcontract.CompileFinalAnswerSchema(schema)
+		if err != nil {
+			return fmt.Errorf("final_answer_schemas[%q]: %w", pack, err)
+		}
+		finalSchemas[pack] = compiled
+	}
 	checks := map[string]map[string][]agentcontract.CompletionValidator{}
 	required := map[string]map[string]bool{}
 	for pack, requirements := range d.Config.CompletionChecks {
@@ -262,6 +274,10 @@ func ConfigureDeploymentChecks(h *durablehost.AgentHost, d *Deployment) error {
 			}
 			return agentcontract.CapabilityResult{Data: data}, nil
 		}
+	}
+	if len(finalSchemas) > 0 {
+		maps.Copy(finalSchemas, h.FinalAnswerSchemas)
+		h.FinalAnswerSchemas = finalSchemas
 	}
 	h.CompletionValidator, h.Reconciler = compiledCompletion, compiledReconciler
 	return nil

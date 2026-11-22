@@ -137,6 +137,22 @@ func TestHTTPJSONDecisionModelOutputFraming(t *testing.T) {
 	}
 }
 
+func TestFinalDecisionFraming(t *testing.T) {
+	content := "Result follows:\n```JSON\n{\"kind\":\"final\",\"answer_markdown\":\"done\"\n```\nCompleted."
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		memoryModelReply(t, w, content)
+	}))
+	defer server.Close()
+	model, err := NewHTTPJSONDecisionModel("test", server.URL, "test-key", time.Second, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := model.Decide(t.Context(), agentcontract.ContextPacket{}, "system")
+	if err != nil || d.Kind != "final" || d.AnswerMarkdown != "done" || d.ModelCall.Attempts != 1 {
+		t.Fatalf("framed final: %+v %v", d, err)
+	}
+}
+
 func TestRuntimeJSONRecoveryIsBoundedBeforeExecution(t *testing.T) {
 	valid := `{"kind":"tool_batch","calls":[{"call_ref":"publish","capability":"notice.create","arguments":{},"reason":"Publish the notice"}]}`
 	for _, tc := range []struct {

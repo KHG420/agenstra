@@ -131,7 +131,8 @@ func TestModelStreamPreservesStrictErrorsAndReviewPrivacy(t *testing.T) {
 	}{
 		{"truncated", "length", `{"kind":"final","answer_markdown":"draft","fact_ids":[]}`, "model_output_truncated", false, true},
 		{"refused", "content_filter", `{"kind":"final","answer_markdown":"draft","fact_ids":[]}`, "model_refused", false, true},
-		{"invalid-json", "stop", `{"kind":"final","answer_markdown":"draft","fact_ids":[]`, "model_decision_invalid", false, true},
+		{"completed-value", "stop", `{"kind":"final","answer_markdown":"draft","fact_ids":[]`, "", false, true},
+		{"invalid-json", "stop", `{"kind":"final","answer_markdown":"unfinished`, "model_decision_invalid", false, true},
 		{"cut-stream", "stop", `{"kind":"final","answer_markdown":"draft","fact_ids":[]}`, "model_outcome_unknown", false, false},
 		{"review", "stop", `{"kind":"approve_completion"}`, "", true, true},
 	} {
@@ -160,8 +161,11 @@ func TestModelStreamPreservesStrictErrorsAndReviewPrivacy(t *testing.T) {
 			ctx := agentcontract.WithAnswerObserver(context.Background(), func(u agentcontract.AnswerUpdate) { updates = append(updates, u) })
 			d, err := model.Decide(ctx, packet, "Return JSON")
 			if tc.want == "" {
-				if err != nil || len(updates) != 0 {
-					t.Fatal("review leaked or failed", updates, err)
+				if err != nil || (tc.review && len(updates) != 0) {
+					t.Fatal("final decision failed or review leaked", updates, err)
+				}
+				if !tc.review && (d.Kind != "final" || d.AnswerMarkdown != "draft" || d.ModelCall.OutputTokens != 20) {
+					t.Fatal("stream recovery changed the answer or token usage", d)
 				}
 			} else {
 				if agentcontract.ModelErrorCode(err) != tc.want {

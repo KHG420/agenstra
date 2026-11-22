@@ -25,7 +25,7 @@ func (m *HTTPJSONDecisionModel) CompactConversation(ctx context.Context, request
 		return result, metrics, err
 	}
 	model := m.conversationRequestModel(request)
-	raw, err := model.requestJSON(ctx, input, agentcontract.ConversationCompactionPrompt)
+	raw, err := model.requestJSON(ctx, input, agentcontract.ConversationCompactionPrompt, false)
 	if err != nil {
 		return result, metrics, err
 	}

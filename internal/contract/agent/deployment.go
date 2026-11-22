@@ -57,6 +57,7 @@ type DeploymentConfig struct {
 	Workflows            map[string][]WorkflowDefinition          `json:"workflows,omitempty"`
 	Database             *DatabaseConfig                          `json:"database,omitempty"`
 	Models               *ModelConfiguration                      `json:"models,omitempty"`
+	FinalAnswerSchemas   map[string]JSON                          `json:"final_answer_schemas,omitempty"`
 	CompletionChecks     map[string][]FactRequirement             `json:"completion_checks,omitempty"`
 	ReconciliationChecks map[string]map[string]ReconciliationRule `json:"reconciliation_checks,omitempty"`
 	DatabasePath         string                                   `json:"database_path"`

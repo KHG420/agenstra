@@ -95,7 +95,7 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet agentcontract
 	if packet.MaxModelOutputTokens > 0 && (requestModel.MaxOutputTokens <= 0 || packet.MaxModelOutputTokens < requestModel.MaxOutputTokens) {
 		requestModel.MaxOutputTokens = packet.MaxModelOutputTokens
 	}
-	body, err := requestModel.requestJSON(ctx, contextJSON, prompt)
+	body, err := requestModel.requestJSON(ctx, contextJSON, prompt, true)
 	if err != nil {
 		return agentcontract.Decision{}, err
 	}
@@ -137,7 +137,7 @@ func (m *HTTPJSONDecisionModel) Decide(ctx context.Context, packet agentcontract
 	return decision, nil
 }
 
-func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, prompt string) (body []byte, resultErr error) {
+func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, prompt string, decisionRequest bool) (body []byte, resultErr error) {
 	if metrics := modelMetrics(ctx); metrics != nil {
 		metrics.Profile, metrics.Model, metrics.APIType = m.Profile, m.Model, m.APIType
 		metrics.Thinking, metrics.ReasoningEffort = m.Thinking, m.ReasoningEffort
@@ -418,6 +418,9 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	if envelope.Choices[0].FinishReason == "length" {
 		return nil, agentcontract.ModelDecisionError{Kind: "model_output_truncated"}
 	}
+	usage := envelope.Usage
+	atOutputLimit := usage != nil && usage.Output != nil && outputLimit > 0 && *usage.Output >= outputLimit && *usage.Output <= 1000000000
+	recoverFinal := decisionRequest && !atOutputLimit
 	_, usesOutputTools := payload["tools"]
 	if strings.TrimSpace(envelope.Choices[0].Message.Content) == "" && (!usesOutputTools || len(envelope.Choices[0].Message.ToolCalls) == 0) {
 		// Some compatible gateways report stop even when reasoning consumed the
@@ -434,6 +437,15 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 		}
 	}
 	if usesOutputTools {
+		calls := envelope.Choices[0].Message.ToolCalls
+		if recoverFinal && len(calls) == 1 && calls[0].Type == "function" {
+			fn := &calls[0].Function
+			if fn.Name == "final" || fn.Name == "submit_decision" {
+				if fixed, ok := recoverFinalOutput([]byte(fn.Arguments), fn.Name == "final"); ok {
+					fn.Arguments = string(fixed)
+				}
+			}
+		}
 		var raw []byte
 		var detail string
 		var batchFunctions map[string]bool
@@ -491,6 +503,11 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	}
 	body = unwrapModelJSON([]byte(envelope.Choices[0].Message.Content))
 	body, _ = normalizeModelJSON(body)
+	if recoverFinal {
+		if fixed, ok := recoverFinalOutput(body, false); ok {
+			body = fixed
+		}
+	}
 	if usage := envelope.Usage; outputLimit > 0 && usage != nil && usage.Output != nil && *usage.Output >= outputLimit && *usage.Output <= 1000000000 {
 		// Compatible gateways may also label a nonempty cut-off JSON response as
 		// stop. Infer exhaustion only for an unfinished JSON value at the known
@@ -555,43 +572,10 @@ func modelJSONFormatError(body []byte) string {
 	if bytes.TrimSpace(body)[0] != '{' {
 		return "model_decision_schema_invalid"
 	}
-	type objectKeys struct {
-		seen       map[string]bool
-		expectsKey bool
+	if jsonvalue.DuplicateKeys(body) {
+		return "model_output_duplicate_key"
 	}
-	var stack []objectKeys
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	for {
-		token, err := decoder.Token()
-		if err == io.EOF {
-			return ""
-		}
-		if err != nil {
-			return "model_output_invalid_json"
-		}
-		if len(stack) > 0 {
-			current := &stack[len(stack)-1]
-			if key, ok := token.(string); ok && current.expectsKey {
-				if current.seen[key] {
-					return "model_output_duplicate_key"
-				}
-				current.seen[key], current.expectsKey = true, false
-				continue
-			}
-			current.expectsKey = current.seen != nil
-		}
-		if delimiter, ok := token.(json.Delim); ok {
-			switch delimiter {
-			case '{':
-				stack = append(stack, objectKeys{seen: map[string]bool{}, expectsKey: true})
-			case '[':
-				stack = append(stack, objectKeys{})
-			case '}', ']':
-				stack = stack[:len(stack)-1]
-			}
-		}
-	}
+	return ""
 }
 
 func invalidModelOutput(ctx context.Context, detail string) error {

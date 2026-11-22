@@ -36,6 +36,8 @@ type AgentHost struct {
 	// metadata. Configure it before serving. Returned models must preserve the
 	// underlying optional measurement, memory and capacity interfaces they use.
 	RunModelWrapper func(agentcontract.RunModelContext, agentcontract.DecisionModel) agentcontract.DecisionModel
+	// FinalAnswerSchemas validates JSON answers for opted-in packs before publication.
+	FinalAnswerSchemas map[string]*agentcontract.FinalAnswerSchema
 	// CompletionPreflight optionally checks drafts before expensive model review.
 	// Configure it before serving runs and retain it when resuming them.
 	CompletionPreflight    agentcontract.CompletionValidator
@@ -1124,6 +1126,7 @@ func (h *AgentHost) work(ctx context.Context, run agentcontract.StoredRun) (resu
 	}
 	runtime := &reactcore.AgentRuntime{Provider: provider, Model: runModel, Grants: policy.GrantedCapabilities, OriginPackID: run.PackID, ConnectionID: agentcontract.NewID(), Durable: true, MaxModelRounds: h.runSettings(run).MaxModelRounds, MaxToolCalls: h.runSettings(run).MaxToolCalls, MaxRepeatedCall: 2, MaxContextCharacters: h.runSettings(run).MaxContextCharacters}
 	runtime.ModelTimeout = time.Duration(h.runSettings(run).ModelTimeoutSeconds * 1e9)
+	runtime.FinalAnswerSchema = h.FinalAnswerSchemas[run.PackID]
 	runtime.CompletionValidator = h.CompletionValidator
 	runtime.CompletionPreflight = h.CompletionPreflight
 	runtime.CompletionReviewPolicy = h.CompletionReviewPolicy

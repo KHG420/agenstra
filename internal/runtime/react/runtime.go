@@ -36,6 +36,8 @@ type AgentRuntime struct {
 	MaxContextCharacters       int
 	MaxContextCapabilities     int
 	Memories                   []agentcontract.MemoryView
+	// FinalAnswerSchema validates JSON answers for opted-in packs before publication.
+	FinalAnswerSchema *agentcontract.FinalAnswerSchema
 	// CompletionPreflight optionally rejects invalid drafts before model review.
 	// It is read-only and does not replace the final CompletionValidator.
 	CompletionPreflight    agentcontract.CompletionValidator
@@ -630,6 +632,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 	}
 	feedback := ""
 	formatRecovery := false
+	correctingFinal := false
 	var decision agentcontract.Decision
 	approvedProposal := false
 	var review *agentcontract.Decision
@@ -898,6 +901,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		if r.ModelTimeout > 0 {
 			modelCtx, cancelModel = context.WithTimeout(ctx, r.ModelTimeout)
 		}
+		if r.FinalAnswerSchema != nil {
+			// A partial structured value is not a usable answer. The runtime
+			// publishes the normalized value after it passes the contract.
+			modelCtx = agentcontract.WithAnswerObserver(modelCtx, func(agentcontract.AnswerUpdate) {})
+		}
 		d, err := r.Model.Decide(modelCtx, modelPacket, prompt)
 		if err == nil && ctx.Err() == nil {
 			err = modelCtx.Err()
@@ -906,6 +914,24 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		metrics := agentcontract.ModelCallMetrics{Attempts: 1, EstimatedInputTokens: measurement.Tokens, ElapsedMilliseconds: time.Since(started).Milliseconds()}
 		if d.ModelCall != nil {
 			metrics = *d.ModelCall
+		}
+		answerFeedback := ""
+		if err == nil && correctingFinal && d.Kind != "final" && !(review != nil && d.Kind == "approve_completion") {
+			metrics.FormatError = "model_final_answer_invalid"
+			err = agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
+		}
+		if err == nil && r.FinalAnswerSchema != nil && d.Kind == "final" && d.CompletionFeedback == "" {
+			// Apply the decision's existing size bound before parsing model text.
+			if d.Validate() == nil {
+				var invalid error
+				d.AnswerMarkdown, invalid = r.FinalAnswerSchema.Normalize(d.AnswerMarkdown)
+				if invalid != nil {
+					metrics.FormatError = "model_final_answer_invalid"
+					answerFeedback = finalAnswerFeedback(invalid)
+					correctingFinal = true
+					err = agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
+				}
+			}
 		}
 		metrics.FormatRecovery = formatRecovery
 		metrics.Round = state.RoundsUsed
@@ -1037,6 +1063,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 				agentcontract.ObserveAnswer(ctx, agentcontract.AnswerUpdate{Text: frozen.AnswerMarkdown, Phase: "checking"})
 				feedback = ""
 				formatRecovery = false
+				correctingFinal = false
 				attempt = -1
 				continue
 			}
@@ -1065,6 +1092,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			if review != nil {
 				feedback += " This is completion review: return only a final decision or approve_completion; capability calls and all other decision kinds are not allowed."
 			}
+		} else if answerFeedback != "" {
+			feedback = "\nThe JSON inside final.answer_markdown was rejected: " + answerFeedback + ". Regenerate the complete final decision using the retained facts and original business values. Place only the declared JSON in answer_markdown, preserve fact_ids in the outer decision, and do not replay completed operations."
+			if review != nil {
+				feedback += " Submit a corrected final answer or approve the frozen proposal through the current review channel."
+			}
 		} else if review != nil {
 			feedback = "\nYour previous review was invalid. Use the configured decision output channel, including a declared output function when tool output is configured. Submit approve_completion with no payload only when the frozen proposal is fully verified and needs no correction. Otherwise submit exactly one final decision through that same channel with completion_feedback as a string: identify missing originally requested execution, or use an empty string when work is handled or concretely blocked. No capability calls or other decision kinds are allowed during completion review."
 		} else if errors.As(err, &inspectionRange) {
@@ -1076,6 +1108,8 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 			switch metrics.FormatError {
 			case "model_output_tool_calls_invalid":
 				feedback += " The response did not contain exactly one valid registered output tool. Use exactly one output function declared for this request with its native argument schema. Inspection decisions must also use the declared output channel. Choose one inspection and wait for its result before the next decision."
+			case "model_output_protocol_mismatch":
+				feedback += " Tool markup appeared in the content channel. Return the decision through the configured JSON or declared function channel, without XML, DSML or pseudo tool calls."
 			case "model_output_duplicate_key":
 				feedback += " Each object key must occur only once, including in nested capability arguments."
 			case "model_output_invalid_json":
@@ -1397,6 +1431,9 @@ func (r *AgentRuntime) SystemPrompt() string {
 	}
 	if len(r.Memories) > 0 {
 		prompt += agentcontract.MemoryUsagePrompt
+	}
+	if r.FinalAnswerSchema != nil {
+		prompt += r.FinalAnswerSchema.Prompt()
 	}
 	return prompt + "\nReturn exactly one raw JSON object. Do not wrap it in Markdown or code fences, and do not include text outside the JSON object."
 }

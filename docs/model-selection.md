@@ -245,6 +245,8 @@ CLI 使用既有 AGENSTRA_SERVER / AGENSTRA_ADMIN_API_KEY。models.json 包含 M
 
 格式规范化采用线性扫描，受已有 8 MiB 响应上限约束，在流式响应完整接收及终止状态检查后执行。规范化复用本次模型用量，无额外模型请求。日志记录字节数和固定格式类别。剩余语法错误、缺失值、混合正文、多根对象及截断输出进入原有的有界失败恢复流程。
 
+最终回答可以额外识别单一 JSON 的外层说明并补齐可确定的容器。应用可按包声明内部答案 Schema，具体错误会在同一任务中反馈模型纠正。工具调用沿用本节的完整参数要求。参见[结构化最终答案](completion-evaluation.md#结构化最终答案)。
+
 LangChain 的 JSON 工具包含代码围栏、字符串换行和部分 JSON 解析。小π的业务执行入口使用完整对象校验，流式预览沿用其原有显示路径。Vercel AI SDK 的调用修复也在执行前重新运行完整解析与 Schema 校验。[LangChain 源码](https://github.com/langchain-ai/langchain/blob/master/libs/core/langchain_core/utils/json.py) · [Vercel AI SDK 调用修复](https://github.com/vercel/ai/blob/main/packages/ai/src/generate-text/parse-tool-call.ts)
 
 

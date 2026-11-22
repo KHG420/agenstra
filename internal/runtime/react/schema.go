@@ -73,6 +73,18 @@ func validationFeedback(validation *jsonschema.ValidationError) string {
 	return boundedSchemaFeedback(strings.Join(parts, "; "))
 }
 
+// finalAnswerFeedback is sent only to the correcting model, never persisted in metrics.
+func finalAnswerFeedback(err error) string {
+	if detail := modelValidationFeedback(err); detail != "" {
+		return detail
+	}
+	var syntax *json.SyntaxError
+	if errors.As(err, &syntax) {
+		return fmt.Sprintf("JSON syntax error at byte %d: %s", syntax.Offset, syntax.Error())
+	}
+	return boundedSchemaFeedback(err.Error())
+}
+
 func boundedSchemaFeedback(value string) string {
 	text := []rune(value)
 	if len(text) > 1000 {

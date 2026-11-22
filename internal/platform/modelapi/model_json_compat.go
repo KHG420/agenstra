@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/KHG420/agenstra/internal/base/jsonvalue"
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
 
@@ -44,7 +45,7 @@ func normalizeModelJSON(body []byte) ([]byte, bool) {
 	if len(candidate) == 0 || candidate[0] != '{' {
 		return body, false
 	}
-	if fixed, changed := normalizeModelJSONPunctuation(candidate); changed {
+	if fixed, changed := jsonvalue.RepairModelPunctuation(candidate); changed {
 		candidate = fixed
 		reasons = append(reasons, "json_punctuation")
 	}
@@ -66,77 +67,23 @@ func normalizeModelJSON(body []byte) ([]byte, bool) {
 	return candidate, true
 }
 
-// This single pass preserves quoted bytes and escapes. It removes a trailing
-// comma only after a value and escapes literal control characters in strings.
-// The full JSON parser determines whether the resulting object is complete.
-func normalizeModelJSONPunctuation(body []byte) ([]byte, bool) {
-	var output []byte
-	var stack []byte
-	redundant := 0
-	inside, escaped := false, false
-	last := byte(0)
-	start := 0
-	for i, current := range body {
-		if inside {
-			if escaped {
-				escaped = false
-				continue
-			}
-			switch current {
-			case '\\':
-				escaped = true
-			case '"':
-				inside = false
-				last = '"'
-			default:
-				if current < 0x20 {
-					if len(output)+i-start+6 > 8<<20 {
-						return body, false
-					}
-					output = append(output, body[start:i]...)
-					const hex = "0123456789abcdef"
-					output = append(output, '\\', 'u', '0', '0', hex[current>>4], hex[current&15])
-					start = i + 1
-				}
-			}
-			continue
+// Recover presentation mistakes only for final answers. Incomplete action
+// envelopes, multiple alternatives and explicit truncation stay on the retry path.
+func recoverFinalOutput(raw []byte, nativeFinal bool) ([]byte, bool) {
+	if json.Valid(raw) {
+		return raw, false
+	}
+	fixed, ok := jsonvalue.RecoverModelContainer(raw)
+	if !ok {
+		return raw, false
+	}
+	if !nativeFinal {
+		var header struct {
+			Kind string `json:"kind"`
 		}
-		if current == '"' {
-			inside = true
-		} else if current == '{' || current == '[' {
-			stack = append(stack, current)
-		} else if (current == '}' || current == ']') && len(stack) > 0 {
-			opening := stack[len(stack)-1]
-			if opening == '{' && current == '}' || opening == '[' && current == ']' {
-				stack = stack[:len(stack)-1]
-			} else {
-				redundant++
-				if redundant > 32 {
-					return body, false
-				}
-				output = append(output, body[start:i]...)
-				start = i + 1
-				continue
-			}
-		} else if current == ',' && strings.ContainsRune(`"}]0123456789el`, rune(last)) {
-			next := i + 1
-			for next < len(body) && strings.ContainsRune(" \t\r\n", rune(body[next])) {
-				next++
-			}
-			if next < len(body) && (body[next] == '}' || body[next] == ']') {
-				output = append(output, body[start:i]...)
-				start = i + 1
-			}
-		}
-		if !strings.ContainsRune(" \t\r\n", rune(current)) {
-			last = current
+		if json.Unmarshal(fixed, &header) != nil || header.Kind != "final" {
+			return raw, false
 		}
 	}
-	if output == nil && start == 0 {
-		return body, false
-	}
-	if len(output)+len(body)-start > 8<<20 {
-		return body, false
-	}
-	return append(output, body[start:]...), true
+	return fixed, true
 }
