@@ -18,6 +18,8 @@
 
 实现参考了 LangChain 的 Markdown / 部分 JSON 解析与结构化输出纠错、Pydantic AI 的输出校验反馈，以及 OpenAI 对截断和拒绝的区分。[LangChain 解析器](https://github.com/langchain-ai/langchain/blob/master/libs/core/langchain_core/utils/json.py) · [LangChain 结构化输出](https://docs.langchain.com/oss/python/langchain/structured-output) · [Pydantic AI 输出](https://pydantic.dev/docs/ai/core-concepts/output/) · [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
 
+最终正文未通过字段校验时，纠错请求保留已有证据及其来源，并把这一轮的业务工具额度设为零。`native_tools`、`output_tools` 和 `json_schema` 只声明本轮可提交的最终决策。普通纠错只能提交 `final`，复核阶段还可以批准已冻结的草稿。输入计量与实际发给模型的请求采用同一组可用决策。
+
 ## 发布前的回答一致性复核
 
 Go 完成回调中的 `CompletionContext.LoadedSkills` 提供本次运行已选择的技能名称。宿主据此为专业校验确定生效范围，再核对当前工具回执与引用。业务规则应绑定当前执行领域或实际能力调用，引用文本、共享术语和最终回答的措辞只用于解释内容。独立专家通过自己的技能与提示词执行，父级按其工作流结果进行证据核对。

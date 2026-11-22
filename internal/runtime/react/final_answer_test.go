@@ -2,6 +2,7 @@ package react
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -43,6 +44,9 @@ func TestStructuredFinalCorrectsWithinOriginalRun(t *testing.T) {
 				if calls >= 3 {
 					answer = `{"id":"kept"}`
 					if p.CompletionReview == nil {
+						if !slices.Contains(p.RuntimeFeatures, agentcontract.FinalAnswerCorrection) || p.ToolCallsRemaining != 0 {
+							t.Fatal("correction did not restrict the next decision to the retained result")
+						}
 						if !strings.Contains(prompt, "final.answer_markdown was rejected") || !strings.Contains(prompt, "extra") {
 							t.Fatal("missing field-specific recovery feedback")
 						}

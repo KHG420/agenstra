@@ -44,7 +44,7 @@ func nativeCapabilityFunctionName(name string) string {
 
 func nativeFunctionCapabilities(packet agentcontract.ContextPacket) map[string]agentcontract.JSON {
 	caps := map[string]agentcontract.JSON{}
-	if packet.CompletionReview != nil {
+	if packet.CompletionReview != nil || slices.Contains(packet.RuntimeFeatures, agentcontract.FinalAnswerCorrection) {
 		return caps
 	}
 	for _, cap := range append(append([]agentcontract.JSON{}, packet.Capabilities...), packet.InspectedCapability) {
@@ -157,6 +157,7 @@ func nativeDecisionOutputTools(tools []any, packet agentcontract.ContextPacket) 
 func (m *HTTPJSONDecisionModel) allowsNativeConversation(packet agentcontract.ContextPacket) bool {
 	return m.DecisionOutputMode == "native_tools" && m.APIType == "deepseek_chat" &&
 		packet.Schema == "agenstra.context.v1" && packet.CompletionReview == nil &&
+		!slices.Contains(packet.RuntimeFeatures, agentcontract.FinalAnswerCorrection) &&
 		len(packet.Facts) == 0 && len(packet.Observations) == 0 && len(packet.ActionOutcomes) == 0
 }
 

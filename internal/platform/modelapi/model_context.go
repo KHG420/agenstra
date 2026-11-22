@@ -347,6 +347,7 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 	}
 	if (m.DecisionOutputMode == "output_tools" || m.DecisionOutputMode == "json_schema" || m.DecisionOutputMode == "native_tools") && decisionPacket {
 		tools := decisionOutputTools(packet.CompletionReview != nil)
+		finalOnly := packet.CompletionReview != nil || slices.Contains(packet.RuntimeFeatures, agentcontract.FinalAnswerCorrection)
 		if packet.CompletionReview == nil && len(skillReads) == 0 {
 			prompt = jsonDecisionPromptWithoutSkills(prompt)
 		}
@@ -370,9 +371,8 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 				parameters := function["parameters"].(agentcontract.JSON)
 				parameters["properties"].(agentcontract.JSON)["name"].(agentcontract.JSON)["enum"] = skillReads
 			}
-			// Review can reject publication, but cannot propose calls or user input.
-			// Offer only the decision kind that the runtime accepts in this stage.
-			if packet.CompletionReview != nil && name != "submit_final" && name != "submit_approve_completion" {
+			// Approval exists only when there is an actual frozen proposal to review.
+			if finalOnly && name != "submit_final" && !(packet.CompletionReview != nil && name == "submit_approve_completion") {
 				unavailable[name] = true
 			}
 			if !unavailable[name] {

@@ -652,7 +652,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		}
 		packet := r.contextCandidate(state)
 		packet.CompletionReview = review
-		if review != nil {
+		if correctingFinal {
+			packet.RuntimeFeatures = append(packet.RuntimeFeatures, agentcontract.FinalAnswerCorrection)
+			packet.ToolCallsRemaining = 0
+		}
+		if review != nil || correctingFinal {
 			// Keep observed source meanings, not executable contracts. Apply this
 			// projection before budgeting so catalogs cannot displace evidence.
 			packet.Capabilities = r.completionSourceDescriptions(state)

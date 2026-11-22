@@ -10,6 +10,9 @@ import (
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
+// FinalAnswerCorrection marks the current model request as a correction of a rejected final payload.
+const FinalAnswerCorrection = "final_answer_correction"
+
 // FinalAnswerSchema is a trusted pack's immutable contract for the JSON encoded
 // in final.answer_markdown. The prompt and validator describe the same schema.
 type FinalAnswerSchema struct {

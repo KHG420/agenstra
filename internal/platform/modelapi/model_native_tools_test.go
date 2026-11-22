@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -79,6 +80,56 @@ func nativeTestPacket() agentcontract.ContextPacket {
 			{"name": "inventory.get", "description": "Read an inventory record", "input_schema": agentcontract.JSON{"type": "object", "properties": agentcontract.JSON{"id": agentcontract.JSON{"type": "integer", "minimum": 1}}, "required": []string{"id"}, "additionalProperties": false}},
 			{"name": "inventory.deferred", "description": "Deferred contract", "schema_requires_inspection": true},
 		}}
+}
+
+func TestFinalAnswerCorrectionDeclaresOnlyAcceptedDecisions(t *testing.T) {
+	for _, mode := range []string{"native_tools", "output_tools", "json_schema"} {
+		t.Run(mode, func(t *testing.T) {
+			for _, review := range []bool{false, true} {
+				packet := nativeTestPacket()
+				packet.RuntimeFeatures = append(packet.RuntimeFeatures, agentcontract.FinalAnswerCorrection)
+				want := []string{"final"}
+				if review {
+					packet.CompletionReview = &agentcontract.Decision{Kind: "final", AnswerMarkdown: "frozen"}
+					want = append(want, "approve_completion")
+				}
+				body, err := agentcontract.CanonicalJSON(packet)
+				if err != nil {
+					t.Fatal(err)
+				}
+				model := HTTPJSONDecisionModel{APIType: "deepseek_chat", DecisionOutputMode: mode}
+				payload, err := model.requestPayload(body, "Correct the final result")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var kinds []string
+				if mode == "native_tools" {
+					for _, item := range payload["tools"].([]any) {
+						function := item.(agentcontract.JSON)["function"].(agentcontract.JSON)
+						kinds = append(kinds, function["name"].(string))
+					}
+					if model.allowsNativeConversation(packet) {
+						t.Fatal("correction accepted plain conversation text")
+					}
+				} else {
+					var schema agentcontract.JSON
+					if mode == "json_schema" {
+						format := payload["response_format"].(agentcontract.JSON)["json_schema"].(agentcontract.JSON)
+						schema = format["schema"].(agentcontract.JSON)
+					} else {
+						function := payload["tools"].([]any)[0].(agentcontract.JSON)["function"].(agentcontract.JSON)
+						schema = function["parameters"].(agentcontract.JSON)
+					}
+					kinds = schema["properties"].(agentcontract.JSON)["kind"].(agentcontract.JSON)["enum"].([]string)
+				}
+				slices.Sort(want)
+				slices.Sort(kinds)
+				if !slices.Equal(kinds, want) {
+					t.Fatalf("review=%v, available decisions %v, want %v", review, kinds, want)
+				}
+			}
+		})
+	}
 }
 
 func nativeTestFunction(t *testing.T, payload agentcontract.JSON, capability string) agentcontract.JSON {
