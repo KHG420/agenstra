@@ -71,3 +71,46 @@ func TestStructuredFinalCorrectsWithinOriginalRun(t *testing.T) {
 		})
 	}
 }
+
+func TestFirstAnswerSchemaErrorAfterProtocolRecovery(t *testing.T) {
+	schema, err := agentcontract.CompileFinalAnswerSchema(agentcontract.JSON{"type": "object", "required": []string{"id"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name      string
+		rounds    int
+		corrected bool
+		want      string
+		calls     int
+	}{
+		{"distinct correction", 8, true, "completed", 4},
+		{"one inner retry", 8, false, "failed", 4},
+		{"round budget", 3, true, "failed", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			count := 0
+			model := decisionModelFunc(func(_ context.Context, _ agentcontract.ContextPacket, prompt string) (agentcontract.Decision, error) {
+				count++
+				if count <= 2 {
+					return agentcontract.Decision{ModelCall: &agentcontract.ModelCallMetrics{Attempts: 1, FormatError: "model_output_tool_calls_invalid"}}, agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
+				}
+				answer := "{}"
+				if count == 4 {
+					if !strings.Contains(prompt, "final.answer_markdown was rejected") || !strings.Contains(prompt, "id") {
+						t.Fatal("first inner error was not returned to the model")
+					}
+					if tc.corrected {
+						answer = `{"id":"verified"}`
+					}
+				}
+				return agentcontract.Decision{Kind: "final", AnswerMarkdown: answer}, nil
+			})
+			r := &AgentRuntime{Provider: &coreTestProvider{caps: map[string]agentcontract.CapabilityDescription{}}, Model: model, MaxModelRounds: tc.rounds, FinalAnswerSchema: schema}
+			s, err := r.Run(t.Context(), "give the record ID")
+			if err != nil || s.Status != tc.want || count != tc.calls {
+				t.Fatalf("status %s, calls %d, error %v", s.Status, count, err)
+			}
+		})
+	}
+}

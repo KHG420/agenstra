@@ -14,7 +14,7 @@
 {"final_answer_schemas":{"records":{"type":"object","required":["id"],"properties":{"id":{"type":"string"}},"additionalProperties":false}}}
 ```
 
-运行时先尝试读取裸 JSON。对象或数组带有说明或单个 JSON 代码围栏时，框架可以提取唯一值；在字符串、布尔值、null 或子容器完整结束之后，可以补齐确定的闭合符。多个候选、重复键、半截 ID、缺少的值和违反契约的字段交给模型纠正。具体错误会随现有证据返回模型一次，使用原任务的轮数、Token 和时间预算。只有通过校验的答案才会用于完成复核和发布。模型明确报告截断时沿用截断重试；工具动作继续按原权限和参数校验执行。
+运行时先尝试读取裸 JSON。对象或数组带有说明或单个 JSON 代码围栏时，框架可以提取唯一值；在字符串、布尔值、null 或子容器完整结束之后，可以补齐确定的闭合符。多个候选、重复键、半截 ID、缺少的值和违反契约的字段交给模型纠正。具体错误会随现有证据返回模型一次，使用原任务的轮数、Token 和时间预算。外层决策纠正后首次发现内部字段错误时，仍有一次仅纠正最终答案的机会。只有通过校验的答案才会用于完成复核和发布。模型明确报告截断时沿用截断重试；工具动作继续按原权限和参数校验执行。
 
 实现参考了 LangChain 的 Markdown / 部分 JSON 解析与结构化输出纠错、Pydantic AI 的输出校验反馈，以及 OpenAI 对截断和拒绝的区分。[LangChain 解析器](https://github.com/langchain-ai/langchain/blob/master/libs/core/langchain_core/utils/json.py) · [LangChain 结构化输出](https://docs.langchain.com/oss/python/langchain/structured-output) · [Pydantic AI 输出](https://pydantic.dev/docs/ai/core-concepts/output/) · [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
 

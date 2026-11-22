@@ -636,7 +636,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 	var decision agentcontract.Decision
 	approvedProposal := false
 	var review *agentcontract.Decision
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < 4; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -928,7 +928,6 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 				if invalid != nil {
 					metrics.FormatError = "model_final_answer_invalid"
 					answerFeedback = finalAnswerFeedback(invalid)
-					correctingFinal = true
 					err = agentcontract.ModelDecisionError{Kind: "model_decision_invalid"}
 				}
 			}
@@ -1078,8 +1077,11 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 		}
 		// A rejected tool envelope has not dispatched any business action. Give
 		// that protocol failure one final correction within the same run budget.
-		finalEnvelopeCorrection := attempt == 1 && metrics.FormatError == "model_output_tool_calls_invalid"
-		if (attempt >= 1 && !finalEnvelopeCorrection) || state.RoundsUsed >= r.MaxModelRounds {
+		finalEnvelopeCorrection := !correctingFinal && attempt == 1 && metrics.FormatError == "model_output_tool_calls_invalid"
+		// An outer protocol retry can reveal an inner schema error for the
+		// first time. Give that distinct error one final-only correction.
+		firstAnswerCorrection := answerFeedback != "" && !correctingFinal
+		if (attempt >= 1 && !finalEnvelopeCorrection && !firstAnswerCorrection) || state.RoundsUsed >= r.MaxModelRounds {
 			state.Status = "failed"
 			state.ErrorCode = agentcontract.Strptr(code)
 			return nil
@@ -1093,6 +1095,7 @@ func (r *AgentRuntime) Step(ctx context.Context, state *agentcontract.RuntimeSta
 				feedback += " This is completion review: return only a final decision or approve_completion; capability calls and all other decision kinds are not allowed."
 			}
 		} else if answerFeedback != "" {
+			correctingFinal = true
 			feedback = "\nThe JSON inside final.answer_markdown was rejected: " + answerFeedback + ". Regenerate the complete final decision using the retained facts and original business values. Place only the declared JSON in answer_markdown, preserve fact_ids in the outer decision, and do not replay completed operations."
 			if review != nil {
 				feedback += " Submit a corrected final answer or approve the frozen proposal through the current review channel."
