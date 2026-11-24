@@ -31,8 +31,12 @@ func TestSDKCompletionReviewKeepsConfiguredToolChannel(t *testing.T) {
 					}
 					messages := payload["messages"].([]any)
 					prompt := messages[0].(map[string]any)["content"].(string)
+					contextIndex := 1
+					if mode == "native_tools" {
+						contextIndex = 2
+					}
 					var packet agenstra.ContextPacket
-					if err := json.Unmarshal([]byte(messages[1].(map[string]any)["content"].(string)), &packet); err != nil {
+					if err := json.Unmarshal([]byte(messages[contextIndex].(map[string]any)["content"].(string)), &packet); err != nil {
 						t.Error(err)
 						w.WriteHeader(500)
 						return

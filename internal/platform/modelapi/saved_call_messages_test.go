@@ -112,7 +112,11 @@ func TestSavedResultValueAppearsOnceInEveryDecisionProtocol(t *testing.T) {
 				t.Fatal(err)
 			}
 			messages := payload["messages"].([]any)
-			cumulative := messages[1].(agentcontract.JSON)["content"].(string)
+			contextIndex := 1
+			if mode == "native_tools" {
+				contextIndex = 2
+			}
+			cumulative := messages[contextIndex].(agentcontract.JSON)["content"].(string)
 			if !strings.Contains(cumulative, earlierValue) || !strings.Contains(cumulative, latest) || strings.Contains(cumulative, latestValue) {
 				t.Fatal("the cumulative packet lost Fact identity or retained a duplicate value")
 			}

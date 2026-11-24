@@ -84,9 +84,17 @@ func TestSDKNativeReferenceProposalsRespectRuntimeValidationAndPolicy(t *testing
 					w.WriteHeader(500)
 					return
 				}
+				if payload["tools"] == nil {
+					nativeSDKMemoryReply(t, w)
+					return
+				}
 				messages := payload["messages"].([]any)
+				contextIndex := 2
+				if _, forcedOutputTool := payload["tool_choice"].(map[string]any); forcedOutputTool {
+					contextIndex = 1 // Native format recovery uses the output-tools message sequence.
+				}
 				var packet agenstra.ContextPacket
-				if err := json.Unmarshal([]byte(messages[1].(map[string]any)["content"].(string)), &packet); err != nil {
+				if err := json.Unmarshal([]byte(messages[contextIndex].(map[string]any)["content"].(string)), &packet); err != nil {
 					t.Error(err)
 					w.WriteHeader(500)
 					return

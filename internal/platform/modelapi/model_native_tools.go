@@ -91,10 +91,12 @@ func nativeDecisionMessages(messages []any, packet agentcontract.ContextPacket) 
 		return nil, err
 	}
 	result := make([]any, 0, len(messages)+1)
-	result = append(result, messages[0], agentcontract.JSON{"role": "user", "content": string(encoded)})
+	result = append(result, messages[0])
 	if packet.Instruction != "" {
 		result = append(result, agentcontract.JSON{"role": "user", "content": packet.Instruction})
 	}
+	// Present the task before its own context and saved outcomes.
+	result = append(result, agentcontract.JSON{"role": "user", "content": string(encoded)})
 	return append(result, messages[2:]...), nil
 }
 

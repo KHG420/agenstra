@@ -24,11 +24,11 @@ func TestNativeToolsPresentTheOriginalTaskAsAUserMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := payload["messages"].([]any)
-	if len(messages) != 3 || messages[2].(agentcontract.JSON)["role"] != "user" || messages[2].(agentcontract.JSON)["content"] != packet.Instruction {
+	if len(messages) != 3 || messages[1].(agentcontract.JSON)["role"] != "user" || messages[1].(agentcontract.JSON)["content"] != packet.Instruction {
 		t.Fatal("unchanged task was not emitted as a native user message", messages)
 	}
 	var data agentcontract.JSON
-	if err := json.Unmarshal([]byte(messages[1].(agentcontract.JSON)["content"].(string)), &data); err != nil {
+	if err := json.Unmarshal([]byte(messages[2].(agentcontract.JSON)["content"].(string)), &data); err != nil {
 		t.Fatal(err)
 	}
 	if _, duplicate := data["instruction"]; duplicate {

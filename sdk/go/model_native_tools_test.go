@@ -73,6 +73,13 @@ func nativeSDKReply(t *testing.T, w http.ResponseWriter, function string, args a
 	}
 }
 
+func nativeSDKMemoryReply(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+	if err := json.NewEncoder(w).Encode(agenstra.JSON{"choices": []any{agenstra.JSON{"message": agenstra.JSON{"content": `{"proposals":[]}`}}}}); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestSDKNativeToolsResolveTypedEvidenceBeforeBusinessExecution(t *testing.T) {
 	for _, native := range []bool{false, true} {
 		name := "proposal function"
@@ -100,17 +107,15 @@ func testNativeSDKReferenceExecution(t *testing.T, native, durable bool) {
 			w.WriteHeader(500)
 			return
 		}
-		messages := payload["messages"].([]any)
-		var packet agenstra.ContextPacket
-		if err := json.Unmarshal([]byte(messages[1].(map[string]any)["content"].(string)), &packet); err != nil {
-			t.Error(err)
-			w.WriteHeader(500)
+		if payload["tools"] == nil {
+			nativeSDKMemoryReply(t, w)
 			return
 		}
-		if packet.Schema == "" && payload["tools"] == nil {
-			if err := json.NewEncoder(w).Encode(agenstra.JSON{"choices": []any{agenstra.JSON{"message": agenstra.JSON{"content": `{"proposals":[]}`}}}}); err != nil {
-				t.Error(err)
-			}
+		messages := payload["messages"].([]any)
+		var packet agenstra.ContextPacket
+		if err := json.Unmarshal([]byte(messages[2].(map[string]any)["content"].(string)), &packet); err != nil {
+			t.Error(err)
+			w.WriteHeader(500)
 			return
 		}
 		switch {
