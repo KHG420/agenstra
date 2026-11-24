@@ -14,15 +14,16 @@ import (
 )
 
 type capabilityMatch struct {
-	name      string
-	score     float64
-	exact     bool
-	exactName bool
+	name           string
+	score          float64
+	exact          bool
+	exactName      bool
+	exactOperation bool
 }
 
 type capabilitySearchDocument struct {
-	name, nameText, description, fields string
-	parts, qualifiedOperations          []string
+	name, nameText, operation, description, fields string
+	parts, qualifiedOperations                     []string
 }
 
 type capabilitySearchTerm struct {
@@ -34,6 +35,7 @@ type capabilitySearchTerm struct {
 var qualifiedCapabilityQueryPattern = regexp.MustCompile(`[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)+`)
 var projectCapabilityQueryPattern = regexp.MustCompile(`[a-z][a-z0-9_.-]*::[a-z_][a-z0-9_-]*(?:\.[a-z_][a-z0-9_-]*)*`)
 var capabilityCamelCasePattern = regexp.MustCompile(`([a-z0-9])([A-Z])`)
+var explicitOperationQueryPattern = regexp.MustCompile(`\b[a-z][a-z0-9]*(?:[A-Z][A-Za-z0-9_]*|_[a-z0-9_]+)\b`)
 
 func capabilityNameParts(name string) []string {
 	separated := name
@@ -318,6 +320,7 @@ func capabilitySelectionInstruction(state *agentcontract.RuntimeState) string {
 // pass. Each new pass receives current contracts and grants from its caller.
 func capabilitySearcher(caps map[string]agentcontract.CapabilityDescription, grants map[string]bool) func(string, int) []string {
 	var documents []capabilitySearchDocument
+	operationCounts := map[string]int{}
 	return func(query string, limit int) []string {
 		if limit < 1 {
 			return []string{}
@@ -347,7 +350,16 @@ func capabilitySearcher(caps map[string]agentcontract.CapabilityDescription, gra
 					continue
 				}
 				nameText, description, fields, operations := capabilitySearchText(cap)
-				documents = append(documents, capabilitySearchDocument{name: name, nameText: nameText, description: description, fields: fields, parts: capabilityNameParts(cap.Name), qualifiedOperations: operations})
+				localName := nameText
+				if _, operationPath, routed := strings.Cut(nameText, "::"); routed {
+					localName = operationPath
+				}
+				operation := localName[strings.LastIndexByte(localName, '.')+1:]
+				operationCounts[operation]++
+				documents = append(documents, capabilitySearchDocument{
+					name: name, nameText: nameText, operation: operation, description: description, fields: fields,
+					parts: capabilityNameParts(cap.Name), qualifiedOperations: operations,
+				})
 			}
 		}
 		candidates := documents
@@ -360,11 +372,18 @@ func capabilitySearcher(caps map[string]agentcontract.CapabilityDescription, gra
 				candidates = append(candidates, doc)
 			}
 		}
-		return rankCapabilitySearch(candidates, terms, limit)
+		explicitOperations := map[string]bool{}
+		for _, identifier := range explicitOperationQueryPattern.FindAllString(query, -1) {
+			operation := strings.ToLower(identifier)
+			if operationCounts[operation] == 1 {
+				explicitOperations[operation] = true
+			}
+		}
+		return rankCapabilitySearch(candidates, terms, explicitOperations, limit)
 	}
 }
 
-func rankCapabilitySearch(documents []capabilitySearchDocument, terms []capabilitySearchTerm, limit int) []string {
+func rankCapabilitySearch(documents []capabilitySearchDocument, terms []capabilitySearchTerm, explicitOperations map[string]bool, limit int) []string {
 	weights := map[string]float64{}
 	for _, term := range terms {
 		frequency := 0
@@ -390,7 +409,10 @@ func rankCapabilitySearch(documents []capabilitySearchDocument, terms []capabili
 			score += doc.weight(term) * weights[term.text]
 		}
 		if score > 0 {
-			matches = append(matches, capabilityMatch{name: doc.name, score: score, exact: exact, exactName: exactName})
+			matches = append(matches, capabilityMatch{
+				name: doc.name, score: score, exact: exact, exactName: exactName,
+				exactOperation: explicitOperations[doc.operation],
+			})
 		}
 	}
 	sort.Slice(matches, func(i, j int) bool {
@@ -404,6 +426,9 @@ func rankCapabilitySearch(documents []capabilitySearchDocument, terms []capabili
 		// capability more precisely than shared module names or field words.
 		if matches[i].exact != matches[j].exact {
 			return matches[i].exact
+		}
+		if matches[i].exactOperation != matches[j].exactOperation {
+			return matches[i].exactOperation
 		}
 		if matches[i].score != matches[j].score {
 			return matches[i].score > matches[j].score
@@ -532,6 +557,8 @@ func selectedCapabilityNames(caps map[string]agentcontract.CapabilityDescription
 	}
 	if len(selected) < limit {
 		significant := capabilityQueryTerms(instruction, true)
+		// Retain explicitly written identifiers when the other terms are case folded.
+		significant = append(significant, explicitOperationQueryPattern.FindAllString(instruction, -1)...)
 		for _, name := range search(strings.Join(significant, " "), limit) {
 			add(name)
 		}
