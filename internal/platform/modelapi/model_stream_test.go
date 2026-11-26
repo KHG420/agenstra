@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
@@ -25,6 +26,65 @@ func streamFrame(t *testing.T, w http.ResponseWriter, value any) {
 	}
 	if err = http.NewResponseController(w).Flush(); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestLiveReasoningPreviewOptInAndHandoff(t *testing.T) {
+	for _, tc := range []struct{ mode, reasoning, want string }{
+		{"enabled", "核对两步计算", "核对两步计算"}, {"disabled", "unexpected reasoning ", ""}, {"enabled", "", ""},
+	} {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			streamFrame(t, w, agentcontract.JSON{"choices": []any{agentcontract.JSON{"index": 0, "delta": agentcontract.JSON{"reasoning_content": tc.reasoning}}}})
+			streamFrame(t, w, agentcontract.JSON{"choices": []any{agentcontract.JSON{"index": 0, "delta": agentcontract.JSON{"content": `{"kind":"final","answer_markdown":"四","fact_ids":[]}`}, "finish_reason": "stop"}}})
+			if _, err := fmt.Fprint(w, "data: [DONE]\n\n"); err != nil {
+				t.Error(err)
+			}
+		}))
+		m, err := NewHTTPJSONDecisionModel("test", upstream.URL, "test", time.Second, upstream.Client())
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.APIType, m.Thinking, m.StreamAnswers = "deepseek_chat", tc.mode, true
+		m.AllowReasoningPreview = func(string) bool { return true }
+		var updates []agentcontract.AnswerUpdate
+		ctx := agentcontract.WithAnswerObserver(t.Context(), func(update agentcontract.AnswerUpdate) { updates = append(updates, update) })
+		d, err := m.Decide(ctx, agentcontract.ContextPacket{Schema: "agenstra.context.v1"}, "Return JSON")
+		upstream.Close()
+		if err != nil || d.AnswerMarkdown != "四" || len(updates) == 0 {
+			t.Fatal(tc, updates, err)
+		}
+		got := ""
+		for _, u := range updates {
+			if u.ReasoningPreview != "" {
+				if u.Text != "" || u.Phase != "waiting" {
+					t.Fatal(u)
+				}
+				got = u.ReasoningPreview
+			}
+		}
+		if got != tc.want || updates[len(updates)-1].ReasoningPreview != "" {
+			t.Fatal(tc, updates)
+		}
+	}
+}
+
+func TestLiveReasoningExcerptBoundsAndFiltersBeforeClipping(t *testing.T) {
+	allow := func(s string) bool { return !strings.Contains(s, "private") }
+	for _, tc := range []struct{ source, want string }{
+		{"第一句。\n正在比较两项条件", "正在比较两项条件"},
+		{"核实天气。 ", "核实天气。"},
+		{"Compare the partial-credential", "Compare the"},
+		{"private " + strings.Repeat("中", 260), ""},
+		{strings.Repeat("中", 1800), ""},
+		{strings.Repeat("中", 1800) + "\n下一句", "下一句"},
+	} {
+		if got := liveReasoningExcerpt(tc.source, allow); got != tc.want {
+			t.Fatalf("got %q, want %q", got, tc.want)
+		}
+	}
+	got := liveReasoningExcerpt(strings.Repeat("🛳船", 90), allow)
+	if !utf8.ValidString(got) || len(got) < 377 || len(got) > agentcontract.MaxReasoningPreviewBytes {
+		t.Fatal(len(got))
 	}
 }
 
@@ -206,7 +266,7 @@ func TestModelStreamRejectsBrokenFraming(t *testing.T) {
 		{"oversized-line", "data: " + strings.Repeat("x", 1<<20), "model_response_too_large"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := readModelStream(strings.NewReader(tc.raw), func(string, string) {}, nil, false); agentcontract.ModelErrorCode(err) != tc.code {
+			if _, err := readModelStream(strings.NewReader(tc.raw), func(agentcontract.AnswerUpdate) {}, nil, false, nil); agentcontract.ModelErrorCode(err) != tc.code {
 				t.Fatal(err)
 			}
 		})

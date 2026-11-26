@@ -7,13 +7,15 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
 
 // SSE is transport only: reassemble the original envelope and pass it through
 // the same usage, refusal, truncation and strict decision checks as non-streaming.
-func readModelStream(reader io.Reader, publish func(string, string), allowedOutput map[string]bool, plainConversation bool) ([]byte, error) {
+func readModelStream(reader io.Reader, publish func(agentcontract.AnswerUpdate), allowedOutput map[string]bool, plainConversation bool, allowPreview func(string) bool) ([]byte, error) {
 	const maximum = 8 << 20
 	bounded := &io.LimitedReader{R: reader, N: maximum + 1}
 	scanner := bufio.NewScanner(bounded)
@@ -28,12 +30,24 @@ func readModelStream(reader io.Reader, publish func(string, string), allowedOutp
 	var data []string
 	done, sawChoice := false, false
 	var last time.Time
-	displayed := ""
+	displayed, shownReasoning := "", ""
+	wasThinking := false
 	preview := func(force bool) {
-		if !force && time.Since(last) < 40*time.Millisecond {
+		thinking := allowPreview != nil && !force && finish == "" && reasoning.Len() > 0 &&
+			content.Len() == 0 && refusal.Len() == 0 && len(tools) == 0
+		if !force && thinking == wasThinking && time.Since(last) < 40*time.Millisecond {
 			return
 		}
+		wasThinking = thinking
 		last = time.Now()
+		if thinking {
+			next := liveReasoningExcerpt(reasoning.String(), allowPreview)
+			if next != shownReasoning {
+				publish(agentcontract.AnswerUpdate{Phase: "waiting", ReasoningPreview: next})
+				shownReasoning = next
+			}
+			return
+		}
 		text := ""
 		if refusal.Len() == 0 && finish != "length" && finish != "content_filter" {
 			if len(tools) == 1 && tools[0] != nil && allowedOutput[tools[0].name.String()] && strings.TrimSpace(content.String()) == "" {
@@ -57,11 +71,12 @@ func readModelStream(reader io.Reader, publish func(string, string), allowedOutp
 			if force {
 				phase = "checking"
 			}
-			publish(text, phase)
-		} else if displayed != "" {
-			publish("", "waiting")
+			publish(agentcontract.AnswerUpdate{Text: text, Phase: phase})
+		} else if displayed != "" || shownReasoning != "" {
+			publish(agentcontract.AnswerUpdate{Phase: "waiting"})
 		}
 		displayed = text
+		shownReasoning = ""
 	}
 	invalid := func() error { return agentcontract.ModelDecisionError{Kind: "model_response_invalid"} }
 	consume := func() error {
@@ -166,4 +181,39 @@ func readModelStream(reader io.Reader, publish func(string, string), allowedOutp
 	}
 	preview(true)
 	return json.Marshal(agentcontract.JSON{"model": model, "usage": usage, "choices": []any{agentcontract.JSON{"finish_reason": finish, "message": agentcontract.JSON{"content": content.String(), "reasoning_content": reasoning.String(), "refusal": refusal.String(), "tool_calls": calls}}}})
+}
+
+// Inspect only the current passage. Skip oversized passages instead of handing
+// the host an unmarked suffix of a credential or other protected value.
+func liveReasoningExcerpt(reasoning string, allow func(string) bool) string {
+	const maxPassage = 4096
+	start := max(0, len(reasoning)-maxPassage)
+	window := reasoning[start:]
+	// Keep the last completed passage on screen until the next one starts.
+	body := strings.TrimRight(window, " \t\r\n。！？")
+	if cut := strings.LastIndexAny(body, "\r\n。！？"); cut >= 0 {
+		_, width := utf8.DecodeRuneInString(body[cut:])
+		window = window[cut+width:]
+	} else if start > 0 {
+		return ""
+	}
+	if !allow(window) {
+		return ""
+	}
+	// Withhold the unfinished ASCII token. Connection strings, UUIDs and
+	// keys may arrive over many provider frames.
+	asciiToken := func(r rune) bool { return r > ' ' && r <= '~' }
+	window = strings.TrimRightFunc(window, asciiToken)
+	if len(window) > agentcontract.MaxReasoningPreviewBytes {
+		cut := len(window) - agentcontract.MaxReasoningPreviewBytes
+		for !utf8.RuneStart(window[cut]) {
+			cut++
+		}
+		if asciiToken(rune(window[cut-1])) {
+			window = strings.TrimLeftFunc(window[cut:], asciiToken)
+		} else {
+			window = window[cut:]
+		}
+	}
+	return strings.TrimFunc(window, unicode.IsSpace)
 }

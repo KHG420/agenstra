@@ -5,10 +5,14 @@ import "context"
 // AnswerUpdate is a replacement snapshot, never a delta or an execution receipt.
 // Only the host may publish completed after the validated answer is persisted.
 type AnswerUpdate struct {
-	RunID string `json:"run_id"`
-	Text  string `json:"text"`
-	Phase string `json:"phase"`
+	RunID            string `json:"run_id"`
+	Text             string `json:"text"`
+	Phase            string `json:"phase"`
+	ReasoningPreview string `json:"reasoning_preview,omitempty"`
 }
+
+// MaxReasoningPreviewBytes bounds the transient display window independently of the answer.
+const MaxReasoningPreviewBytes = 384
 
 type answerObserverKey struct{}
 

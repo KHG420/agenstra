@@ -13,6 +13,22 @@ function response(text) {
 }
 function client(fetch, getSession = async () => "ticket") { return new AgenstraClient({ integration: "app", fetch, getSession, storage: null }); }
 
+test("only requested waiting snapshots carry a bounded reasoning preview", async () => {
+  const frame = phase => "event: answer\ndata: " + JSON.stringify({ run_id: "run", phase, text: "", reasoning_preview: "核对条件" }) + "\n\n";
+  for (const reasoningPreview of [false, true]) {
+    const updates = [];
+    const c = client(async url => {
+      assert.equal(url.endsWith("?reasoning_preview=1"), reasoningPreview);
+      return response(frame("waiting") + frame("completed"));
+    });
+    await c.watchAnswerStream("run", u => updates.push(u), { reasoningPreview }).done;
+    assert.equal(updates[0].reasoning_preview, reasoningPreview ? "核对条件" : undefined);
+    assert.equal(updates[0].text, "");
+    assert.equal(updates[1].reasoning_preview, undefined);
+    await c.destroy();
+  }
+});
+
 test("answer snapshots decode split UTF8, replace rejected drafts and finish", async () => {
   const updates = [];
   const c = client(async (_url, init) => {

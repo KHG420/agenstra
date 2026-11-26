@@ -20,6 +20,16 @@ func TestAnswerSnapshotsAreOwnedFencedAndDurable(t *testing.T) {
 	old := h.answers.begin(t.Context(), run)
 	agentcontract.ObserveAnswer(old, agentcontract.AnswerUpdate{Text: "old", Phase: "generating"})
 	current := h.answers.begin(t.Context(), run)
+	agentcontract.ObserveAnswer(current, agentcontract.AnswerUpdate{Phase: "waiting", ReasoningPreview: "核对条件"})
+	if got, err := h.AnswerSnapshotWithReasoningPreview(t.Context(), run.RunID, "alice"); err != nil || got.ReasoningPreview != "核对条件" || got.Text != "" {
+		t.Fatal("authorized live preview missing", got, err)
+	}
+	if got, err := h.AnswerSnapshot(t.Context(), run.RunID, "alice"); err != nil || got.ReasoningPreview != "" {
+		t.Fatal("ordinary subscriber received reasoning", got, err)
+	}
+	if got, err := h.AnswerSnapshotWithReasoningPreview(t.Context(), run.RunID, "bob"); err == nil || got.ReasoningPreview != "" {
+		t.Fatal("cross-owner preview", got, err)
+	}
 	agentcontract.ObserveAnswer(old, agentcontract.AnswerUpdate{Text: "stale", Phase: "generating"})
 	if got, err := h.AnswerSnapshot(t.Context(), run.RunID, "alice"); err != nil || got.Text != "" {
 		t.Fatal("superseded candidate survived", got, err)

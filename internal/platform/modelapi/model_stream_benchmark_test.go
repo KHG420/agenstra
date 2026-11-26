@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
 
 // Keep the output fixed while varying upstream fragmentation. Small token
@@ -46,7 +48,7 @@ func BenchmarkFragmentedModelStream(b *testing.B) {
 				b.SetBytes(int64(len(stream)))
 				b.ResetTimer()
 				for range b.N {
-					if _, err := readModelStream(strings.NewReader(stream), func(string, string) {}, map[string]bool{"record_read": true}, false); err != nil {
+					if _, err := readModelStream(strings.NewReader(stream), func(agentcontract.AnswerUpdate) {}, map[string]bool{"record_read": true}, false, nil); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -57,7 +59,7 @@ func BenchmarkFragmentedModelStream(b *testing.B) {
 
 func TestFragmentedModelStreamRetainsCompleteFields(t *testing.T) {
 	for _, tool := range []bool{false, true} {
-		raw, err := readModelStream(strings.NewReader(fragmentedModelStream(t, 4096, tool)), func(string, string) {}, map[string]bool{"record_read": true}, false)
+		raw, err := readModelStream(strings.NewReader(fragmentedModelStream(t, 4096, tool)), func(agentcontract.AnswerUpdate) {}, map[string]bool{"record_read": true}, false, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

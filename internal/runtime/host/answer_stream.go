@@ -58,12 +58,16 @@ func (a *answerStreams) begin(ctx context.Context, run agentcontract.StoredRun) 
 		if update.Phase == "waiting" {
 			update.Text = ""
 		}
+		if update.Phase != "waiting" || len(update.ReasoningPreview) > agentcontract.MaxReasoningPreviewBytes {
+			update.ReasoningPreview = ""
+		}
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		if ctx.Err() != nil || a.entries[key] != entry {
 			return
 		}
-		entry.update = agentcontract.AnswerUpdate{RunID: key.run, Text: strings.Clone(update.Text), Phase: update.Phase}
+		entry.update = agentcontract.AnswerUpdate{RunID: key.run, Text: strings.Clone(update.Text), Phase: update.Phase,
+			ReasoningPreview: strings.Clone(update.ReasoningPreview)}
 		entry.updated = time.Now()
 	})
 }
@@ -81,6 +85,16 @@ func (a *answerStreams) clear(owner, run, lease string) {
 // Drafts are transient. A completed answer is always read from durable state,
 // including after process restart or a reconnect routed to another instance.
 func (h *AgentHost) AnswerSnapshot(ctx context.Context, id, owner string) (agentcontract.AnswerUpdate, error) {
+	return h.answerSnapshot(ctx, id, owner, false)
+}
+
+// AnswerSnapshotWithReasoningPreview includes the latest transient excerpt when
+// the producing host allowed it. It shares the ordinary owner and lease checks.
+func (h *AgentHost) AnswerSnapshotWithReasoningPreview(ctx context.Context, id, owner string) (agentcontract.AnswerUpdate, error) {
+	return h.answerSnapshot(ctx, id, owner, true)
+}
+
+func (h *AgentHost) answerSnapshot(ctx context.Context, id, owner string, preview bool) (agentcontract.AnswerUpdate, error) {
 	run, err := h.Get(ctx, id, owner)
 	if err != nil {
 		return agentcontract.AnswerUpdate{}, err
@@ -103,7 +117,10 @@ func (h *AgentHost) AnswerSnapshot(ctx context.Context, id, owner string) (agent
 	h.answers.mu.Lock()
 	defer h.answers.mu.Unlock()
 	if entry := h.answers.entries[answerKey{owner, id}]; entry != nil && entry.active.Err() == nil && entry.lease == run.LeaseToken && run.LeaseUntil != nil && *run.LeaseUntil > h.Now() && time.Since(entry.updated) <= 10*time.Minute {
-		return entry.update, nil
+		update = entry.update
+		if !preview {
+			update.ReasoningPreview = ""
+		}
 	}
 	return update, nil
 }

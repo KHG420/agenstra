@@ -7,7 +7,7 @@ export interface Run { run_id: string; status: string; revision: number; state: 
 export interface RunEvent { sequence: number; created_at: number; event: JSONObject & { kind: string; metrics?: ModelCallMetrics; context?: ContextTelemetry | null; budget?: RunBudget; progress?: RunProgress; attempt?: number; retry_at?: number } }
 export interface RunProgressSnapshot { run: Run; telemetry: RunTelemetry | null; events: RunEvent[]; cursor: number }
 /** Replacement snapshot; reconnecting is client-local, completed is durable. */
-export interface AnswerUpdate { run_id: string; text: string; phase: "waiting" | "generating" | "checking" | "completed" | "failed" | "cancelled" | "reconnecting" }
+export interface AnswerUpdate { run_id: string; text: string; phase: "waiting" | "generating" | "checking" | "completed" | "failed" | "cancelled" | "reconnecting"; reasoning_preview?: string }
 export interface AnswerSubscription { (): void; readonly done: Promise<void> }
 export interface ChatAttachment { id: string; conversation_id: string; name: string; media_type: string; kind: "text" | "spreadsheet" | "image" | "pdf"; size: number; page_count: number; preview: string; preview_partial: boolean; created_at: number }
 export interface AttachmentRead { page?: number; count?: number; offset?: number; limit?: number; vision?: boolean }
@@ -100,7 +100,7 @@ export class AgenstraClient {
   steerRun(id: string, text: string, revision: number, options?: { requestId?: string }): Promise<Run>;
   watchRun(id: string, callback: (snapshot: RunProgressSnapshot) => void, options?: { after?: number }): () => void;
   /** Authenticated SSE with ticket renewal and reconnection. Stop/destroy abort the read, never the run. */
-  watchAnswerStream(id: string, callback: (update: AnswerUpdate) => void, options?: { signal?: AbortSignal }): AnswerSubscription;
+  watchAnswerStream(id: string, callback: (update: AnswerUpdate) => void, options?: { signal?: AbortSignal; reasoningPreview?: boolean }): AnswerSubscription;
   supplyInput(id: string, field: string, text: string, revision: number): Promise<Run>;
   approve(id: string, invocation: JSONObject, revision: number, approved: boolean): Promise<Run>;
   cancelMessage(id: string): Promise<ChatMessage>;

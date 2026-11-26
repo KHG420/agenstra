@@ -15,8 +15,16 @@ import (
 // Connections are short lived so ticket renewal and reconnect use the normal
 // authentication path. Every snapshot rechecks the owner's current run policy.
 func (s *HTTPServer) answerHTTP(w http.ResponseWriter, r *http.Request, owner string, ticketValid func() bool) {
+	s.serveAnswerStream(w, r, owner, ticketValid, false)
+}
+
+func (s *HTTPServer) serveAnswerStream(w http.ResponseWriter, r *http.Request, owner string, ticketValid func() bool, preview bool) {
 	id := strings.Split(strings.TrimPrefix(r.URL.Path, "/runs/"), "/")[0]
-	update, err := s.Host.AnswerSnapshot(r.Context(), id, owner)
+	snapshot := s.Host.AnswerSnapshot
+	if preview {
+		snapshot = s.Host.AnswerSnapshotWithReasoningPreview
+	}
+	update, err := snapshot(r.Context(), id, owner)
 	if err != nil {
 		serverError(w, err)
 		return
@@ -48,18 +56,18 @@ func (s *HTTPServer) answerHTTP(w http.ResponseWriter, r *http.Request, owner st
 		return
 	}
 	var lastAnswer time.Time
-	interval := func(phase string) time.Duration {
-		if phase != "waiting" {
+	interval := func(value agentcontract.AnswerUpdate) time.Duration {
+		if value.Phase != "waiting" || value.ReasoningPreview != "" {
 			lastAnswer = time.Now()
 		}
 		// A withdrawn draft can be followed immediately by durable completion.
 		// Keep that handoff responsive, then reduce idle identity-source reads.
-		if phase == "waiting" && time.Since(lastAnswer) >= time.Second {
+		if value.Phase == "waiting" && time.Since(lastAnswer) >= time.Second {
 			return time.Second
 		}
 		return 250 * time.Millisecond
 	}
-	pollInterval := interval(update.Phase)
+	pollInterval := interval(update)
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	deadline := time.NewTimer(25 * time.Second)
@@ -77,7 +85,7 @@ func (s *HTTPServer) answerHTTP(w http.ResponseWriter, r *http.Request, owner st
 				write(agentcontract.AnswerUpdate{RunID: id, Phase: "waiting"})
 				return
 			}
-			next, err := s.Host.AnswerSnapshot(r.Context(), id, owner)
+			next, err := snapshot(r.Context(), id, owner)
 			if err != nil {
 				if r.Context().Err() != nil {
 					return
@@ -98,7 +106,7 @@ func (s *HTTPServer) answerHTTP(w http.ResponseWriter, r *http.Request, owner st
 				}
 				update = next
 			}
-			if nextInterval := interval(next.Phase); nextInterval != pollInterval {
+			if nextInterval := interval(next); nextInterval != pollInterval {
 				ticker.Reset(nextInterval)
 				pollInterval = nextInterval
 			}

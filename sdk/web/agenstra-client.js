@@ -608,7 +608,7 @@ export class AgenstraClient {
     return stop;
   }
   /** Subscribe to replacement answer snapshots. Stopping only closes this read. */
-  watchAnswerStream(id, callback, { signal } = {}) {
+  watchAnswerStream(id, callback, { signal, reasoningPreview = false } = {}) {
     if (this.closed) throw new AgenstraError("client_closed");
     const controller = new AbortController();
     let stopped = false, timer, wake;
@@ -638,12 +638,13 @@ export class AgenstraClient {
           controller.signal.addEventListener("abort", abortRead, { once: true });
           this.answerReadAborters.add(readController);
           try {
-            const terminal = await this.request("/web/v1/runs/" + encodeURIComponent(id) + "/answer-stream", {
+            const path = "/web/v1/runs/" + encodeURIComponent(id) + "/answer-stream" + (reasoningPreview ? "?reasoning_preview=1" : "");
+            const terminal = await this.request(path, {
               signal: readController.signal,
               consume: (response, readSignal) => consumeAnswerStream(response, id, update => {
                 delay = 250;
                 notify(update);
-              }, readSignal),
+              }, readSignal, reasoningPreview),
             });
             if (terminal || stopped || this.closed) return;
           } catch (error) {
@@ -719,7 +720,7 @@ export class AgenstraClient {
 }
 export function createAgenstraClient(options) { return new AgenstraClient(options); }
 
-async function consumeAnswerStream(response, id, callback, signal) {
+async function consumeAnswerStream(response, id, callback, signal, reasoningPreview) {
   if (!response.body || !/^text\/event-stream\b/i.test(response.headers.get("content-type") || "")) throw new AgenstraError("answer_stream_invalid");
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -734,7 +735,12 @@ async function consumeAnswerStream(response, id, callback, signal) {
         if (update?.run_id !== id || typeof update.text !== "string" || update.text.length > 120000 || !["waiting", "generating", "checking", "completed", "failed", "cancelled"].includes(update.phase)) throw new AgenstraError("answer_stream_invalid");
         const terminal = ["completed", "failed", "cancelled"].includes(update.phase);
         if (["waiting", "failed", "cancelled"].includes(update.phase)) update.text = "";
-        callback({ run_id: id, text: update.text, phase: update.phase });
+        const snapshot = { run_id: id, text: update.text, phase: update.phase };
+        if (reasoningPreview && update.phase === "waiting" && update.reasoning_preview !== undefined) {
+          if (typeof update.reasoning_preview !== "string" || new TextEncoder().encode(update.reasoning_preview).length > 384) throw new AgenstraError("answer_stream_invalid");
+          snapshot.reasoning_preview = update.reasoning_preview;
+        }
+        callback(snapshot);
         data = ""; event = "";
         return terminal;
       }

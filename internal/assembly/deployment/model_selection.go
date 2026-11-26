@@ -17,6 +17,8 @@ import (
 type ModelManager struct {
 	// Configure before serving runs. Streaming is opt-in and affects decisions only.
 	StreamAnswers bool
+	// AllowReasoningPreview is an optional host display policy for live decisions.
+	AllowReasoningPreview func(string) bool
 	// DecisionPrompt is a trusted, deterministic startup policy. Measurement and
 	// execution both apply it; business-specific parsing remains in the host app.
 	DecisionPrompt func(agentcontract.ContextPacket, string) string
@@ -167,6 +169,7 @@ func (m *ModelManager) selectedModel(c agentcontract.ModelConfiguration) (*selec
 		}
 	}
 	d.StreamAnswers = m.StreamAnswers
+	d.AllowReasoningPreview = m.AllowReasoningPreview
 	review.StreamAnswers = m.StreamAnswers
 	return &selectedModels{decision: d, memory: mem, review: review, prompt: m.DecisionPrompt, thinking: m.ThinkingPolicy, reasoningRequests: m.ReasoningRequests && d.APIType == "deepseek_chat"}, nil
 }

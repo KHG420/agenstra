@@ -24,6 +24,9 @@ type HTTPJSONDecisionModel struct {
 	// StreamAnswers opts this instance into strict SSE transport for decisions.
 	// It does not change validation, output budgets or memory extraction.
 	StreamAnswers bool
+	// AllowReasoningPreview opts user-facing decision streams into a transient
+	// preview. The host can suppress a complete source passage before it is clipped.
+	AllowReasoningPreview func(string) bool
 	// DecisionOutputMode selects JSON content or typed output tools for decisions.
 	// Empty retains JSON content; memory extraction always uses JSON content.
 	DecisionOutputMode         string
@@ -238,6 +241,10 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 	var packet agentcontract.ContextPacket
 	validPacket := json.Unmarshal(input, &packet) == nil
 	showAnswer := payload["stream"] == true && validPacket && packet.CompletionReview == nil
+	allowPreview := m.AllowReasoningPreview
+	if !showAnswer || m.Thinking == "disabled" {
+		allowPreview = nil
+	}
 	plainConversation := validPacket && m.allowsNativeConversation(packet)
 	allowedOutput := map[string]bool{}
 	if output, ok := payload["tools"].([]any); ok {
@@ -286,11 +293,11 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 			retryAfter = modelRetryAfter(res.Header.Get("Retry-After"), time.Now())
 			if code == "" {
 				if payload["stream"] == true {
-					body, requestErr = readModelStream(res.Body, func(text, phase string) {
+					body, requestErr = readModelStream(res.Body, func(update agentcontract.AnswerUpdate) {
 						if showAnswer {
-							agentcontract.ObserveAnswer(ctx, agentcontract.AnswerUpdate{Text: text, Phase: phase})
+							agentcontract.ObserveAnswer(ctx, update)
 						}
-					}, allowedOutput, plainConversation)
+					}, allowedOutput, plainConversation, allowPreview)
 				} else {
 					body, requestErr = io.ReadAll(io.LimitReader(res.Body, (8<<20)+1))
 				}

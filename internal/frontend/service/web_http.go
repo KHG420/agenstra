@@ -215,10 +215,10 @@ func (s *HTTPServer) webHTTP(w http.ResponseWriter, r *http.Request) {
 		copy.URL = &u
 		if strings.HasSuffix(path, "/answer-stream") && len(strings.Split(path, "/")) == 4 && r.Method == "GET" {
 			token := webBearer(r)
-			s.answerHTTP(w, copy, owner, func() bool {
+			s.serveAnswerStream(w, copy, owner, func() bool {
 				current, err := integration.ticketOwner(token)
 				return err == nil && current == owner
-			})
+			}, r.URL.Query().Get("reasoning_preview") == "1")
 			return
 		}
 		s.runHTTP(w, copy, owner)
