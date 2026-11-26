@@ -398,7 +398,9 @@ func (m *HTTPJSONDecisionModel) requestPayload(input []byte, prompt string) (age
 			payload["tools"], payload["tool_choice"], payload["parallel_tool_calls"] = nativeTools, toolChoice, false
 			delete(payload, "response_format")
 			nativePrompt := nativeDecisionToolPrompt(prompt, packet.CompletionReview != nil, len(nativeFunctionCapabilities(packet)) > 0)
-			if plainConversation {
+			if plainConversation && m.StreamAnswers {
+				nativePrompt += "\nSend every user-facing reply through the final function, including ordinary conversation. The answer_markdown string contains the requested format. Use an empty fact_ids array for ordinary conversation without evidence. Keep commentary and planning out of message text."
+			} else if plainConversation {
 				nativePrompt += "\nReply in plain message text for an ordinary conversation that needs no business lookup. For requested JSON or code blocks, put the requested content in final.answer_markdown. The final function delivers the answer without invoking a business capability. Use it with fact_ids for cited results. Keep proposed calls and decision envelopes out of message text."
 			}
 			messages[0] = agentcontract.JSON{"role": "system", "content": nativePrompt}

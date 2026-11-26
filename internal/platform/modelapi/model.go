@@ -297,7 +297,7 @@ func (m *HTTPJSONDecisionModel) requestJSON(ctx context.Context, input []byte, p
 						if showAnswer {
 							agentcontract.ObserveAnswer(ctx, update)
 						}
-					}, allowedOutput, plainConversation, allowPreview)
+					}, allowedOutput, allowPreview)
 				} else {
 					body, requestErr = io.ReadAll(io.LimitReader(res.Body, (8<<20)+1))
 				}

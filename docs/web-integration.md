@@ -418,7 +418,7 @@ await stop.done;
 
 `GET /web/v1/runs/{id}/answer-stream` 使用既有 web ticket、owner 和 Web run 绑定校验，持续重新检查当前授权。Go/服务端接入也可使用原身份认证下的 `GET /runs/{id}/answer-stream`，或 `host.AnswerSnapshot(ctx, runID, owner)`。HTTP 是 `text/event-stream`，默认每条 `event: answer` 的数据为 `{run_id, text, phase}`；`text` 是当前完整文本，应替换旧文本，不能追加。
 
-宿主可设置 `ModelManager.AllowReasoningPreview` 筛选允许展示的模型原文。网页通过 `watchAnswerStream(id, callback, { reasoningPreview: true })` 在同一接口使用 `?reasoning_preview=1`。在用户决策实际返回 `reasoning_content` 时，等待快照可附带 `reasoning_preview`，例如 `{"run_id":"run-1","phase":"waiting","text":"","reasoning_preview":"核对两个时间范围"}`。字段最多 384 个 UTF-8 字节，每次替换。正文、工具调用、撤回或结束时清除。预览只在当前租约内存中保存，历史记录与默认订阅均不返回此字段。
+宿主可设置 `ModelManager.AllowReasoningPreview` 筛选允许展示的模型原文。网页通过 `watchAnswerStream(id, callback, { reasoningPreview: true })` 在同一接口使用 `?reasoning_preview=1`。在用户决策实际返回 `reasoning_content` 时，等待快照可附带 `reasoning_preview`，例如 `{"run_id":"run-1","phase":"waiting","text":"","reasoning_preview":"核对两个时间范围"}`。字段最多 384 个 UTF-8 字节，每次替换。正文、工具调用、撤回或结束时清除。等待由本任务启动的工作流时，预览可显示其当前授权、持有有效租约的 Agent 步骤推理，仍使用主任务的流和标识。预览只在当前租约内存中保存，历史记录与默认订阅均不返回此字段。原生工具模式下的普通模型正文在完成且确认没有工具调用后提交。带显式最终答案的流片段继续用于实时正文。
 
 HTTP 在空闲等待时每秒读取一次快照，显示预览、生成或复核正文时每 250 毫秒读取一次，避免等待外部工作流时持续消耗身份源额度。每次读取仍核对当前归属和授权，不缓存权限结果；取消、票据失效和服务关闭仍会结束流。
 

@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -11,10 +12,11 @@ import (
 
 type answerKey struct{ owner, run string }
 type answerCandidate struct {
-	update  agentcontract.AnswerUpdate
-	lease   string
-	updated time.Time
-	active  context.Context
+	update     agentcontract.AnswerUpdate
+	workflowID string
+	lease      string
+	updated    time.Time
+	active     context.Context
 }
 
 type answerStreams struct {
@@ -27,6 +29,11 @@ type answerStreams struct {
 func (a *answerStreams) begin(ctx context.Context, run agentcontract.StoredRun) context.Context {
 	key := answerKey{run.OwnerID, run.RunID}
 	entry := &answerCandidate{update: agentcontract.AnswerUpdate{RunID: run.RunID, Phase: "waiting"}, lease: run.LeaseToken, updated: time.Now(), active: ctx}
+	runtime, _ := run.State["runtime"].(map[string]any)
+	parent, _ := runtime["workflow_parent"].(map[string]any)
+	if step, _ := parent["step_id"].(string); step != "" {
+		entry.workflowID, _ = parent["run_id"].(string)
+	}
 	a.mu.Lock()
 	if a.entries == nil {
 		a.entries = make(map[answerKey]*answerCandidate)
@@ -114,13 +121,87 @@ func (h *AgentHost) answerSnapshot(ctx context.Context, id, owner string, previe
 		update.Phase = run.Status
 		return update, nil
 	}
-	h.answers.mu.Lock()
-	defer h.answers.mu.Unlock()
-	if entry := h.answers.entries[answerKey{owner, id}]; entry != nil && entry.active.Err() == nil && entry.lease == run.LeaseToken && run.LeaseUntil != nil && *run.LeaseUntil > h.Now() && time.Since(entry.updated) <= 10*time.Minute {
-		update = entry.update
-		if !preview {
-			update.ReasoningPreview = ""
-		}
+	if candidate, ok := h.answers.snapshot(run, h.Now()); ok {
+		update = candidate
+	}
+	if !preview {
+		update.ReasoningPreview = ""
+	} else if run.Status == "waiting" && update.Phase == "waiting" && update.ReasoningPreview == "" {
+		update.ReasoningPreview = h.delegatedReasoningPreview(ctx, run)
 	}
 	return update, nil
+}
+
+func (a *answerStreams) snapshot(run agentcontract.StoredRun, now float64) (agentcontract.AnswerUpdate, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	entry := a.entries[answerKey{run.OwnerID, run.RunID}]
+	if entry == nil || entry.active.Err() != nil || entry.lease != run.LeaseToken ||
+		run.LeaseUntil == nil || *run.LeaseUntil <= now || time.Since(entry.updated) > 10*time.Minute {
+		return agentcontract.AnswerUpdate{}, false
+	}
+	return entry.update, true
+}
+
+// Read the existing bounded stream cache before looking up any child run.
+func (a *answerStreams) thinkingChild(owner, workflow string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var child string
+	var latest time.Time
+	for key, entry := range a.entries {
+		if key.owner == owner && entry.workflowID == workflow && entry.update.ReasoningPreview != "" &&
+			entry.active.Err() == nil && entry.updated.After(latest) {
+			child, latest = key.run, entry.updated
+		}
+	}
+	return child
+}
+
+func (h *AgentHost) delegatedReasoningPreview(ctx context.Context, run agentcontract.StoredRun) string {
+	runtime, _ := run.State["runtime"].(map[string]any)
+	pending, _ := runtime["pending"].([]any)
+	for _, value := range pending {
+		item, _ := value.(map[string]any)
+		call, _ := item["call"].(map[string]any)
+		invocation, _ := item["invocation_id"].(string)
+		if item["status"] != "waiting" || call["capability"] != "workflows.start" || invocation == "" {
+			continue
+		}
+		workflowID := requestRunID(run.OwnerID, "workflow:"+invocation)
+		childID := h.answers.thinkingChild(run.OwnerID, workflowID)
+		if childID == "" || ctx.Err() != nil {
+			continue
+		}
+		workflow, err := h.Store.GetRun(workflowID, run.OwnerID)
+		if err != nil || !workflowPreviewActive(workflow, run.PackID) {
+			continue
+		}
+		origin, err := workflowAgentScope(workflow)
+		if err != nil || origin.RunID != run.RunID {
+			continue
+		}
+		child, err := h.Store.GetRun(childID, run.OwnerID)
+		if err != nil || !workflowPreviewActive(child, run.PackID) {
+			continue
+		}
+		step, err := workflowAgentScope(child)
+		if err != nil || step.RunID != workflowID || step.StepID == "" {
+			continue
+		}
+		policy, err := h.ProjectPolicy(ctx, child)
+		if err != nil || !policy.AllowModelData || slices.ContainsFunc(step.Capabilities, func(name string) bool {
+			return !policy.GrantedCapabilities[name]
+		}) {
+			continue
+		}
+		if preview, ok := h.answers.snapshot(child, h.Now()); ok && preview.ReasoningPreview != "" {
+			return preview.ReasoningPreview
+		}
+	}
+	return ""
+}
+
+func workflowPreviewActive(run agentcontract.StoredRun, pack string) bool {
+	return run.PackID == pack && !run.CancelRequested && !Terminal(run.Status) && !strings.HasPrefix(run.Status, "needs_")
 }

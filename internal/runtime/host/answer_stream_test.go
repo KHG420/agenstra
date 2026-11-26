@@ -102,3 +102,78 @@ func TestAnswerCancellationEvictionAndBounds(t *testing.T) {
 		t.Fatal("expired generation revived")
 	}
 }
+
+func TestAnswerPreviewFollowsActiveDelegatedWorkflow(t *testing.T) {
+	h, _ := workflowFixture(t)
+	definition := h.Workflows["records"][0]
+	definition.Steps = []agentcontract.WorkflowStep{{ID: "agent", Agent: &agentcontract.WorkflowAgent{
+		Instruction: "Analyze the report", Capabilities: []string{"records.get"},
+	}}}
+	definition.Output, definition.Answer = nil, workflowRef("/steps/agent/answer_markdown")
+	h.Workflows["records"] = []agentcontract.WorkflowDefinition{definition}
+	h.Model = &hostModel{decisions: []agentcontract.Decision{
+		{Schema: "agenstra.decision.v1", Kind: "inspect_capability", Name: "workflows.start"},
+		{Schema: "agenstra.decision.v1", Kind: "tool_batch", Calls: []agentcontract.ToolCall{{
+			CallRef: "report", Capability: "workflows.start", Reason: "Analyze the report",
+			Arguments: agentcontract.JSON{"workflow": "report", "input": agentcontract.JSON{"id": "R-1"}},
+		}}},
+	}}
+	root, err := h.Create(t.Context(), "alice", "records", "Analyze the report", "preview-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err = h.Drive(t.Context(), root.RunID, "alice")
+	if err != nil || root.Status != "waiting" {
+		t.Fatal(root.Status, err)
+	}
+	state, err := h.Restore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowID := requestRunID(root.OwnerID, "workflow:"+state.Pending[0].InvocationID)
+	workflow, err := h.Drive(t.Context(), workflowID, root.OwnerID)
+	if err != nil || workflow.Status != "waiting" {
+		t.Fatal(workflow.Status, err)
+	}
+	progress, err := h.Restore(workflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := h.Store.Claim(progress.Workflow.Steps[0].RunID, root.OwnerID, h.Settings.LeaseSeconds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	stepCtx = h.answers.begin(stepCtx, child)
+	agentcontract.ObserveAnswer(stepCtx, agentcontract.AnswerUpdate{Phase: "waiting", ReasoningPreview: "逐项核对日报"})
+	got, err := h.AnswerSnapshotWithReasoningPreview(t.Context(), root.RunID, root.OwnerID)
+	if err != nil || got.RunID != root.RunID || got.Phase != "waiting" || got.Text != "" || got.ReasoningPreview != "逐项核对日报" {
+		t.Fatal("root preview missing", got, err)
+	}
+	if got, err = h.AnswerSnapshot(t.Context(), root.RunID, root.OwnerID); err != nil || got.ReasoningPreview != "" {
+		t.Fatal("ordinary subscriber received delegated reasoning", got, err)
+	}
+	if _, err = h.AnswerSnapshotWithReasoningPreview(t.Context(), root.RunID, "bob"); err == nil {
+		t.Fatal("delegated reasoning crossed owners")
+	}
+	originalPolicy := h.PolicyResolver
+	h.PolicyResolver = func(ctx context.Context, owner, pack string) (agentcontract.ExecutionPolicy, error) {
+		policy, err := originalPolicy(ctx, owner, pack)
+		policy.GrantedCapabilities["records.get"] = false
+		return policy, err
+	}
+	if got, err = h.AnswerSnapshotWithReasoningPreview(t.Context(), root.RunID, root.OwnerID); err != nil || got.ReasoningPreview != "" {
+		t.Fatal("revoked delegate remained visible", got, err)
+	}
+	h.PolicyResolver = originalPolicy
+	agentcontract.ObserveAnswer(stepCtx, agentcontract.AnswerUpdate{Phase: "generating", Text: "specialist draft"})
+	if got, err = h.AnswerSnapshotWithReasoningPreview(t.Context(), root.RunID, root.OwnerID); err != nil || got.Text != "" || got.ReasoningPreview != "" {
+		t.Fatal("specialist draft or stale preview reached root", got, err)
+	}
+	agentcontract.ObserveAnswer(stepCtx, agentcontract.AnswerUpdate{Phase: "waiting", ReasoningPreview: "继续核对"})
+	cancel()
+	if got, err = h.AnswerSnapshotWithReasoningPreview(t.Context(), root.RunID, root.OwnerID); err != nil || got.ReasoningPreview != "" {
+		t.Fatal("stopped delegate remained visible", got, err)
+	}
+}

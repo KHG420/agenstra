@@ -48,7 +48,7 @@ func BenchmarkFragmentedModelStream(b *testing.B) {
 				b.SetBytes(int64(len(stream)))
 				b.ResetTimer()
 				for range b.N {
-					if _, err := readModelStream(strings.NewReader(stream), func(agentcontract.AnswerUpdate) {}, map[string]bool{"record_read": true}, false, nil); err != nil {
+					if _, err := readModelStream(strings.NewReader(stream), func(agentcontract.AnswerUpdate) {}, map[string]bool{"record_read": true}, nil); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -59,7 +59,7 @@ func BenchmarkFragmentedModelStream(b *testing.B) {
 
 func TestFragmentedModelStreamRetainsCompleteFields(t *testing.T) {
 	for _, tool := range []bool{false, true} {
-		raw, err := readModelStream(strings.NewReader(fragmentedModelStream(t, 4096, tool)), func(agentcontract.AnswerUpdate) {}, map[string]bool{"record_read": true}, false, nil)
+		raw, err := readModelStream(strings.NewReader(fragmentedModelStream(t, 4096, tool)), func(agentcontract.AnswerUpdate) {}, map[string]bool{"record_read": true}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

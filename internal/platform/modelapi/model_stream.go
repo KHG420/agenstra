@@ -15,7 +15,7 @@ import (
 
 // SSE is transport only: reassemble the original envelope and pass it through
 // the same usage, refusal, truncation and strict decision checks as non-streaming.
-func readModelStream(reader io.Reader, publish func(agentcontract.AnswerUpdate), allowedOutput map[string]bool, plainConversation bool, allowPreview func(string) bool) ([]byte, error) {
+func readModelStream(reader io.Reader, publish func(agentcontract.AnswerUpdate), allowedOutput map[string]bool, allowPreview func(string) bool) ([]byte, error) {
 	const maximum = 8 << 20
 	bounded := &io.LimitedReader{R: reader, N: maximum + 1}
 	scanner := bufio.NewScanner(bounded)
@@ -48,6 +48,8 @@ func readModelStream(reader io.Reader, publish func(agentcontract.AnswerUpdate),
 			}
 			return
 		}
+		// Native plain content can be a preamble to a later tool call. The
+		// decision parser accepts it as an answer only after a tool-free stop.
 		text := ""
 		if refusal.Len() == 0 && finish != "length" && finish != "content_filter" {
 			if len(tools) == 1 && tools[0] != nil && allowedOutput[tools[0].name.String()] && strings.TrimSpace(content.String()) == "" {
@@ -57,8 +59,6 @@ func readModelStream(reader io.Reader, publish func(agentcontract.AnswerUpdate),
 				case "submit_decision":
 					text = answerPrefix(tools[0].arguments.String(), true)
 				}
-			} else if len(tools) == 0 && plainConversation {
-				text = nativeConversationText(content.String())
 			} else if len(tools) == 0 && len(allowedOutput) == 0 {
 				text = answerPrefix(content.String(), true)
 			}

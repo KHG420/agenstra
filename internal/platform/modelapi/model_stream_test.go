@@ -266,7 +266,7 @@ func TestModelStreamRejectsBrokenFraming(t *testing.T) {
 		{"oversized-line", "data: " + strings.Repeat("x", 1<<20), "model_response_too_large"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := readModelStream(strings.NewReader(tc.raw), func(agentcontract.AnswerUpdate) {}, nil, false, nil); agentcontract.ModelErrorCode(err) != tc.code {
+			if _, err := readModelStream(strings.NewReader(tc.raw), func(agentcontract.AnswerUpdate) {}, nil, nil); agentcontract.ModelErrorCode(err) != tc.code {
 				t.Fatal(err)
 			}
 		})
@@ -278,5 +278,38 @@ func TestStreamOptInDoesNotChangeMemoryPayload(t *testing.T) {
 	payload, err := model.requestPayload([]byte(`{"text":"remember"}`), "Extract memories")
 	if err != nil || payload["stream"] != nil || payload["stream_options"] != nil {
 		t.Fatal("memory transport changed", payload, err)
+	}
+}
+
+func TestNativeToolPreambleNeverBecomesAnswer(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		streamFrame(t, w, agentcontract.JSON{"choices": []any{agentcontract.JSON{
+			"index": 0, "delta": agentcontract.JSON{"content": "I need to request the vessel before running the analysis."},
+		}}})
+		streamFrame(t, w, agentcontract.JSON{"choices": []any{agentcontract.JSON{
+			"index": 0, "finish_reason": "tool_calls", "delta": agentcontract.JSON{"tool_calls": []any{agentcontract.JSON{
+				"index": 0, "type": "function", "function": agentcontract.JSON{
+					"name": "request_input", "arguments": `{"field":"vessel","prompt":"请选择船舶"}`,
+				},
+			}}},
+		}}})
+		if _, err := fmt.Fprint(w, "data: [DONE]\n\n"); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer upstream.Close()
+	model, err := NewHTTPJSONDecisionModel("test", upstream.URL, "test", time.Second, upstream.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.APIType, model.DecisionOutputMode, model.StreamAnswers = "deepseek_chat", "native_tools", true
+	ctx := agentcontract.WithAnswerObserver(t.Context(), func(update agentcontract.AnswerUpdate) {
+		if update.Text != "" {
+			t.Error("tool preamble published as an answer:", update.Text)
+		}
+	})
+	d, err := model.Decide(ctx, agentcontract.ContextPacket{Schema: "agenstra.context.v1"}, "Handle the request")
+	if err != nil || d.Kind != "request_input" {
+		t.Fatal(d.Kind, err)
 	}
 }

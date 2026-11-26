@@ -13,7 +13,7 @@ import (
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
 )
 
-func TestNativeConversationTextPreservesThinkingAndStreaming(t *testing.T) {
+func TestNativeConversationTextPreservesThinkingAndUsage(t *testing.T) {
 	for _, mode := range []struct {
 		thinking  string
 		streaming bool
@@ -21,8 +21,6 @@ func TestNativeConversationTextPreservesThinkingAndStreaming(t *testing.T) {
 		streaming := mode.streaming
 		t.Run(fmt.Sprintf("thinking=%s/stream=%t", mode.thinking, streaming), func(t *testing.T) {
 			var requests atomic.Int32
-			release := make(chan struct{})
-			defer close(release)
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
 				var payload agentcontract.JSON
@@ -34,13 +32,12 @@ func TestNativeConversationTextPreservesThinkingAndStreaming(t *testing.T) {
 					t.Error("configured thinking or native tool choice changed")
 				}
 				if streaming {
+					prompt := payload["messages"].([]any)[0].(map[string]any)["content"].(string)
+					if !strings.Contains(prompt, "Send every user-facing reply through the final function") {
+						t.Error("live replies lack an explicit final channel")
+					}
 					w.Header().Set("Content-Type", "text/event-stream")
 					streamFrame(t, w, agentcontract.JSON{"choices": []any{agentcontract.JSON{"index": 0, "delta": agentcontract.JSON{"content": "JSON 是一种", "reasoning_content": "private reasoning"}}}})
-					select {
-					case <-release:
-					case <-r.Context().Done():
-						return
-					}
 					streamFrame(t, w, agentcontract.JSON{"choices": []any{agentcontract.JSON{"index": 0, "delta": agentcontract.JSON{"content": "数据交换格式。"}, "finish_reason": "stop"}}})
 					streamFrame(t, w, agentcontract.JSON{"choices": []any{}, "usage": agentcontract.JSON{"prompt_tokens": 40, "completion_tokens": 12}})
 					if _, err := fmt.Fprint(w, "data: [DONE]\n\n"); err != nil {
@@ -59,29 +56,13 @@ func TestNativeConversationTextPreservesThinkingAndStreaming(t *testing.T) {
 			}
 			model.APIType, model.Thinking, model.DecisionOutputMode = "deepseek_chat", mode.thinking, "native_tools"
 			model.StreamAnswers, model.MaxAttempts = streaming, 1
-			updates := make(chan agentcontract.AnswerUpdate, 8)
-			ctx := agentcontract.WithAnswerObserver(t.Context(), func(u agentcontract.AnswerUpdate) { updates <- u })
-			result := make(chan agentcontract.Decision, 1)
-			failure := make(chan error, 1)
-			go func() {
-				d, e := model.Decide(ctx, agentcontract.ContextPacket{Schema: "agenstra.context.v1", Instruction: "什么是 JSON？"}, "Use declared tools for business operations.")
-				result <- d
-				failure <- e
-			}()
-			if streaming {
-				select {
-				case update := <-updates:
-					if update.Text != "JSON 是一种" || update.Phase != "generating" {
-						t.Error("ordinary reply did not stream safely", update)
-					}
-					release <- struct{}{}
-				case <-time.After(time.Second):
-					t.Error("ordinary reply did not arrive before completion")
-					release <- struct{}{}
+			ctx := agentcontract.WithAnswerObserver(t.Context(), func(update agentcontract.AnswerUpdate) {
+				if update.Text != "" {
+					t.Error("plain native content appeared as an unconfirmed answer", update)
 				}
-			}
-			d := <-result
-			if err := <-failure; err != nil {
+			})
+			d, err := model.Decide(ctx, agentcontract.ContextPacket{Schema: "agenstra.context.v1", Instruction: "什么是 JSON？"}, "Use declared tools for business operations.")
+			if err != nil {
 				t.Fatal("ordinary native conversation was rejected", err)
 			}
 			if d.Kind != "final" || d.AnswerMarkdown != "JSON 是一种数据交换格式。" || len(d.FactIDs) != 0 || requests.Load() != 1 || d.ModelCall.FormatError != "" || !d.ModelCall.UsageAvailable || d.ModelCall.OutputTokens != 12 {
