@@ -69,6 +69,11 @@ func TestInspectionFeedbackTargetsMissingOriginalPathsAfterRestore(t *testing.T)
 		if !strings.Contains(prompt, "This inspected view is incomplete") {
 			t.Fatal("bounded inspection guidance did not reach the decision model")
 		}
+		for _, guidance := range []string{"small first page", "follow returned cursors or offsets", "in the saved Fact before another read"} {
+			if !strings.Contains(prompt, guidance) {
+				t.Fatalf("decision model is missing paginated evidence guidance: %q", guidance)
+			}
+		}
 		path := append([]any{"data", "entries"}, omissions[0][1:]...)
 		return agentcontract.Decision{Kind: "inspect_fact", FactID: packet.InspectedFact["fact_id"].(string), Path: path}, nil
 	})

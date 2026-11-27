@@ -21,6 +21,9 @@ func TestUnproductiveCapabilityDiscoveryCanAnswerBeforeStagnation(t *testing.T) 
 				if !slices.Contains(packet.RuntimeFeatures, "capability_search") {
 					t.Fatal("initial discovery or one alternate query was unavailable")
 				}
+				if calls == 2 && !strings.Contains(prompt, "inspect a known exact capability once before trying another query") {
+					t.Fatal("empty search did not direct the model to use a known exact tool first")
+				}
 				return agentcontract.Decision{Kind: "search_capabilities", Query: fmt.Sprintf("unsupported-request-%d", calls)}, nil
 			}
 			if slices.Contains(packet.RuntimeFeatures, "capability_search") || !strings.Contains(prompt, capabilityDiscoveryStopPrompt) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	agentcontract "github.com/KHG420/agenstra/internal/contract/agent"
@@ -26,8 +27,11 @@ func TestReasoningUpgradeSurvivesCheckpointWithoutExtraClassifier(t *testing.T) 
 	for _, upgrade := range []bool{false, true} {
 		t.Run(map[bool]string{false: "routine", true: "complex"}[upgrade], func(t *testing.T) {
 			calls := 0
-			model := reasoningTestModel{func(_ context.Context, p agentcontract.ContextPacket, _ string) (agentcontract.Decision, error) {
+			model := reasoningTestModel{func(_ context.Context, p agentcontract.ContextPacket, prompt string) (agentcontract.Decision, error) {
 				calls++
+				if strings.Contains(prompt, "starting a declared workflow when the required inputs are available") != (calls == 1) {
+					t.Fatal("fast-path workflow guidance was missing or repeated after the upgrade")
+				}
 				if p.ReasoningRequested != (upgrade && calls > 1) || slices.Contains(p.RuntimeFeatures, "reasoning_request") != (calls == 1) {
 					t.Fatal("mode or one-way availability lost", p.ReasoningRequested, p.RuntimeFeatures)
 				}
